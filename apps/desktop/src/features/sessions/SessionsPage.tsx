@@ -12,7 +12,7 @@ export function SessionsPage() {
       <EmptyState
         icon={<Images />}
         title="Sessions are not available in this build"
-        body="This release (0.1) covers ingest and dataset quality. Session creation, scene grouping, prediction with confidence and Lightroom apply ship in 0.3.0. Nothing here pretends otherwise."
+        body="This build covers ingest, dataset quality and Style training. Session creation, scene grouping, prediction with confidence and Lightroom apply ship in 0.3.0. Nothing here pretends otherwise."
       />
     </>
   );

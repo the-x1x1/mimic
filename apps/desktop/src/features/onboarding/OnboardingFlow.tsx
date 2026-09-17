@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, InlineError } from "@mimic/ui";
+import { Button, InlineError, Metric } from "@mimic/ui";
 import { ArrowRight, Cable, FolderOpen, FlaskConical } from "lucide-react";
 import { LightroomSetup } from "@/components/LightroomSetup";
 import { DataQualityPanel } from "@/components/DataQualityPanel";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { useCreateLibrary, useDataQualityReport, useStartScan } from "@/hooks/useLibraries";
-import { useCreateStyle } from "@/hooks/useStyles";
+import { useCreateStyle, useStyles, useTrainStyle } from "@/hooks/useStyles";
+import { primaryError } from "@mimic/contracts";
 import { useLightroomStatus, useStartLightroomIngest } from "@/hooks/useLightroom";
 import { useJobs } from "@/hooks/useJobs";
 import { useNativeEventBridge, useSystemStatus } from "@/hooks/useSystem";
@@ -17,7 +18,7 @@ import { JOB_LABELS } from "@mimic/contracts";
 import { ProgressBar } from "@mimic/ui";
 
 type Source = "lightroom" | "folder" | "demo";
-type Step = "source" | "lightroom" | "style" | "quality";
+type Step = "source" | "lightroom" | "style" | "quality" | "train";
 
 export function OnboardingFlow() {
   useNativeEventBridge();
@@ -28,6 +29,10 @@ export function OnboardingFlow() {
   const [name, setName] = useState("");
   const [folder, setFolder] = useState<string | null>(null);
   const [libraryId, setLibraryId] = useState<string | null>(null);
+  const [styleId, setStyleId] = useState<string | null>(null);
+  const train = useTrainStyle();
+  const stylesQ = useStyles();
+  const createdStyle = stylesQ.data?.find((s) => s.id === styleId);
   const [error, setError] = useState<string | null>(null);
   const createLibrary = useCreateLibrary();
   const createStyle = useCreateStyle();
@@ -37,6 +42,10 @@ export function OnboardingFlow() {
   const system = useSystemStatus();
   const report = useDataQualityReport(libraryId);
   const jobs = useJobs(true);
+  const trainingJob = jobs.data?.find(
+    (j) =>
+      j.type === "train_style" && (j.payload as { styleId?: string } | null)?.styleId === styleId,
+  );
   const activeJob = jobs.data?.find(
     (j) => (j.payload as { libraryId?: string } | null)?.libraryId === libraryId,
   );
@@ -54,11 +63,12 @@ export function OnboardingFlow() {
       try {
         const lib = await ipc.enableDemoMode();
         setLibraryId(lib.id);
-        await createStyle.mutateAsync({
+        const st = await createStyle.mutateAsync({
           name: "DEMO Style",
           description: "Synthetic sample data — not a real editing style.",
           libraryId: lib.id,
         });
+        setStyleId(st.id);
         setStep("quality");
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -83,7 +93,12 @@ export function OnboardingFlow() {
           sourceType: "folder_sidecars",
           rootPath: folder,
         });
-        await createStyle.mutateAsync({ name: name.trim(), description: null, libraryId: lib.id });
+        const st = await createStyle.mutateAsync({
+          name: name.trim(),
+          description: null,
+          libraryId: lib.id,
+        });
+        setStyleId(st.id);
         await scan.mutateAsync(lib.id);
         setLibraryId(lib.id);
       } else {
@@ -93,7 +108,12 @@ export function OnboardingFlow() {
           sourceType: "lightroom_catalog",
           rootPath: null,
         });
-        await createStyle.mutateAsync({ name: name.trim(), description: null, libraryId: lib.id });
+        const st = await createStyle.mutateAsync({
+          name: name.trim(),
+          description: null,
+          libraryId: lib.id,
+        });
+        setStyleId(st.id);
         await ingest.mutateAsync({ libraryId: lib.id, scope: "selection" });
         setLibraryId(lib.id);
       }
@@ -237,12 +257,71 @@ export function OnboardingFlow() {
                 These are synthetic images with sample settings, for exploring the interface only.
               </InlineError>
             ) : null}
-            <p className="muted small mt-3">
-              Training a Style Brain from this data arrives in Mimic 0.2.0. This build ingests,
-              normalizes and reports; it does not train.
-            </p>
             <div className="row gap-2 end mt-4">
-              <Button variant="primary" onClick={finish}>
+              <Button onClick={finish}>Finish without training</Button>
+              <Button
+                variant="primary"
+                icon={<ArrowRight />}
+                disabled={
+                  !!activeJob ||
+                  !report.data ||
+                  report.data.recommendation.level === "insufficient" ||
+                  !styleId
+                }
+                title={
+                  report.data?.recommendation.level === "insufficient"
+                    ? "Not enough edited examples to train"
+                    : ""
+                }
+                onClick={() => {
+                  if (styleId) train.mutate({ styleId }, { onSuccess: () => setStep("train") });
+                }}
+                loading={train.isPending}
+              >
+                Train
+              </Button>
+            </div>
+          </>
+        ) : null}
+
+        {step === "train" ? (
+          <>
+            <h1>
+              {trainingJob
+                ? "Training your Style Brain…"
+                : createdStyle?.activeVersion
+                  ? "Your first version is ready"
+                  : "Training"}
+            </h1>
+            {trainingJob ? (
+              <div className="stack gap-2">
+                <ProgressBar
+                  current={trainingJob.progressCurrent}
+                  total={trainingJob.progressTotal}
+                  label={trainingJob.phase ?? "starting"}
+                />
+                <p className="muted small">
+                  Progress follows the trainer's phases (loading pairs, splitting by shoot, fitting,
+                  evaluating, writing artifacts) — not a clock.
+                </p>
+              </div>
+            ) : createdStyle?.activeVersion ? (
+              <div className="metric-grid">
+                <Metric label="Version" value={`v${createdStyle.activeVersion.semanticVersion}`} />
+                <Metric
+                  label="Holdout error (nMAE)"
+                  value={primaryError(createdStyle.activeVersion.metrics)?.toFixed(4) ?? "—"}
+                  hint="measured on shoots the model never saw"
+                />
+                <Metric label="Examples" value={createdStyle.trainingExamples.toLocaleString()} />
+              </div>
+            ) : (
+              <InlineError title="Training did not produce an active version">
+                Open the Style's Versions tab for the failure reason.
+              </InlineError>
+            )}
+            <div className="row gap-2 end mt-4">
+              <Button variant="primary" onClick={finish} disabled={!!trainingJob}>
                 Finish
               </Button>
             </div>

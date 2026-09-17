@@ -353,8 +353,14 @@ impl EngineClient {
         if self.inner.generation.load(Ordering::SeqCst) == generation {
             let code = {
                 let mut guard = self.inner.running.lock().await;
+                // stdout can close before the process is fully reaped (visible on
+                // Windows), so wait briefly for the real exit status.
                 let code = match guard.as_mut() {
-                    Some(r) => r.child.try_wait().ok().flatten().and_then(|s| s.code()),
+                    Some(r) => tokio::time::timeout(Duration::from_secs(5), r.child.wait())
+                        .await
+                        .ok()
+                        .and_then(|res| res.ok())
+                        .and_then(|s| s.code()),
                     None => None,
                 };
                 *guard = None;

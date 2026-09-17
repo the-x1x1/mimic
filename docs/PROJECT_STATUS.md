@@ -1,4 +1,4 @@
-# PROJECT_STATUS — Mimic 0.1.0-alpha.1
+# PROJECT_STATUS — Mimic 0.2.0-alpha.1
 
 Brutally factual. Statuses: **IMPLEMENTED** (test or reproducible check exists) · **PARTIAL** · **BLOCKED** · **PLANNED** · **UNSUPPORTED**. Evidence names the test that proves the row. Anything marked _NEEDS REAL-LIGHTROOM QA_ has not been run against a real Lightroom Classic (there is none in CI).
 
@@ -84,6 +84,15 @@ Brutally factual. Statuses: **IMPLEMENTED** (test or reproducible check exists) 
 | Capability matrix derivation                                                                                         | IMPLEMENTED                                  | `capability::tests`                                                 |
 | Lightroom-connected ingest job                                                                                       | IMPLEMENTED (code) — NEEDS REAL-LIGHTROOM QA | `ingest::ingest_lightroom`; bridge path proven with fake plugin     |
 | Mask / local adjustment support                                                                                      | UNSUPPORTED (by design in 0.x)               | matrix reports `unsupported`                                        |
+
+## Training job (mimic-core)
+
+| Item                                                                                                                 | Status      | Evidence                      |
+| -------------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------- |
+| `train_style` job: version row in `training`, finalize once, training set + artifacts recorded, failed runs recorded | IMPLEMENTED | `tests/training_e2e.rs`       |
+| Activation policy (first version; later only if holdout not worse); manual activate = rollback; archive              | IMPLEMENTED | same; `training::activate`    |
+| Engine progress forwarded into job records                                                                           | IMPLEMENTED | same (`progress_total > 0`)   |
+| Training never resumed after interruption (must be re-run)                                                           | IMPLEMENTED | `resumable == false` asserted |
 
 ## Ingest and data quality
 

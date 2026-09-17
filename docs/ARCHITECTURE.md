@@ -21,7 +21,7 @@
 
 - **Rust shell** (trusted): owns the database, job queue, bridge server, engine child, updater state, discovery file. All filesystem writes happen here or in the engine's own cache directories.
 - **Frontend** (untrusted-ish webview): talks only through `invoke` commands enumerated in `lib.rs`; every response is zod-validated (`packages/contracts`). No direct FS access except the asset protocol scoped to the app data folder for previews.
-- **Engine** (child process): spawned with an argument array, never a shell string. Reads the same SQLite database read-only for training (from 0.2.0); writes only under `cache/` and `models/`. Speaks NDJSON on stdio; messages above 32 MiB are rejected and the child restarted.
+- **Engine** (child process): spawned with an argument array, never a shell string. Reads the same SQLite database read-only (`file:…?mode=ro`) for training and prediction; writes only under `cache/` and `models/`. Speaks NDJSON on stdio; messages above 32 MiB are rejected and the child restarted.
 - **Lightroom plugin** (runs inside Lightroom): polls the bridge; executes a fixed command set with SDK calls; never touches the `.lrcat`, XMP, or pixels.
 
 ## Data flow: historical ingest
@@ -35,7 +35,7 @@
 
 ## Engine protocol (§20)
 
-Request `{"protocolVersion":1,"requestId":"uuid","method":"…","params":{}}`; response `{"protocolVersion":1,"requestId":"uuid","ok":true,"result":{}}` or `ok:false` with `{code,message,details}`; unsolicited events `{"event":"job.progress","jobId":…,"phase":…,"current":n,"total":n}` and `{"event":"log",…}`. Methods in 0.1: `engine.hello`, `engine.configure`, `engine.health`, `engine.shutdown`, `scan.folder`, `xmp.parse`, `image.metadata`, `image.analyze`, `image.analyze_batch`. The Rust client (`engine/mod.rs`) enforces timeouts, correlates by id, restarts on exit with a budget of 5, and fails all pending requests when the child dies.
+Request `{"protocolVersion":1,"requestId":"uuid","method":"…","params":{}}`; response `{"protocolVersion":1,"requestId":"uuid","ok":true,"result":{}}` or `ok:false` with `{code,message,details}`; unsolicited events `{"event":"job.progress","jobId":…,"phase":…,"current":n,"total":n}` and `{"event":"log",…}`. Methods: `engine.hello`, `engine.configure`, `engine.health`, `engine.shutdown`, `scan.folder`, `xmp.parse`, `image.metadata`, `image.analyze`, `image.analyze_batch`, `training.train`, `model.predict`. The Rust client (`engine/mod.rs`) enforces timeouts, correlates by id, restarts on exit with a budget of 5, and fails all pending requests when the child dies.
 
 ## Bridge protocol (§10)
 
@@ -47,4 +47,4 @@ Root `package.json` is the single source; `scripts/sync-version.mjs` propagates 
 
 ## Extension points prepared, not built
 
-Job kinds are strings dispatched by an executor trait; new kinds (training, prediction, apply, correction sync) register in the same runner. Model artifacts are content-addressed files under `models/styles/`. Capability matrix statuses leave room for `supported` local edits once proven.
+Job kinds are strings dispatched through `CompositeExecutor`; ingest and training executors are registered today, prediction/apply/correction-sync join the same runner. Model artifacts are content-addressed files under `models/styles/`. Capability matrix statuses leave room for `supported` local edits once proven.

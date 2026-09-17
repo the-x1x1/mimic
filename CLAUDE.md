@@ -35,8 +35,8 @@ Documentation follows reality. Never let a doc lead the code.
 
 ```
 apps/desktop/            Tauri 2 shell (src-tauri/, Rust) + React/TS frontend (src/)
-crates/mimic-core/       Native core: db (SQLite + migrations), edit_dna, bridge, engine client, jobs, ingest, capability, diagnostics
-engine/                  Python sidecar (uv): protocol server, scanner, XMP parser, previews, features, embeddings; training/inference from 0.2.0
+crates/mimic-core/       Native core: db (SQLite + migrations), edit_dna, bridge, engine client, jobs, ingest, training, capability, diagnostics
+engine/                  Python sidecar (uv): protocol server, scanner, XMP parser, previews, features, embeddings, training, confidence, inference
 lightroom/Mimic.lrplugin Lightroom Classic plugin (Lua): Bridge, Capabilities, Commands, Develop (apply/read-back), Json
 packages/contracts/      zod contracts + edit_mapping_v1.json (single source of the EditDNA mapping)
 packages/ui/             design tokens + primitives
@@ -61,11 +61,13 @@ Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`
 
 Regenerating goldens (only after a reviewed behaviour change): `cd engine && uv run python -m tests.regen_golden`, then `MIMIC_REGEN_GOLDEN=1 cargo test -p mimic-core --test edit_dna_golden`.
 
-## What is implemented (0.1.0-alpha.1)
+## What is implemented (0.2.0-alpha.1)
 
 Foundation + real ingest: shell, onboarding, DB + migrations + backups, jobs with restart recovery, engine protocol with restart/timeouts/size caps, folder + sidecar scanner, XMP parser, ACR detection, EXIF, previews, features, scene heuristics, `stats_v1` embeddings, EditDNA normalization, Lightroom bridge + plugin with fake-plugin integration tests, capability matrix, data quality report, diagnostics, settings, CI, release workflow with signed updater plumbing. See `docs/PROJECT_STATUS.md` for statuses and evidence per item.
 
-Not implemented: training, prediction, sessions, review, apply UI, corrections sync. The Lua plugin's apply path exists and matches the fixtures but is `NEEDS REAL-LIGHTROOM QA`.
+0.2.0 adds the Style Brain: training pipeline (dataset, session-grouped split, baselines, hybrid, metrics, confidence, artifacts), `train_style` job with immutable versions and the activation policy, `model.predict`, Versions UI and onboarding train step.
+
+Not implemented: sessions, scene grouping, prediction jobs/UI, review, apply UI, corrections sync. The Lua plugin's apply path exists and matches the fixtures but is `NEEDS REAL-LIGHTROOM QA`.
 
 ## How to update PROJECT_STATUS
 

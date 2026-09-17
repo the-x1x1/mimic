@@ -22,6 +22,7 @@ import {
   Library,
   LibrarySummary,
   LightroomStatus,
+  ModelVersion,
   OnboardingState,
   PluginSetup,
   Settings,
@@ -105,6 +106,14 @@ export const ipc = {
   attachLibraryToStyle: (styleId: string, libraryId: string) =>
     call("attach_library_to_style", StyleSummary, { styleId, libraryId }),
   styleDetail: (styleId: string) => call("get_style_detail", StyleDetail, { styleId }),
+  trainStyle: (styleId: string, config?: Record<string, unknown>) =>
+    call("train_style", Job, { styleId, config }),
+  activateModelVersion: (modelVersionId: string) =>
+    call("activate_model_version", ModelVersion, { modelVersionId }),
+  archiveModelVersion: (modelVersionId: string) =>
+    call("archive_model_version", ModelVersion, { modelVersionId }),
+  modelVersion: (modelVersionId: string) =>
+    call("get_model_version", ModelVersion, { modelVersionId }),
 
   jobs: (limit = 50, activeOnly = false) => call("list_jobs", Job.array(), { limit, activeOnly }),
   job: (jobId: string) => call("get_job", Job, { jobId }),

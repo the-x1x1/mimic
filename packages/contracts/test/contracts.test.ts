@@ -15,6 +15,9 @@ import {
   controlLabel,
   editMapping,
   nextCheckDelayMs,
+  primaryError,
+  controlMae,
+  evaluationSet,
 } from "../src";
 
 const load = (p: string) => JSON.parse(readFileSync(p, "utf8"));
@@ -134,5 +137,25 @@ describe("updater contracts", () => {
     expect(nextCheckDelayMs(() => 0.5)).toBe(six);
     expect(nextCheckDelayMs(() => 0)).toBe(six - 20 * 60 * 1000);
     expect(nextCheckDelayMs(() => 1)).toBe(six + 20 * 60 * 1000);
+  });
+});
+
+describe("training metrics helpers", () => {
+  const metrics = {
+    holdout: {
+      n: 20,
+      hybrid: { overall: { nMae: 0.04 }, perControl: { "tone.exposure": { mae: 0.21 } } },
+      global_median: { overall: { nMae: 0.09 } },
+    },
+    validation: { n: 18, hybrid: { overall: { nMae: 0.05 } } },
+  };
+  it("prefers holdout and falls back to validation", () => {
+    expect(primaryError(metrics)).toBe(0.04);
+    expect(evaluationSet(metrics)).toBe("holdout");
+    expect(primaryError({ holdout: { n: 0 }, validation: metrics.validation })).toBe(0.05);
+    expect(primaryError({})).toBeNull();
+    expect(primaryError(null)).toBeNull();
+    expect(controlMae(metrics, "hybrid", "tone.exposure")).toBe(0.21);
+    expect(controlMae(metrics, "hybrid", "tone.contrast")).toBeNull();
   });
 });

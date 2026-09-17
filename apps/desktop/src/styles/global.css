@@ -823,3 +823,6 @@ p {
   justify-content: center;
   color: var(--text-secondary);
 }
+.ml-2 {
+  margin-left: var(--space-2);
+}

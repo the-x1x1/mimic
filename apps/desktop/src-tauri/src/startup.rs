@@ -74,7 +74,11 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         }
     };
 
-    let jobs = JobRunner::new(db.clone(), ingest::executor(engine.clone(), bridge.clone()));
+    let executor = std::sync::Arc::new(mimic_core::jobs::CompositeExecutor::new(vec![
+        ingest::executor(engine.clone(), bridge.clone()),
+        mimic_core::training::executor(engine.clone()),
+    ]));
+    let jobs = JobRunner::new(db.clone(), executor);
     let (interrupted, requeued) = jobs.recover()?;
     if interrupted > 0 {
         tracing::warn!(target: "jobs", interrupted, requeued, "recovered interrupted jobs");

@@ -22,6 +22,7 @@ pub mod ids;
 pub mod ingest;
 pub mod jobs;
 pub mod paths;
+pub mod training;
 pub mod version;
 
 pub use version::{APP_VERSION, BRIDGE_PROTOCOL_VERSION, ENGINE_PROTOCOL_VERSION};

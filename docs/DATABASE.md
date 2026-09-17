@@ -31,7 +31,7 @@ Indexes exist on every foreign key used in joins plus `assets(captured_at)`, `as
 
 ## Engine access
 
-The engine receives the database path in `engine.configure` and (from 0.2.0) opens it read-only for training data. Writes to the database happen only in mimic-core.
+The engine receives the database path in `engine.configure` and opens it read-only (`mode=ro` URI) for training data and prediction inputs. Writes to the database happen only in mimic-core.
 
 ## Tests
 
