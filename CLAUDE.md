@@ -35,12 +35,12 @@ Documentation follows reality. Never let a doc lead the code.
 
 ```
 apps/desktop/            Tauri 2 shell (src-tauri/, Rust) + React/TS frontend (src/)
-crates/mimic-core/       Native core: db (SQLite + migrations), edit_dna, bridge, engine client, jobs, ingest, training, capability, diagnostics
-engine/                  Python sidecar (uv): protocol server, scanner, XMP parser, previews, features, embeddings, training, confidence, inference
+crates/mimic-core/       Native core: db (SQLite + migrations), edit_dna, bridge, engine client, jobs, ingest, training, sessions, capability, diagnostics
+engine/                  Python sidecar (uv): protocol server, scanner, XMP parser, previews, features, embeddings, training, confidence, inference, session grouping/consistency
 lightroom/Mimic.lrplugin Lightroom Classic plugin (Lua): Bridge, Capabilities, Commands, Develop (apply/read-back), Json
 packages/contracts/      zod contracts + edit_mapping_v1.json (single source of the EditDNA mapping)
 packages/ui/             design tokens + primitives
-fixtures/                golden fixtures: xmp/, bridge/, images/ (synthetic), expected/ (raw + normalized goldens)
+fixtures/                golden fixtures: xmp/, bridge/, images/ (synthetic), expected/ (raw + normalized goldens), sessions/ (UI read models)
 models/                  encoder manifests (SHA-256 pinned downloads); no binaries committed
 scripts/                 bootstrap/dev/test/build/validate/package-engine/install-lightroom-plugin/verify-release/sync-version
 docs/                    PROJECT_STATUS (truth table), ARCHITECTURE, EDIT_DNA, LIGHTROOM_*, ML_PIPELINE, DATABASE, PRIVACY, SECURITY_MODEL, UPDATE_SYSTEM, RELEASE_PROCESS, TEST_STRATEGY, UI_SPEC, adr/
@@ -54,20 +54,22 @@ docs/                    PROJECT_STATUS (truth table), ARCHITECTURE, EDIT_DNA, L
 .\scripts\test.ps1                      # everything CI runs
 .\scripts\validate.ps1 -Full            # test.ps1 + pre-tag release verification
 .\scripts\build.ps1                     # engine bundle + installer
-node scripts/sync-version.mjs 0.2.0     # bump the single version everywhere (then cargo update -w)
+node scripts/sync-version.mjs 0.3.0     # bump the single version everywhere (then cargo update -w)
 ```
 
 Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`, `cd engine && uv run ruff check . && uv run pytest`, `cd lightroom && lua5.1 tests/json_test.lua`.
 
 Regenerating goldens (only after a reviewed behaviour change): `cd engine && uv run python -m tests.regen_golden`, then `MIMIC_REGEN_GOLDEN=1 cargo test -p mimic-core --test edit_dna_golden`.
 
-## What is implemented (0.2.0-alpha.1)
+## What is implemented (0.3.0-alpha.1)
 
 Foundation + real ingest: shell, onboarding, DB + migrations + backups, jobs with restart recovery, engine protocol with restart/timeouts/size caps, folder + sidecar scanner, XMP parser, ACR detection, EXIF, previews, features, scene heuristics, `stats_v1` embeddings, EditDNA normalization, Lightroom bridge + plugin with fake-plugin integration tests, capability matrix, data quality report, diagnostics, settings, CI, release workflow with signed updater plumbing. See `docs/PROJECT_STATUS.md` for statuses and evidence per item.
 
 0.2.0 adds the Style Brain: training pipeline (dataset, session-grouped split, baselines, hybrid, metrics, confidence, artifacts), `train_style` job with immutable versions and the activation policy, `model.predict`, Versions UI and onboarding train step.
 
-Not implemented: sessions, scene grouping, prediction jobs/UI, review, apply UI, corrections sync. The Lua plugin's apply path exists and matches the fixtures but is `NEEDS REAL-LIGHTROOM QA`.
+0.3.0 adds sessions (`crates/mimic-core/src/sessions`, `engine/src/mimic_engine/session`): session creation from a folder or Lightroom scope backed by a hidden `purpose = session` library, `ingest_session`, `group_session` (engine `session.group`), `predict_session` (consistency via cluster groups), review statuses, `apply_preflight` + `apply_session` (batches of 25, snapshot, read-back verification, `prediction` edit snapshots) and `restore_batch`; schema v2; Sessions and Review UI. Proven end to end against a scripted plugin over the real bridge (`tests/sessions_e2e.rs`).
+
+Not implemented: corrections sync / No-Touch Rate (0.4.0), group editing, reference photos. Everything that talks to Lightroom's SDK is `NEEDS REAL-LIGHTROOM QA`.
 
 ## How to update PROJECT_STATUS
 

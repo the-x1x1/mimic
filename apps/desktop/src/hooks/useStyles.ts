@@ -43,6 +43,7 @@ export function useDeleteStyle() {
   return useMutation({
     mutationFn: (id: string) => ipc.deleteStyle(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.styles }),
+    onError: (e: Error) => toast.danger("Cannot delete Style", e.message),
   });
 }
 

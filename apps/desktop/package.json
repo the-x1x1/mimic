@@ -1,6 +1,6 @@
 {
   "name": "@mimic/desktop",
-  "version": "0.2.0-alpha.1",
+  "version": "0.3.0-alpha.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
+    "@mimic/test-fixtures": "workspace:*",
     "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",

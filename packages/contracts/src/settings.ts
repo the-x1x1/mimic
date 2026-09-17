@@ -10,7 +10,6 @@ export const Settings = z.object({
   "updates.channel": z.enum(["stable", "beta"]),
   "updates.automatic": z.boolean(),
   "diagnostics.includePaths": z.boolean(),
-  "lightroom.applyCreateSnapshot": z.boolean(),
   "review.highThreshold": z.number(),
   "review.mediumThreshold": z.number(),
   "onboarding.completed": z.boolean(),

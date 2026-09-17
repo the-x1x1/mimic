@@ -22,6 +22,7 @@ pub mod ids;
 pub mod ingest;
 pub mod jobs;
 pub mod paths;
+pub mod sessions;
 pub mod training;
 pub mod version;
 

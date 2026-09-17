@@ -34,6 +34,19 @@ fn fixtures_match_types() {
         let batch: ApplyBatchResult = serde_json::from_value(body.result.unwrap()).unwrap();
         assert_eq!(batch.items.len(), 2);
     }
+    // Restore reuses the apply command with the safety flags inverted: no new
+    // snapshot (the apply already made one), read-back still required.
+    let restore_cmd: CommandEnvelope =
+        serde_json::from_str(fixture!("apply_settings_as_plugin_preset.command.restore.json")).unwrap();
+    assert_eq!(restore_cmd.command_type, CommandType::ApplySettingsAsPluginPreset);
+    assert_eq!(restore_cmd.payload["createSnapshot"], false);
+    assert_eq!(restore_cmd.payload["readBack"], true);
+    assert_eq!(restore_cmd.payload["restore"], true);
+    assert!(restore_cmd.payload["items"][0]["predictionId"].as_str().unwrap().starts_with("restore-"));
+    let listing: CommandResultBody = serde_json::from_str(fixture!("get_selected_photos.result.json")).unwrap();
+    let photos = listing.result.unwrap()["photos"].clone();
+    assert_eq!(photos.as_array().unwrap().len(), 2);
+    assert!(photos[0]["photoId"].is_i64() && photos[0]["path"].is_string());
     let err: CommandResultBody = serde_json::from_str(fixture!("command_error.result.json")).unwrap();
     assert!(!err.ok);
     assert_eq!(err.error.unwrap().code, "catalog_write_denied");

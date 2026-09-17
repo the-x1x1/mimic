@@ -20,7 +20,7 @@ from mimic_engine.features.stats import FEATURE_VERSION
 from mimic_engine.training.mapping import predictable_controls
 
 REPO = Path(__file__).resolve().parents[2]
-MIGRATION = REPO / "crates" / "mimic-core" / "src" / "db" / "migrations" / "0001_init.sql"
+MIGRATIONS_DIR = REPO / "crates" / "mimic-core" / "src" / "db" / "migrations"
 
 
 def normalize_value(control, raw):
@@ -37,11 +37,13 @@ def build_db(
 ) -> dict:
     rng = np.random.default_rng(seed)
     conn = sqlite3.connect(path)
-    conn.executescript(MIGRATION.read_text("utf-8"))
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
     )
-    conn.execute("INSERT INTO schema_migrations VALUES (1,'init','2026-01-01T00:00:00Z')")
+    # Apply every checked-in migration in order so tests see the real, current schema.
+    for i, sql_file in enumerate(sorted(MIGRATIONS_DIR.glob("*.sql")), start=1):
+        conn.executescript(sql_file.read_text("utf-8"))
+        conn.execute("INSERT INTO schema_migrations VALUES (?,?,?)", (i, sql_file.stem, "2026-01-01T00:00:00Z"))
     now = datetime(2025, 1, 1, tzinfo=UTC)
     lib_id = str(uuid.uuid4())
     conn.execute(

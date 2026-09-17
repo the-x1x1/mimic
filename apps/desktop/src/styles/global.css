@@ -826,3 +826,108 @@ p {
 .ml-2 {
   margin-left: var(--space-2);
 }
+
+/* Sessions + Review (0.3.0) */
+.session-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: var(--space-3);
+  align-items: start;
+}
+.session-layout .photo-grid {
+  min-width: 0;
+}
+.session-side {
+  position: sticky;
+  top: var(--space-3);
+}
+.tile--selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.pred-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pred-panel__h {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-body-sm);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pred-table td.num,
+.pred-table th.num,
+.table .num {
+  text-align: right;
+}
+.safety-list li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--text-secondary);
+  font-size: var(--text-body-sm);
+}
+.safety-list svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--success);
+}
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
+  gap: var(--space-3);
+  align-items: start;
+}
+.review-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.review-preview > img,
+.review-preview > svg {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  background: var(--photo-bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.review-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.filmstrip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.filmstrip__item {
+  flex: none;
+  width: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.filmstrip__item img {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: 2px;
+  background: var(--photo-bg);
+}
+.filmstrip__item--on {
+  border-color: var(--accent);
+}

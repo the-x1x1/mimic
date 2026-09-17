@@ -77,6 +77,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     let executor = std::sync::Arc::new(mimic_core::jobs::CompositeExecutor::new(vec![
         ingest::executor(engine.clone(), bridge.clone()),
         mimic_core::training::executor(engine.clone()),
+        mimic_core::sessions::executor(engine.clone(), bridge.clone()),
     ]));
     let jobs = JobRunner::new(db.clone(), executor);
     let (interrupted, requeued) = jobs.recover()?;

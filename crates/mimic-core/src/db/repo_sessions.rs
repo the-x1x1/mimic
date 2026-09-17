@@ -25,7 +25,7 @@ fn map_session(r: &Row<'_>) -> rusqlite::Result<Session> {
     })
 }
 
-const PRED_COLS: &str = "id, session_id, asset_id, model_version_id, predicted_settings_json, raw_model_output_json, confidence, confidence_components_json, nearest_examples_json, created_at, status";
+const PRED_COLS: &str = "id, session_id, asset_id, model_version_id, predicted_settings_json, raw_model_output_json, confidence, confidence_components_json, nearest_examples_json, created_at, status, capability_schema_version, cluster_id";
 
 fn map_pred(r: &Row<'_>) -> rusqlite::Result<Prediction> {
     Ok(Prediction {
@@ -40,6 +40,8 @@ fn map_pred(r: &Row<'_>) -> rusqlite::Result<Prediction> {
         nearest_examples: json_col_or_default(r.get(8)?),
         created_at: r.get(9)?,
         status: r.get(10)?,
+        capability_schema_version: r.get(11)?,
+        cluster_id: r.get(12)?,
     })
 }
 
@@ -61,6 +63,7 @@ fn map_batch(r: &Row<'_>) -> rusqlite::Result<ApplyBatch> {
 }
 
 const AE_COLS: &str = "id, apply_batch_id, prediction_id, asset_id, before_settings_json, applied_settings_json, lightroom_snapshot_name, result, error_json, applied_at";
+const AE_ALL_COLS: &str = "id, apply_batch_id, prediction_id, asset_id, before_settings_json, applied_settings_json, lightroom_snapshot_name, result, error_json, applied_at, restored_at, restore_result, restore_error_json";
 
 fn map_ae(r: &Row<'_>) -> rusqlite::Result<AppliedEdit> {
     Ok(AppliedEdit {
@@ -74,6 +77,9 @@ fn map_ae(r: &Row<'_>) -> rusqlite::Result<AppliedEdit> {
         result: r.get(7)?,
         error: json_col(r.get(8)?),
         applied_at: r.get(9)?,
+        restored_at: r.get(10)?,
+        restore_result: r.get(11)?,
+        restore_error: json_col(r.get(12)?),
     })
 }
 
@@ -120,6 +126,21 @@ impl Db {
             conn.prepare(&format!("SELECT {SESSION_COLS} FROM sessions s ORDER BY s.created_at DESC LIMIT {limit}"))?;
         let rows = stmt.query_map([], map_session)?;
         rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Delete a session, its memberships, clusters, predictions and apply
+    /// records, plus the hidden library that backed it. Assets are kept
+    /// (library_id → NULL) so applied-edit history is never silently lost.
+    pub fn delete_session(&self, id: &str) -> DbResult<()> {
+        let session = self.get_session(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))?;
+        self.transaction(|tx| {
+            tx.execute("DELETE FROM sessions WHERE id = ?1", [id])?;
+            tx.execute("DELETE FROM app_settings WHERE key = ?1", [format!("session.{id}.source")])?;
+            if let Some(lib) = &session.source_library_id {
+                tx.execute("DELETE FROM libraries WHERE id = ?1 AND purpose = 'session'", [lib])?;
+            }
+            Ok(())
+        })
     }
 
     pub fn set_session_status(&self, id: &str, status: &str) -> DbResult<()> {
@@ -236,10 +257,11 @@ impl Db {
                 params![p.session_id, p.asset_id],
             )?;
             tx.execute(
-                &format!("INSERT INTO predictions({PRED_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'pending')"),
+                &format!("INSERT INTO predictions({PRED_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'pending',?11,?12)"),
                 params![
                     id, p.session_id, p.asset_id, p.model_version_id, p.predicted_settings.to_string(), p.raw_model_output.to_string(),
-                    p.confidence, p.confidence_components.to_string(), p.nearest_examples.to_string(), now_rfc3339()
+                    p.confidence, p.confidence_components.to_string(), p.nearest_examples.to_string(), now_rfc3339(),
+                    p.capability_schema_version, p.cluster_id
                 ],
             )?;
             Ok(())
@@ -334,7 +356,7 @@ impl Db {
         })?;
         let conn = self.conn();
         Ok(conn.query_row(
-            &format!("SELECT {AE_COLS} FROM applied_edits WHERE apply_batch_id = ?1 AND prediction_id = ?2"),
+            &format!("SELECT {AE_ALL_COLS} FROM applied_edits WHERE apply_batch_id = ?1 AND prediction_id = ?2"),
             params![e.apply_batch_id, e.prediction_id],
             map_ae,
         )?)
@@ -342,9 +364,62 @@ impl Db {
 
     pub fn applied_edits(&self, batch_id: &str) -> DbResult<Vec<AppliedEdit>> {
         let conn = self.conn();
-        let mut stmt = conn
-            .prepare(&format!("SELECT {AE_COLS} FROM applied_edits WHERE apply_batch_id = ?1 ORDER BY applied_at"))?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AE_ALL_COLS} FROM applied_edits WHERE apply_batch_id = ?1 ORDER BY applied_at"
+        ))?;
         let rows = stmt.query_map([batch_id], map_ae)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Record the outcome of restoring one applied edit (batch rollback).
+    /// Idempotent per edit; the apply row itself is never rewritten.
+    pub fn record_restore(&self, applied_edit_id: &str, result: &str, error: Option<&Value>) -> DbResult<AppliedEdit> {
+        if !matches!(result, "restored" | "verify_failed" | "failed" | "skipped") {
+            return Err(DbError::Invalid(format!("bad restore result {result}")));
+        }
+        let n = self.conn().execute(
+            "UPDATE applied_edits SET restored_at = ?2, restore_result = ?3, restore_error_json = ?4 WHERE id = ?1",
+            params![applied_edit_id, now_rfc3339(), result, error.map(|v| v.to_string())],
+        )?;
+        if n == 0 {
+            return Err(DbError::NotFound(applied_edit_id.to_string()));
+        }
+        let conn = self.conn();
+        Ok(conn.query_row(
+            &format!("SELECT {AE_ALL_COLS} FROM applied_edits WHERE id = ?1"),
+            [applied_edit_id],
+            map_ae,
+        )?)
+    }
+
+    /// Mark a batch's rollback availability after a restore pass. A batch can be
+    /// restored once; items that failed to restore keep their apply row intact.
+    pub fn set_batch_rollback_available(&self, batch_id: &str, available: bool) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE apply_batches SET rollback_available = ?2 WHERE id = ?1",
+            params![batch_id, available as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Predictions for a session joined with the asset summary the UI needs.
+    pub fn session_predictions_with_assets(&self, session_id: &str) -> DbResult<Vec<(Prediction, super::Asset)>> {
+        let preds = self.session_predictions(session_id, false)?;
+        let mut out = Vec::with_capacity(preds.len());
+        for p in preds {
+            if let Some(a) = self.get_asset(&p.asset_id)? {
+                out.push((p, a));
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn count_session_predictions_by_status(&self, session_id: &str) -> DbResult<Vec<(String, i64)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT status, COUNT(*) FROM predictions WHERE session_id = ?1 AND status != 'superseded' GROUP BY status",
+        )?;
+        let rows = stmt.query_map([session_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
@@ -483,6 +558,8 @@ mod tests {
                 confidence: 0.9,
                 confidence_components: json!({"knnDistance": 0.1}),
                 nearest_examples: json!([]),
+                capability_schema_version: None,
+                cluster_id: None,
             })
             .unwrap();
         let p2 = db
@@ -495,6 +572,8 @@ mod tests {
                 confidence: 0.5,
                 confidence_components: json!({}),
                 nearest_examples: json!([]),
+                capability_schema_version: None,
+                cluster_id: None,
             })
             .unwrap();
         assert_eq!(db.get_prediction(&p1.id).unwrap().unwrap().status, "superseded");
@@ -531,7 +610,16 @@ mod tests {
         assert_eq!(db.get_prediction(&p2.id).unwrap().unwrap().status, "applied");
         let done = db.complete_apply_batch(&batch.id, false, None).unwrap();
         assert_eq!(done.status, "completed");
-        assert_eq!(db.applied_edits(&batch.id).unwrap().len(), 1);
+        let edits = db.applied_edits(&batch.id).unwrap();
+        assert_eq!(edits.len(), 1);
+        assert!(edits[0].restore_result.is_none());
+        let restored = db.record_restore(&edits[0].id, "restored", None).unwrap();
+        assert_eq!(restored.restore_result.as_deref(), Some("restored"));
+        assert!(restored.restored_at.is_some() && restored.result == "applied", "apply row untouched");
+        assert!(db.record_restore(&edits[0].id, "bogus", None).is_err());
+        db.set_batch_rollback_available(&batch.id, false).unwrap();
+        assert!(!db.get_apply_batch(&batch.id).unwrap().unwrap().rollback_available);
+        assert_eq!(db.count_session_predictions_by_status(&session.id).unwrap(), vec![("applied".to_string(), 1)]);
 
         let c = db
             .insert_correction(
@@ -552,16 +640,19 @@ mod tests {
     fn batch_with_failure_is_never_completed_clean() {
         let db = Db::open_in_memory().unwrap();
         let (session, asset_id, mv_id) = seed(&db);
+        let asset_id_copy = asset_id.clone();
         let p = db
             .insert_prediction(&NewPrediction {
                 session_id: session.id.clone(),
                 asset_id: asset_id.clone(),
-                model_version_id: mv_id,
+                model_version_id: mv_id.clone(),
                 predicted_settings: json!({}),
                 raw_model_output: json!({}),
                 confidence: 0.9,
                 confidence_components: json!({}),
                 nearest_examples: json!([]),
+                capability_schema_version: None,
+                cluster_id: None,
             })
             .unwrap();
         let batch = db.create_apply_batch(&session.id, None).unwrap();
@@ -582,5 +673,16 @@ mod tests {
         let clusters = db.replace_scene_clusters(&session.id, &[("c1".into(), "Group 1".into(), json!({}))]).unwrap();
         assert_eq!(clusters.len(), 1);
         assert_eq!(db.list_sessions(10).unwrap()[0].asset_count, 1);
+        let style_id = db.get_model_version(&mv_id).unwrap().unwrap().style_profile_id;
+        assert!(
+            matches!(db.delete_style_profile(&style_id), Err(DbError::Invalid(_))),
+            "a Style with predictions cannot be deleted"
+        );
+        db.delete_session(&session.id).unwrap();
+        db.delete_style_profile(&style_id).unwrap();
+        assert!(db.get_session(&session.id).unwrap().is_none());
+        assert!(db.get_prediction(&p.id).unwrap().is_none(), "predictions cascade");
+        assert!(db.get_asset(&asset_id_copy).unwrap().is_some(), "assets survive");
+        assert!(matches!(db.delete_session(&session.id), Err(DbError::NotFound(_))));
     }
 }

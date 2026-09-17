@@ -143,8 +143,9 @@ function GeneralSection() {
       </Card>
       <Card title="Review thresholds">
         <p className="muted small">
-          Used by Review once prediction ships (0.3.0). High-confidence photos are eligible for
-          apply; the rest are held for review.
+          Review's “Needs attention” queue shows predictions below the medium threshold, unfamiliar
+          scenes and failed applies. The high threshold sets the green badge. Thresholds never block
+          Apply; you decide per session or per photo.
         </p>
         <div className="row gap-4">
           <Field label="High confidence ≥" htmlFor="th-high">
@@ -183,8 +184,6 @@ function GeneralSection() {
 
 function LightroomSection() {
   const caps = useCapabilityMatrix();
-  const settings = useSettings();
-  const set = useSetSetting();
   return (
     <div className="stack gap-3">
       <LightroomSetup />
@@ -198,15 +197,19 @@ function LightroomSection() {
         )}
       </Card>
       <Card title="Apply safety">
-        {settings.data ? (
-          <Toggle
-            id="snap"
-            label="Create a Develop snapshot before applying"
-            hint="“Mimic Before — <timestamp>”. Kept on unless Lightroom cannot create snapshots."
-            checked={settings.data["lightroom.applyCreateSnapshot"]}
-            onChange={(v) => set.mutate({ key: "lightroom.applyCreateSnapshot", value: v })}
-          />
-        ) : null}
+        <ul className="plain-list small">
+          <li>
+            Every apply creates a “Mimic Before — &lt;timestamp&gt;” develop snapshot first. This
+            cannot be turned off; if Lightroom cannot snapshot, Mimic refuses to apply.
+          </li>
+          <li>
+            Every photo is read back after the preset is applied; only a match counts as applied.
+          </li>
+          <li>
+            Before-values of the written keys are recorded per photo, so a batch can be restored
+            from Mimic.
+          </li>
+        </ul>
       </Card>
     </div>
   );

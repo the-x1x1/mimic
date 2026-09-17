@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { bridgeFixture, expectedFixture } from "@mimic/test-fixtures";
+import { bridgeFixture, expectedFixture, sessionFixture } from "@mimic/test-fixtures";
 import {
   ApplyBatchResult,
   CapabilityMatrix,
@@ -18,6 +18,13 @@ import {
   primaryError,
   controlMae,
   evaluationSet,
+  ApplyPreflight,
+  SessionPhoto,
+  confidenceBand,
+  needsAttention,
+  predictedControlRows,
+  JOB_LABELS,
+  JOB_KINDS,
 } from "../src";
 
 const load = (p: string) => JSON.parse(readFileSync(p, "utf8"));
@@ -41,6 +48,15 @@ describe("bridge fixtures match the TypeScript contracts", () => {
     const err = CommandResultBody.parse(load(bridgeFixture("command_error.result.json")));
     expect(err.error?.code).toBe("catalog_write_denied");
     EventsBody.parse(load(bridgeFixture("event.selection_changed.json")));
+    const restore = CommandEnvelope.parse(
+      load(bridgeFixture("apply_settings_as_plugin_preset.command.restore.json")),
+    );
+    expect(restore.commandType).toBe("apply_settings_as_plugin_preset");
+    expect((restore.payload as { createSnapshot: boolean; restore: boolean }).createSnapshot).toBe(
+      false,
+    );
+    const listing = CommandResultBody.parse(load(bridgeFixture("get_selected_photos.result.json")));
+    expect((listing.result as { photos: unknown[] }).photos).toHaveLength(2);
   });
   it("command list equals the spec set", () => {
     expect(CommandType.options).toEqual([
@@ -157,5 +173,58 @@ describe("training metrics helpers", () => {
     expect(primaryError(null)).toBeNull();
     expect(controlMae(metrics, "hybrid", "tone.exposure")).toBe(0.21);
     expect(controlMae(metrics, "hybrid", "tone.contrast")).toBeNull();
+  });
+});
+
+describe("session contracts", () => {
+  it("session photo fixture (shared with the Rust round-trip test) parses", () => {
+    const photo = SessionPhoto.parse(load(sessionFixture("session_photo.json")));
+    expect(photo.prediction?.status).toBe("pending");
+    expect(photo.lastApply?.result).toBe("verify_failed");
+    expect(photo.prediction?.confidenceComponents.similarity).toBe(0.91);
+    const rows = predictedControlRows(photo.prediction!.predictedSettings);
+    expect(rows.map((r) => r.canonical)).toEqual([
+      "tone.contrast",
+      "tone.exposure",
+      "whiteBalance.temperature",
+    ]);
+    expect(rows[1]?.raw).toBe(0.35);
+  });
+  it("preflight fixture parses and explains refusals", () => {
+    const pf = ApplyPreflight.parse(load(sessionFixture("apply_preflight.refused.json")));
+    expect(pf.ok).toBe(false);
+    expect(pf.blockers[0]).toContain("capability set");
+    expect(pf.batchSize).toBe(25);
+  });
+  it("attention rules: low confidence, OOD and failed applies surface; applied/rejected do not", () => {
+    const base = SessionPhoto.parse(load(sessionFixture("session_photo.json")));
+    expect(needsAttention(base)).toBe(true); // verify_failed apply
+    const clean = { ...base, lastApply: null };
+    expect(needsAttention(clean)).toBe(false); // 0.83 ≥ threshold
+    expect(
+      needsAttention({ ...clean, prediction: { ...clean.prediction!, confidence: 0.4 } }),
+    ).toBe(true);
+    expect(
+      needsAttention({
+        ...clean,
+        prediction: { ...clean.prediction!, rawModelOutput: { ood: true } },
+      }),
+    ).toBe(true);
+    expect(
+      needsAttention({ ...clean, prediction: { ...clean.prediction!, status: "rejected" } }),
+    ).toBe(false);
+    expect(
+      needsAttention({
+        ...clean,
+        prediction: { ...clean.prediction!, status: "applied", confidence: 0.1 },
+      }),
+    ).toBe(false);
+    expect(needsAttention({ ...clean, prediction: null })).toBe(false);
+    expect(confidenceBand(0.9)).toBe("high");
+    expect(confidenceBand(0.7)).toBe("medium");
+    expect(confidenceBand(0.3)).toBe("low");
+  });
+  it("every session job kind has a label", () => {
+    for (const kind of Object.values(JOB_KINDS)) expect(JOB_LABELS[kind]).toBeTruthy();
   });
 });

@@ -17,7 +17,6 @@ pub fn defaults() -> Map<String, Value> {
     m.insert("updates.channel".into(), json!("stable"));
     m.insert("updates.automatic".into(), json!(true));
     m.insert("diagnostics.includePaths".into(), json!(false));
-    m.insert("lightroom.applyCreateSnapshot".into(), json!(true));
     m.insert("review.highThreshold".into(), json!(0.8));
     m.insert("review.mediumThreshold".into(), json!(0.6));
     m.insert("onboarding.completed".into(), json!(false));

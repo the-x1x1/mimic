@@ -15,6 +15,8 @@ pub struct Library {
     pub created_at: String,
     pub last_scanned_at: Option<String>,
     pub status: String,
+    /// `training` (shown in the Libraries UI) or `session` (backs a session).
+    pub purpose: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -333,6 +335,8 @@ pub struct Prediction {
     pub nearest_examples: Value,
     pub created_at: String,
     pub status: String,
+    pub capability_schema_version: Option<String>,
+    pub cluster_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -346,6 +350,10 @@ pub struct NewPrediction {
     pub confidence: f64,
     pub confidence_components: Value,
     pub nearest_examples: Value,
+    #[serde(default)]
+    pub capability_schema_version: Option<String>,
+    #[serde(default)]
+    pub cluster_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,6 +384,9 @@ pub struct AppliedEdit {
     pub result: String,
     pub error: Option<Value>,
     pub applied_at: String,
+    pub restored_at: Option<String>,
+    pub restore_result: Option<String>,
+    pub restore_error: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

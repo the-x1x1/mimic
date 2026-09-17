@@ -2,6 +2,26 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.3.0-alpha.1] — 2026-09-17
+
+Sessions, scene grouping, prediction with confidence, Review, and the Lightroom apply/restore path with read-back verification. Everything that touches a catalog is proven against a scripted plugin over the real bridge; behaviour on a real Lightroom Classic is still unverified.
+
+### Added
+
+- Schema v2 (`0002_sessions.sql`): `libraries.purpose` (training vs session-backing libraries, hidden from the Libraries UI), `applied_edits.restored_at / restore_result / restore_error_json`, `predictions.capability_schema_version / cluster_id`; migration test seeds a v1 database with rows and upgrades it; the engine's test database builder now applies every checked-in migration.
+- Engine `session.group`: capture-time blocks (20 min gap, untimed frames share one block), seeded k-means on standardized visual statistics (+ embedding when present) with a minimum cluster size, burst detection, deterministic output. Engine `model.predict` gains `groups` + `consistency`: a bounded per-family pull toward the scene-group median (white balance, colour, presence); exposure and tone are never blended, the maximum shift is reported per photo.
+- mimic-core `sessions`: `create_session` (folder or Lightroom scope), `ingest_session` (reuses the folder/Lightroom ingest, capture-ordered membership), `group_session`, `predict_session` (active version only, feature-schema check, supersedes earlier predictions, records the Lightroom capability schema version), review transitions, `apply_preflight` (connected, canApply/canSnapshot, writable controls, same catalog, stale capability schema, apply already running), `apply_session` (photo resolution by local id or normalized path against the catalog listing; batches of 25 with `Mimic Before` snapshot and read-back; `verify_readback` per item; `prediction` edit snapshot on success; cancellation between batches; `outcome_unknown` recorded when the bridge fails mid-batch), `restore_batch` (before-values of the written keys only, read-back verified, per-item restore result, predictions back to pending). Apply and restore are never re-queued after an interruption.
+- Commands: `list_sessions`, `create_session`, `get_session_detail`, `list_session_photos`, `set_session_style`, `delete_session`, `group_session`, `predict_session`, `set_prediction_review`, `get_apply_preflight`, `apply_session`, `list_applied_edits`, `restore_apply_batch`, `get_prediction`; typed contracts with checked-in fixtures (`fixtures/sessions/*`) asserted by Rust round-trip and zod tests.
+- Sessions UI: list, New Session dialog (folder or Lightroom scope, optional Style), detail page with Analyze scenes → Predict → Apply to Lightroom (each disabled with a reason), live job card, metrics, per-group and needs-attention filters, confidence badges on every tile, prediction panel (predicted Lightroom values, confidence components and reasons, Lightroom outcome with read-back mismatches, Looks right / Reject / Apply this photo), apply history with Restore, confirm dialog that states the safety steps and shows the backend's blockers verbatim.
+- Review UI: attention-only default (below the medium threshold, unfamiliar, failed apply), All pending, Every prediction; filmstrip, large preview, prev/next, the same prediction panel; works offline, Apply requires Lightroom.
+- Bridge fixtures for the restore payload and the catalog listing; Lightroom integration, ML pipeline, database, architecture and UI docs updated.
+- Tests: pytest session suite (grouping determinism, time gaps, visual split, untimed frames, consistency policy, service-level `session.group` + consistent predict), Rust `tests/sessions_e2e.rs` (real engine ingest of fixture images, grouping, prediction, re-prediction supersedes, rejected photo excluded, apply refused without Lightroom, apply against a scripted plugin with one read-back mismatch and one missing photo, stale-capability refusal, restore with verification), migration upgrade test, repository tests for restore bookkeeping and session delete, frontend tests for the prediction panel, confidence badge, confirm dialog and review queue.
+
+### Changed
+
+- Home and Settings no longer describe Sessions/Review as future work; the unhonoured “create a snapshot before applying” toggle was removed — snapshot + read-back are mandatory and stated as such.
+- `apps/desktop/tsconfig.tsbuildinfo` is no longer tracked (it is a build cache and blocked fast-forward pulls).
+
 ## [0.2.0-alpha.1] — 2026-09-17
 
 First Style Brain. Training is real, reproducible and measured; prediction is exposed through the engine and exercised end to end, but there is still no Sessions/Review UI or Lightroom apply (0.3.0).

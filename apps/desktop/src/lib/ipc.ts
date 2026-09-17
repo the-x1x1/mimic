@@ -8,6 +8,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { z } from "zod";
 import {
   AppInfo,
+  AppliedEdit,
+  ApplyPreflight,
   AssetDetail,
   AssetRow,
   CapabilityMatrixResponse,
@@ -25,6 +27,12 @@ import {
   ModelVersion,
   OnboardingState,
   PluginSetup,
+  Prediction,
+  PredictionDetail,
+  Session,
+  SessionDetail,
+  SessionPhoto,
+  type SessionSource,
   Settings,
   StyleDetail,
   StyleSummary,
@@ -114,6 +122,29 @@ export const ipc = {
     call("archive_model_version", ModelVersion, { modelVersionId }),
   modelVersion: (modelVersionId: string) =>
     call("get_model_version", ModelVersion, { modelVersionId }),
+
+  sessions: () => call("list_sessions", Session.array()),
+  createSession: (name: string, source: SessionSource, styleId: string | null) =>
+    call("create_session", Session, { name, source, styleId }),
+  sessionDetail: (sessionId: string) => call("get_session_detail", SessionDetail, { sessionId }),
+  sessionPhotos: (sessionId: string) =>
+    call("list_session_photos", SessionPhoto.array(), { sessionId }),
+  setSessionStyle: (sessionId: string, styleId: string | null) =>
+    call("set_session_style", Session, { sessionId, styleId }),
+  deleteSession: (sessionId: string) => call("delete_session", z_void, { sessionId }),
+  groupSession: (sessionId: string) => call("group_session", Job, { sessionId }),
+  predictSession: (sessionId: string, styleId?: string | null, consistency?: boolean) =>
+    call("predict_session", Job, { sessionId, styleId: styleId ?? null, consistency }),
+  setPredictionReview: (predictionId: string, status: "pending" | "reviewed" | "rejected") =>
+    call("set_prediction_review", Prediction, { predictionId, status }),
+  applyPreflight: (sessionId: string, predictionIds?: string[]) =>
+    call("get_apply_preflight", ApplyPreflight, { sessionId, predictionIds }),
+  applySession: (sessionId: string, predictionIds?: string[], minConfidence?: number) =>
+    call("apply_session", Job, { sessionId, predictionIds, minConfidence }),
+  appliedEdits: (applyBatchId: string) =>
+    call("list_applied_edits", AppliedEdit.array(), { applyBatchId }),
+  restoreApplyBatch: (applyBatchId: string) => call("restore_apply_batch", Job, { applyBatchId }),
+  prediction: (predictionId: string) => call("get_prediction", PredictionDetail, { predictionId }),
 
   jobs: (limit = 50, activeOnly = false) => call("list_jobs", Job.array(), { limit, activeOnly }),
   job: (jobId: string) => call("get_job", Job, { jobId }),

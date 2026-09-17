@@ -30,4 +30,4 @@ Until a real key pair is generated and its public key replaces the development k
 
 ## Manual release checklist (spec §27.5)
 
-Fresh install → launch → update from previous public release → plugin install → Lightroom handshake → ingest selected images → (0.2.0) train sample Style → (0.3.0) predict → apply → restore snapshot → restart during interrupted ingest → GitHub offline → engine crash → malformed settings payload. Record results in PROJECT_STATUS.
+Fresh install → launch → update from previous public release → plugin install → Lightroom handshake → ingest selected images → train sample Style → new session → group → predict → apply → verify read-back → restore batch → restart during interrupted ingest → GitHub offline → engine crash → malformed settings payload. Record results in PROJECT_STATUS.
