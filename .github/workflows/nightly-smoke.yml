@@ -1,0 +1,38 @@
+name: Nightly smoke
+
+# Full test suite on a schedule plus a Windows debug build of the Tauri app,
+# so platform regressions surface before a release tag. Never publishes.
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+jobs:
+  windows-debug-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - run: pnpm install --frozen-lockfile
+      - run: cd engine; uv sync --all-extras --dev; uv run pytest
+        shell: pwsh
+      - run: pwsh -NoProfile -File scripts/package-engine.ps1
+        shell: pwsh
+      - run: cargo test --workspace
+      - run: pnpm --filter @mimic/desktop tauri build --debug --no-bundle
+      - name: Engine + bridge smoke against the debug binary
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem target/debug -Filter "mimic-desktop.exe" | Select-Object -First 1
+          if (-not $exe) { throw "debug binary missing" }
+          Write-Host "built $($exe.FullName)"

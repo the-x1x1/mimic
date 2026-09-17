@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in Mimic did not behave as documented.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Mimic version
+      description: Settings › Updates › Current
+    validations:
+      required: true
+  - type: input
+    id: lightroom
+    attributes:
+      label: Lightroom Classic version (if relevant)
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: diag
+    attributes:
+      label: Diagnostic bundle
+      description: Settings › Diagnostics › Copy diagnostic bundle (contains no tokens; paths redacted by default).
+      render: json

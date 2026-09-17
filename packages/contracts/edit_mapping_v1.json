@@ -1,0 +1,1482 @@
+{
+  "$comment": "Single source of truth for canonical EditDNA <-> Lightroom develop-setting mapping. Loaded by mimic-core (Rust) and mimic_engine (Python). Never edit a control in place after release: add a new mappingVersion.",
+  "mappingVersion": "edit_mapping_v1",
+  "editDnaSchemaVersion": "1.0",
+  "families": {
+    "whiteBalance": {
+      "label": "White Balance",
+      "predictable": true
+    },
+    "tone": {
+      "label": "Basic Tone",
+      "predictable": true
+    },
+    "presence": {
+      "label": "Presence",
+      "predictable": true
+    },
+    "hsl": {
+      "label": "HSL / Color Mixer",
+      "predictable": true
+    },
+    "toneCurve": {
+      "label": "Tone Curve",
+      "predictable": true,
+      "note": "point curves are stored, not predicted in 0.x"
+    },
+    "colorGrading": {
+      "label": "Color Grading",
+      "predictable": true
+    },
+    "detail": {
+      "label": "Detail",
+      "predictable": true
+    },
+    "lens": {
+      "label": "Lens Corrections",
+      "predictable": false
+    },
+    "effects": {
+      "label": "Effects",
+      "predictable": true
+    },
+    "calibration": {
+      "label": "Calibration",
+      "predictable": true
+    },
+    "crop": {
+      "label": "Crop",
+      "predictable": false,
+      "note": "stored only; crop prediction is roadmap"
+    }
+  },
+  "lightroomMetadataKeys": {
+    "processVersion": ["ProcessVersion"],
+    "crsVersion": ["Version"],
+    "hasSettings": ["HasSettings"],
+    "alreadyApplied": ["AlreadyApplied"],
+    "rawFileName": ["RawFileName"]
+  },
+  "localCorrectionKeyPrefixes": [
+    "MaskGroupBasedCorrections",
+    "GradientBasedCorrections",
+    "CircularGradientBasedCorrections",
+    "PaintBasedCorrections",
+    "RetouchAreas",
+    "RetouchInfo",
+    "RedEyeInfo"
+  ],
+  "heavyEditKeyPrefixes": [
+    "Look",
+    "LookTable",
+    "RGBTable",
+    "RGBTableAmount",
+    "LensBlur",
+    "DepthBasedCorrections",
+    "NoiseReductionAI",
+    "DenoiseAI",
+    "AutoToneDigest",
+    "LensBlurRaw",
+    "PointColors"
+  ],
+  "controls": [
+    {
+      "canonical": "whiteBalance.mode",
+      "family": "whiteBalance",
+      "lightroomKeys": ["WhiteBalance"],
+      "valueType": "enum",
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent",
+      "note": "As Shot, Auto, Daylight, Cloudy, Shade, Tungsten, Fluorescent, Flash, Custom"
+    },
+    {
+      "canonical": "whiteBalance.temperature",
+      "family": "whiteBalance",
+      "lightroomKeys": ["Temperature"],
+      "valueType": "int",
+      "range": {
+        "min": 2000,
+        "max": 50000
+      },
+      "normalize": "log",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent",
+      "note": "Kelvin for RAW; normalized on log10 scale"
+    },
+    {
+      "canonical": "whiteBalance.tint",
+      "family": "whiteBalance",
+      "lightroomKeys": ["Tint"],
+      "valueType": "int",
+      "range": {
+        "min": -150,
+        "max": 150
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "tone.exposure",
+      "family": "tone",
+      "lightroomKeys": ["Exposure2012", "Exposure"],
+      "valueType": "float",
+      "range": {
+        "min": -5.0,
+        "max": 5.0
+      },
+      "default": 0.0,
+      "normalize": "linear",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "tone.contrast",
+      "family": "tone",
+      "lightroomKeys": ["Contrast2012", "Contrast"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "tone.highlights",
+      "family": "tone",
+      "lightroomKeys": ["Highlights2012", "HighlightRecovery"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "tone.shadows",
+      "family": "tone",
+      "lightroomKeys": ["Shadows2012", "FillLight"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "tone.whites",
+      "family": "tone",
+      "lightroomKeys": ["Whites2012"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "tone.blacks",
+      "family": "tone",
+      "lightroomKeys": ["Blacks2012", "Shadows"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "presence.texture",
+      "family": "presence",
+      "lightroomKeys": ["Texture"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "presence.clarity",
+      "family": "presence",
+      "lightroomKeys": ["Clarity2012", "Clarity"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "presence.dehaze",
+      "family": "presence",
+      "lightroomKeys": ["Dehaze"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "presence.vibrance",
+      "family": "presence",
+      "lightroomKeys": ["Vibrance"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "presence.saturation",
+      "family": "presence",
+      "lightroomKeys": ["Saturation"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.red",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentRed"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.red",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentRed"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.red",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentRed"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.orange",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentOrange"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.orange",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentOrange"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.orange",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentOrange"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.yellow",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentYellow"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.yellow",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentYellow"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.yellow",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentYellow"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.green",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentGreen"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.green",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentGreen"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.green",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentGreen"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.aqua",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentAqua"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.aqua",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentAqua"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.aqua",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentAqua"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.blue",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentBlue"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.blue",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentBlue"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.blue",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentBlue"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.purple",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentPurple"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.purple",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentPurple"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.purple",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentPurple"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.hue.magenta",
+      "family": "hsl",
+      "lightroomKeys": ["HueAdjustmentMagenta"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.saturation.magenta",
+      "family": "hsl",
+      "lightroomKeys": ["SaturationAdjustmentMagenta"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "hsl.luminance.magenta",
+      "family": "hsl",
+      "lightroomKeys": ["LuminanceAdjustmentMagenta"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.parametric.shadows",
+      "family": "toneCurve",
+      "lightroomKeys": ["ParametricShadows"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.parametric.darks",
+      "family": "toneCurve",
+      "lightroomKeys": ["ParametricDarks"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.parametric.lights",
+      "family": "toneCurve",
+      "lightroomKeys": ["ParametricLights"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.parametric.highlights",
+      "family": "toneCurve",
+      "lightroomKeys": ["ParametricHighlights"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.parametric.shadowSplit",
+      "family": "toneCurve",
+      "lightroomKeys": ["ParametricShadowSplit"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 25,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.parametric.midtoneSplit",
+      "family": "toneCurve",
+      "lightroomKeys": ["ParametricMidtoneSplit"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.parametric.highlightSplit",
+      "family": "toneCurve",
+      "lightroomKeys": ["ParametricHighlightSplit"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 75,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.point.rgb",
+      "family": "toneCurve",
+      "lightroomKeys": ["ToneCurvePV2012", "ToneCurve"],
+      "valueType": "curve",
+      "normalize": "none",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent",
+      "note": "List of 'x, y' points in 0-255 space"
+    },
+    {
+      "canonical": "toneCurve.point.red",
+      "family": "toneCurve",
+      "lightroomKeys": ["ToneCurvePV2012Red", "ToneCurveRed"],
+      "valueType": "curve",
+      "normalize": "none",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.point.green",
+      "family": "toneCurve",
+      "lightroomKeys": ["ToneCurvePV2012Green", "ToneCurveGreen"],
+      "valueType": "curve",
+      "normalize": "none",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.point.blue",
+      "family": "toneCurve",
+      "lightroomKeys": ["ToneCurvePV2012Blue", "ToneCurveBlue"],
+      "valueType": "curve",
+      "normalize": "none",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "toneCurve.name",
+      "family": "toneCurve",
+      "lightroomKeys": ["ToneCurveName2012", "ToneCurveName"],
+      "valueType": "string",
+      "normalize": "none",
+      "processVersions": ["6.7", "11.0", "15.4", "2012+"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.shadow.hue",
+      "family": "colorGrading",
+      "lightroomKeys": ["SplitToningShadowHue"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 360
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.shadow.saturation",
+      "family": "colorGrading",
+      "lightroomKeys": ["SplitToningShadowSaturation"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.shadow.luminance",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeShadowLum"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.midtone.hue",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeMidtoneHue"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 360
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.midtone.saturation",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeMidtoneSat"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.midtone.luminance",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeMidtoneLum"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.highlight.hue",
+      "family": "colorGrading",
+      "lightroomKeys": ["SplitToningHighlightHue"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 360
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.highlight.saturation",
+      "family": "colorGrading",
+      "lightroomKeys": ["SplitToningHighlightSaturation"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.highlight.luminance",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeHighlightLum"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.global.hue",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeGlobalHue"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 360
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.global.saturation",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeGlobalSat"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.global.luminance",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeGlobalLum"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.blending",
+      "family": "colorGrading",
+      "lightroomKeys": ["ColorGradeBlending"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "colorGrading.balance",
+      "family": "colorGrading",
+      "lightroomKeys": ["SplitToningBalance"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.sharpness",
+      "family": "detail",
+      "lightroomKeys": ["Sharpness"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 150
+      },
+      "default": 40,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.sharpenRadius",
+      "family": "detail",
+      "lightroomKeys": ["SharpenRadius"],
+      "valueType": "float",
+      "range": {
+        "min": 0.5,
+        "max": 3.0
+      },
+      "default": 1.0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.sharpenDetail",
+      "family": "detail",
+      "lightroomKeys": ["SharpenDetail"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 25,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.sharpenEdgeMasking",
+      "family": "detail",
+      "lightroomKeys": ["SharpenEdgeMasking"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.luminanceNoise",
+      "family": "detail",
+      "lightroomKeys": ["LuminanceSmoothing"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.luminanceNoiseDetail",
+      "family": "detail",
+      "lightroomKeys": ["LuminanceNoiseReductionDetail"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.luminanceNoiseContrast",
+      "family": "detail",
+      "lightroomKeys": ["LuminanceNoiseReductionContrast"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.colorNoise",
+      "family": "detail",
+      "lightroomKeys": ["ColorNoiseReduction"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 25,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.colorNoiseDetail",
+      "family": "detail",
+      "lightroomKeys": ["ColorNoiseReductionDetail"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "detail.colorNoiseSmoothness",
+      "family": "detail",
+      "lightroomKeys": ["ColorNoiseReductionSmoothness"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "lens.profileEnabled",
+      "family": "lens",
+      "lightroomKeys": ["LensProfileEnable"],
+      "valueType": "bool",
+      "default": false,
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "lens.profileName",
+      "family": "lens",
+      "lightroomKeys": ["LensProfileName"],
+      "valueType": "string",
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "lens.autoLateralCA",
+      "family": "lens",
+      "lightroomKeys": ["AutoLateralCA"],
+      "valueType": "bool",
+      "default": false,
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "lens.manualDistortion",
+      "family": "lens",
+      "lightroomKeys": ["LensManualDistortionAmount"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "lens.vignetteAmount",
+      "family": "lens",
+      "lightroomKeys": ["VignetteAmount"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "lens.vignetteMidpoint",
+      "family": "lens",
+      "lightroomKeys": ["VignetteMidpoint"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.postCropVignetteAmount",
+      "family": "effects",
+      "lightroomKeys": ["PostCropVignetteAmount"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.postCropVignetteMidpoint",
+      "family": "effects",
+      "lightroomKeys": ["PostCropVignetteMidpoint"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.postCropVignetteFeather",
+      "family": "effects",
+      "lightroomKeys": ["PostCropVignetteFeather"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.postCropVignetteRoundness",
+      "family": "effects",
+      "lightroomKeys": ["PostCropVignetteRoundness"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.postCropVignetteHighlightContrast",
+      "family": "effects",
+      "lightroomKeys": ["PostCropVignetteHighlightContrast"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.postCropVignetteStyle",
+      "family": "effects",
+      "lightroomKeys": ["PostCropVignetteStyle"],
+      "valueType": "enum",
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent",
+      "note": "1 Highlight Priority, 2 Color Priority, 3 Paint Overlay"
+    },
+    {
+      "canonical": "effects.grainAmount",
+      "family": "effects",
+      "lightroomKeys": ["GrainAmount"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.grainSize",
+      "family": "effects",
+      "lightroomKeys": ["GrainSize"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 25,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "effects.grainFrequency",
+      "family": "effects",
+      "lightroomKeys": ["GrainFrequency"],
+      "valueType": "int",
+      "range": {
+        "min": 0,
+        "max": 100
+      },
+      "default": 50,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.profile",
+      "family": "calibration",
+      "lightroomKeys": ["CameraProfile"],
+      "valueType": "string",
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.shadowTint",
+      "family": "calibration",
+      "lightroomKeys": ["ShadowTint"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.redHue",
+      "family": "calibration",
+      "lightroomKeys": ["RedHue"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.redSaturation",
+      "family": "calibration",
+      "lightroomKeys": ["RedSaturation"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.greenHue",
+      "family": "calibration",
+      "lightroomKeys": ["GreenHue"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.greenSaturation",
+      "family": "calibration",
+      "lightroomKeys": ["GreenSaturation"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.blueHue",
+      "family": "calibration",
+      "lightroomKeys": ["BlueHue"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "calibration.blueSaturation",
+      "family": "calibration",
+      "lightroomKeys": ["BlueSaturation"],
+      "valueType": "int",
+      "range": {
+        "min": -100,
+        "max": 100
+      },
+      "default": 0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "crop.hasCrop",
+      "family": "crop",
+      "lightroomKeys": ["HasCrop"],
+      "valueType": "bool",
+      "default": false,
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "crop.top",
+      "family": "crop",
+      "lightroomKeys": ["CropTop"],
+      "valueType": "float",
+      "range": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "default": 0.0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "crop.left",
+      "family": "crop",
+      "lightroomKeys": ["CropLeft"],
+      "valueType": "float",
+      "range": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "default": 0.0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "crop.bottom",
+      "family": "crop",
+      "lightroomKeys": ["CropBottom"],
+      "valueType": "float",
+      "range": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "default": 1.0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "crop.right",
+      "family": "crop",
+      "lightroomKeys": ["CropRight"],
+      "valueType": "float",
+      "range": {
+        "min": 0.0,
+        "max": 1.0
+      },
+      "default": 1.0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "crop.angle",
+      "family": "crop",
+      "lightroomKeys": ["CropAngle"],
+      "valueType": "float",
+      "range": {
+        "min": -45.0,
+        "max": 45.0
+      },
+      "default": 0.0,
+      "normalize": "linear",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    },
+    {
+      "canonical": "crop.constrainToWarp",
+      "family": "crop",
+      "lightroomKeys": ["CropConstrainToWarp"],
+      "valueType": "bool",
+      "default": false,
+      "normalize": "none",
+      "processVersions": ["all"],
+      "writable": "capabilityDependent"
+    }
+  ]
+}

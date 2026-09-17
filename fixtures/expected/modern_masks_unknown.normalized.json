@@ -1,0 +1,231 @@
+{
+  "schemaVersion": "1.0",
+  "mappingVersion": "edit_mapping_v1",
+  "global": {
+    "calibration": {
+      "profile": {
+        "raw": "Adobe Portrait",
+        "sourceKey": "CameraProfile"
+      }
+    },
+    "crop": {
+      "angle": {
+        "raw": -1.5,
+        "value": 0.48333333333333334,
+        "sourceKey": "CropAngle"
+      },
+      "bottom": {
+        "raw": 0.95,
+        "value": 0.95,
+        "sourceKey": "CropBottom"
+      },
+      "constrainToWarp": {
+        "raw": false,
+        "value": 0.0,
+        "sourceKey": "CropConstrainToWarp"
+      },
+      "hasCrop": {
+        "raw": true,
+        "value": 1.0,
+        "sourceKey": "HasCrop"
+      },
+      "left": {
+        "raw": 0.1,
+        "value": 0.1,
+        "sourceKey": "CropLeft"
+      },
+      "right": {
+        "raw": 0.9,
+        "value": 0.9,
+        "sourceKey": "CropRight"
+      },
+      "top": {
+        "raw": 0.05,
+        "value": 0.05,
+        "sourceKey": "CropTop"
+      }
+    },
+    "detail": {
+      "colorNoise": {
+        "raw": 25,
+        "value": 0.25,
+        "sourceKey": "ColorNoiseReduction"
+      },
+      "luminanceNoise": {
+        "raw": 15,
+        "value": 0.15,
+        "sourceKey": "LuminanceSmoothing"
+      },
+      "sharpness": {
+        "raw": 55,
+        "value": 0.36666666666666664,
+        "sourceKey": "Sharpness"
+      }
+    },
+    "effects": {
+      "grainAmount": {
+        "raw": 15,
+        "value": 0.15,
+        "sourceKey": "GrainAmount"
+      },
+      "grainFrequency": {
+        "raw": 50,
+        "value": 0.5,
+        "sourceKey": "GrainFrequency"
+      },
+      "grainSize": {
+        "raw": 25,
+        "value": 0.25,
+        "sourceKey": "GrainSize"
+      },
+      "postCropVignetteAmount": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "PostCropVignetteAmount"
+      }
+    },
+    "lens": {
+      "profileEnabled": {
+        "raw": true,
+        "value": 1.0,
+        "sourceKey": "LensProfileEnable"
+      },
+      "profileName": {
+        "raw": "Adobe (SONY FE 85mm F1.8)",
+        "sourceKey": "LensProfileName"
+      }
+    },
+    "presence": {
+      "clarity": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "Clarity2012"
+      },
+      "dehaze": {
+        "raw": 8,
+        "value": 0.54,
+        "sourceKey": "Dehaze"
+      },
+      "saturation": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "Saturation"
+      },
+      "texture": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "Texture"
+      },
+      "vibrance": {
+        "raw": 20,
+        "value": 0.6,
+        "sourceKey": "Vibrance"
+      }
+    },
+    "tone": {
+      "blacks": {
+        "raw": -20,
+        "value": 0.4,
+        "sourceKey": "Blacks2012"
+      },
+      "contrast": {
+        "raw": 15,
+        "value": 0.575,
+        "sourceKey": "Contrast2012"
+      },
+      "exposure": {
+        "raw": -0.25,
+        "value": 0.475,
+        "sourceKey": "Exposure2012"
+      },
+      "highlights": {
+        "raw": -70,
+        "value": 0.15,
+        "sourceKey": "Highlights2012"
+      },
+      "shadows": {
+        "raw": 25,
+        "value": 0.625,
+        "sourceKey": "Shadows2012"
+      },
+      "whites": {
+        "raw": 5,
+        "value": 0.525,
+        "sourceKey": "Whites2012"
+      }
+    },
+    "toneCurve": {
+      "point.rgb": {
+        "raw": [
+          [0.0, 12.0],
+          [255.0, 250.0]
+        ],
+        "sourceKey": "ToneCurvePV2012"
+      }
+    },
+    "whiteBalance": {
+      "mode": {
+        "raw": "As Shot",
+        "sourceKey": "WhiteBalance"
+      },
+      "temperature": {
+        "raw": 5600,
+        "value": 0.31986925659778015,
+        "sourceKey": "Temperature"
+      },
+      "tint": {
+        "raw": 10,
+        "value": 0.5333333333333333,
+        "sourceKey": "Tint"
+      }
+    }
+  },
+  "local": {
+    "status": "observed",
+    "observedKeys": ["MaskGroupBasedCorrections"],
+    "operations": []
+  },
+  "lightroom": {
+    "processVersion": "15.4",
+    "crsVersion": "17.0",
+    "hasSettings": true,
+    "heavyEditKeys": ["LensBlur", "Look", "PointColors"]
+  },
+  "unknown": {
+    "LensBlur": "{\"Active\":false}",
+    "PointColors": "{\"version\":1}",
+    "SomeNewSlider2027": "+42",
+    "MaskGroupBasedCorrections": [
+      {
+        "What": "Correction",
+        "CorrectionAmount": "1.000000",
+        "CorrectionActive": "true",
+        "CorrectionName": "Subject 1",
+        "LocalExposure2012": "0.35",
+        "LocalShadows2012": "0.2",
+        "CorrectionMasks": [
+          {
+            "What": "Mask/Image",
+            "MaskActive": "true",
+            "MaskName": "Subject 1",
+            "MaskSubType": "1",
+            "MaskValue": "1.000000",
+            "ReferencePoint": "0.500000 0.450000"
+          }
+        ]
+      }
+    ],
+    "Look": {
+      "Name": "Adobe Color",
+      "Amount": "1",
+      "UUID": "B952C231111CD8E0ECCF14B86BAA7077",
+      "SupportsAmount": "false",
+      "Parameters": {
+        "CameraProfile": "Adobe Standard",
+        "ConvertToGrayscale": "False"
+      }
+    }
+  },
+  "warnings": [],
+  "rawSettingsHash": "eb394f8793e9efeb91ee9e9cee569d0841858672d5417e71621830522c7796ce"
+}

@@ -1,0 +1,13 @@
+node_modules
+dist
+target
+.venv
+engine/.venv
+engine/dist
+pnpm-lock.yaml
+uv.lock
+Cargo.lock
+*.min.*
+fixtures/images
+apps/desktop/src-tauri/gen
+apps/desktop/src-tauri/icons

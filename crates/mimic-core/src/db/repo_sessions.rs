@@ -1,0 +1,586 @@
+use rusqlite::{params, OptionalExtension, Row};
+use serde_json::Value;
+
+use super::models::{json_col, json_col_or_default};
+use super::{
+    AppliedEdit, ApplyBatch, Correction, Db, DbError, DbResult, NewPrediction, Prediction, SceneCluster, Session,
+    SessionAsset,
+};
+use crate::ids::{new_id, now_rfc3339};
+
+const SESSION_COLS: &str = "s.id, s.name, s.source_path, s.source_library_id, s.captured_start, s.captured_end, s.status, s.active_style_profile_id, s.created_at, (SELECT COUNT(*) FROM session_assets sa WHERE sa.session_id = s.id)";
+
+fn map_session(r: &Row<'_>) -> rusqlite::Result<Session> {
+    Ok(Session {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        source_path: r.get(2)?,
+        source_library_id: r.get(3)?,
+        captured_start: r.get(4)?,
+        captured_end: r.get(5)?,
+        status: r.get(6)?,
+        active_style_profile_id: r.get(7)?,
+        created_at: r.get(8)?,
+        asset_count: r.get(9)?,
+    })
+}
+
+const PRED_COLS: &str = "id, session_id, asset_id, model_version_id, predicted_settings_json, raw_model_output_json, confidence, confidence_components_json, nearest_examples_json, created_at, status";
+
+fn map_pred(r: &Row<'_>) -> rusqlite::Result<Prediction> {
+    Ok(Prediction {
+        id: r.get(0)?,
+        session_id: r.get(1)?,
+        asset_id: r.get(2)?,
+        model_version_id: r.get(3)?,
+        predicted_settings: json_col_or_default(r.get(4)?),
+        raw_model_output: json_col_or_default(r.get(5)?),
+        confidence: r.get(6)?,
+        confidence_components: json_col_or_default(r.get(7)?),
+        nearest_examples: json_col_or_default(r.get(8)?),
+        created_at: r.get(9)?,
+        status: r.get(10)?,
+    })
+}
+
+const BATCH_COLS: &str = "id, session_id, lightroom_catalog_fingerprint, started_at, completed_at, status, applied_count, failed_count, rollback_available, error_json";
+
+fn map_batch(r: &Row<'_>) -> rusqlite::Result<ApplyBatch> {
+    Ok(ApplyBatch {
+        id: r.get(0)?,
+        session_id: r.get(1)?,
+        lightroom_catalog_fingerprint: r.get(2)?,
+        started_at: r.get(3)?,
+        completed_at: r.get(4)?,
+        status: r.get(5)?,
+        applied_count: r.get(6)?,
+        failed_count: r.get(7)?,
+        rollback_available: r.get::<_, i64>(8)? != 0,
+        error: json_col(r.get(9)?),
+    })
+}
+
+const AE_COLS: &str = "id, apply_batch_id, prediction_id, asset_id, before_settings_json, applied_settings_json, lightroom_snapshot_name, result, error_json, applied_at";
+
+fn map_ae(r: &Row<'_>) -> rusqlite::Result<AppliedEdit> {
+    Ok(AppliedEdit {
+        id: r.get(0)?,
+        apply_batch_id: r.get(1)?,
+        prediction_id: r.get(2)?,
+        asset_id: r.get(3)?,
+        before_settings: json_col(r.get(4)?),
+        applied_settings: json_col_or_default(r.get(5)?),
+        lightroom_snapshot_name: r.get(6)?,
+        result: r.get(7)?,
+        error: json_col(r.get(8)?),
+        applied_at: r.get(9)?,
+    })
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewAppliedEdit {
+    pub apply_batch_id: String,
+    pub prediction_id: String,
+    pub asset_id: String,
+    pub before_settings: Option<Value>,
+    pub applied_settings: Value,
+    pub lightroom_snapshot_name: Option<String>,
+    pub result: String,
+    pub error: Option<Value>,
+}
+
+impl Db {
+    pub fn create_session(
+        &self,
+        name: &str,
+        source_path: Option<&str>,
+        source_library_id: Option<&str>,
+        style_id: Option<&str>,
+    ) -> DbResult<Session> {
+        let id = new_id();
+        self.conn().execute(
+            "INSERT INTO sessions(id, name, source_path, source_library_id, status, active_style_profile_id, created_at)
+             VALUES (?1,?2,?3,?4,'new',?5,?6)",
+            params![id, name, source_path, source_library_id, style_id, now_rfc3339()],
+        )?;
+        self.get_session(&id)?.ok_or(DbError::NotFound(id))
+    }
+
+    pub fn get_session(&self, id: &str) -> DbResult<Option<Session>> {
+        Ok(self
+            .conn()
+            .query_row(&format!("SELECT {SESSION_COLS} FROM sessions s WHERE s.id = ?1"), [id], map_session)
+            .optional()?)
+    }
+
+    pub fn list_sessions(&self, limit: usize) -> DbResult<Vec<Session>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare(&format!("SELECT {SESSION_COLS} FROM sessions s ORDER BY s.created_at DESC LIMIT {limit}"))?;
+        let rows = stmt.query_map([], map_session)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    pub fn set_session_status(&self, id: &str, status: &str) -> DbResult<()> {
+        self.conn().execute("UPDATE sessions SET status = ?2 WHERE id = ?1", params![id, status])?;
+        Ok(())
+    }
+
+    pub fn set_session_style(&self, id: &str, style_id: Option<&str>) -> DbResult<()> {
+        self.conn().execute("UPDATE sessions SET active_style_profile_id = ?2 WHERE id = ?1", params![id, style_id])?;
+        Ok(())
+    }
+
+    pub fn set_session_capture_range(&self, id: &str, start: Option<&str>, end: Option<&str>) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE sessions SET captured_start = ?2, captured_end = ?3 WHERE id = ?1",
+            params![id, start, end],
+        )?;
+        Ok(())
+    }
+
+    pub fn add_session_asset(&self, session_id: &str, asset_id: &str, sequence_index: i64) -> DbResult<()> {
+        self.conn().execute(
+            "INSERT INTO session_assets(session_id, asset_id, sequence_index) VALUES (?1, ?2, ?3)
+             ON CONFLICT(session_id, asset_id) DO UPDATE SET sequence_index = excluded.sequence_index",
+            params![session_id, asset_id, sequence_index],
+        )?;
+        Ok(())
+    }
+
+    pub fn session_assets(&self, session_id: &str) -> DbResult<Vec<SessionAsset>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, asset_id, sequence_index, cluster_id, burst_id FROM session_assets WHERE session_id = ?1 ORDER BY sequence_index",
+        )?;
+        let rows = stmt.query_map([session_id], |r| {
+            Ok(SessionAsset {
+                session_id: r.get(0)?,
+                asset_id: r.get(1)?,
+                sequence_index: r.get(2)?,
+                cluster_id: r.get(3)?,
+                burst_id: r.get(4)?,
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    pub fn assign_cluster(
+        &self,
+        session_id: &str,
+        asset_id: &str,
+        cluster_id: Option<&str>,
+        burst_id: Option<&str>,
+    ) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE session_assets SET cluster_id = ?3, burst_id = ?4 WHERE session_id = ?1 AND asset_id = ?2",
+            params![session_id, asset_id, cluster_id, burst_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn replace_scene_clusters(
+        &self,
+        session_id: &str,
+        clusters: &[(String, String, Value)],
+    ) -> DbResult<Vec<SceneCluster>> {
+        self.transaction(|tx| {
+            tx.execute("DELETE FROM scene_clusters WHERE session_id = ?1", [session_id])?;
+            for (id, label, summary) in clusters {
+                tx.execute(
+                    "INSERT INTO scene_clusters(id, session_id, label, feature_summary_json, created_at) VALUES (?1,?2,?3,?4,?5)",
+                    params![id, session_id, label, summary.to_string(), now_rfc3339()],
+                )?;
+            }
+            Ok(())
+        })?;
+        self.scene_clusters(session_id)
+    }
+
+    pub fn scene_clusters(&self, session_id: &str) -> DbResult<Vec<SceneCluster>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.session_id, c.label, c.centroid_artifact_id, c.feature_summary_json, c.created_at,
+                    (SELECT COUNT(*) FROM session_assets sa WHERE sa.cluster_id = c.id)
+             FROM scene_clusters c WHERE c.session_id = ?1 ORDER BY c.label",
+        )?;
+        let rows = stmt.query_map([session_id], |r| {
+            Ok(SceneCluster {
+                id: r.get(0)?,
+                session_id: r.get(1)?,
+                label: r.get(2)?,
+                centroid_artifact_id: r.get(3)?,
+                feature_summary: json_col_or_default(r.get(4)?),
+                created_at: r.get(5)?,
+                asset_count: r.get(6)?,
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    pub fn rename_scene_cluster(&self, cluster_id: &str, label: &str) -> DbResult<()> {
+        self.conn().execute("UPDATE scene_clusters SET label = ?2 WHERE id = ?1", params![cluster_id, label])?;
+        Ok(())
+    }
+
+    // ----- predictions --------------------------------------------------
+
+    /// Insert a prediction and mark any earlier pending prediction for the same
+    /// (session, asset) as superseded.
+    pub fn insert_prediction(&self, p: &NewPrediction) -> DbResult<Prediction> {
+        let id = new_id();
+        self.transaction(|tx| {
+            tx.execute(
+                "UPDATE predictions SET status = 'superseded' WHERE session_id = ?1 AND asset_id = ?2 AND status IN ('pending','reviewed')",
+                params![p.session_id, p.asset_id],
+            )?;
+            tx.execute(
+                &format!("INSERT INTO predictions({PRED_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'pending')"),
+                params![
+                    id, p.session_id, p.asset_id, p.model_version_id, p.predicted_settings.to_string(), p.raw_model_output.to_string(),
+                    p.confidence, p.confidence_components.to_string(), p.nearest_examples.to_string(), now_rfc3339()
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.get_prediction(&id)?.ok_or(DbError::NotFound(id))
+    }
+
+    pub fn get_prediction(&self, id: &str) -> DbResult<Option<Prediction>> {
+        Ok(self
+            .conn()
+            .query_row(&format!("SELECT {PRED_COLS} FROM predictions WHERE id = ?1"), [id], map_pred)
+            .optional()?)
+    }
+
+    pub fn session_predictions(&self, session_id: &str, include_superseded: bool) -> DbResult<Vec<Prediction>> {
+        let conn = self.conn();
+        let filter = if include_superseded { "" } else { "AND status != 'superseded'" };
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {PRED_COLS} FROM predictions WHERE session_id = ?1 {filter} ORDER BY created_at"
+        ))?;
+        let rows = stmt.query_map([session_id], map_pred)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    pub fn set_prediction_status(&self, id: &str, status: &str) -> DbResult<()> {
+        if !matches!(status, "pending" | "reviewed" | "applied" | "rejected" | "superseded") {
+            return Err(DbError::Invalid(format!("bad prediction status {status}")));
+        }
+        let n = self.conn().execute("UPDATE predictions SET status = ?2 WHERE id = ?1", params![id, status])?;
+        if n == 0 {
+            return Err(DbError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    // ----- apply batches -----------------------------------------------
+
+    pub fn create_apply_batch(&self, session_id: &str, catalog_fingerprint: Option<&str>) -> DbResult<ApplyBatch> {
+        let id = new_id();
+        self.conn().execute(
+            "INSERT INTO apply_batches(id, session_id, lightroom_catalog_fingerprint, started_at, status) VALUES (?1,?2,?3,?4,'running')",
+            params![id, session_id, catalog_fingerprint, now_rfc3339()],
+        )?;
+        self.get_apply_batch(&id)?.ok_or(DbError::NotFound(id))
+    }
+
+    pub fn get_apply_batch(&self, id: &str) -> DbResult<Option<ApplyBatch>> {
+        Ok(self
+            .conn()
+            .query_row(&format!("SELECT {BATCH_COLS} FROM apply_batches WHERE id = ?1"), [id], map_batch)
+            .optional()?)
+    }
+
+    pub fn session_apply_batches(&self, session_id: &str) -> DbResult<Vec<ApplyBatch>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {BATCH_COLS} FROM apply_batches WHERE session_id = ?1 ORDER BY started_at DESC"
+        ))?;
+        let rows = stmt.query_map([session_id], map_batch)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Record one item result. Idempotent per (batch, prediction): a retry never
+    /// double-counts. Counters are recomputed from rows.
+    pub fn record_applied_edit(&self, e: &NewAppliedEdit) -> DbResult<AppliedEdit> {
+        let id = new_id();
+        self.transaction(|tx| {
+            tx.execute(
+                &format!(
+                    "INSERT INTO applied_edits({AE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+                     ON CONFLICT(apply_batch_id, prediction_id) DO UPDATE SET before_settings_json = excluded.before_settings_json,
+                       applied_settings_json = excluded.applied_settings_json, lightroom_snapshot_name = excluded.lightroom_snapshot_name,
+                       result = excluded.result, error_json = excluded.error_json, applied_at = excluded.applied_at"
+                ),
+                params![
+                    id, e.apply_batch_id, e.prediction_id, e.asset_id, e.before_settings.as_ref().map(|v| v.to_string()),
+                    e.applied_settings.to_string(), e.lightroom_snapshot_name, e.result, e.error.as_ref().map(|v| v.to_string()), now_rfc3339()
+                ],
+            )?;
+            tx.execute(
+                "UPDATE apply_batches SET
+                   applied_count = (SELECT COUNT(*) FROM applied_edits WHERE apply_batch_id = ?1 AND result = 'applied'),
+                   failed_count = (SELECT COUNT(*) FROM applied_edits WHERE apply_batch_id = ?1 AND result IN ('failed','verify_failed')),
+                   rollback_available = (SELECT COUNT(*) > 0 FROM applied_edits WHERE apply_batch_id = ?1 AND before_settings_json IS NOT NULL)
+                 WHERE id = ?1",
+                [&e.apply_batch_id],
+            )?;
+            if e.result == "applied" {
+                tx.execute("UPDATE predictions SET status = 'applied' WHERE id = ?1", [&e.prediction_id])?;
+            }
+            Ok(())
+        })?;
+        let conn = self.conn();
+        Ok(conn.query_row(
+            &format!("SELECT {AE_COLS} FROM applied_edits WHERE apply_batch_id = ?1 AND prediction_id = ?2"),
+            params![e.apply_batch_id, e.prediction_id],
+            map_ae,
+        )?)
+    }
+
+    pub fn applied_edits(&self, batch_id: &str) -> DbResult<Vec<AppliedEdit>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(&format!("SELECT {AE_COLS} FROM applied_edits WHERE apply_batch_id = ?1 ORDER BY applied_at"))?;
+        let rows = stmt.query_map([batch_id], map_ae)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Close a batch. Status is derived from rows: `completed` only when nothing failed.
+    pub fn complete_apply_batch(&self, id: &str, canceled: bool, error: Option<&Value>) -> DbResult<ApplyBatch> {
+        let batch = self.get_apply_batch(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))?;
+        let status = if canceled {
+            "canceled"
+        } else if error.is_some() {
+            "failed"
+        } else if batch.failed_count > 0 {
+            "completed_with_failures"
+        } else {
+            "completed"
+        };
+        self.conn().execute(
+            "UPDATE apply_batches SET status = ?2, completed_at = ?3, error_json = ?4 WHERE id = ?1",
+            params![id, status, now_rfc3339(), error.map(|v| v.to_string())],
+        )?;
+        self.get_apply_batch(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))
+    }
+
+    // ----- corrections --------------------------------------------------
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_correction(
+        &self,
+        asset_id: &str,
+        prediction_id: &str,
+        model_version_id: &str,
+        predicted: &Value,
+        corrected: &Value,
+        delta: &Value,
+        magnitude: f64,
+    ) -> DbResult<Correction> {
+        let id = new_id();
+        self.conn().execute(
+            "INSERT INTO corrections(id, asset_id, prediction_id, model_version_id, predicted_settings_json, corrected_settings_json,
+               delta_json, correction_magnitude, observed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![id, asset_id, prediction_id, model_version_id, predicted.to_string(), corrected.to_string(), delta.to_string(), magnitude, now_rfc3339()],
+        )?;
+        let conn = self.conn();
+        Ok(conn.query_row(
+            "SELECT id, asset_id, prediction_id, model_version_id, predicted_settings_json, corrected_settings_json, delta_json,
+                    correction_magnitude, observed_at, included_in_training_version FROM corrections WHERE id = ?1",
+            [&id],
+            |r| {
+                Ok(Correction {
+                    id: r.get(0)?,
+                    asset_id: r.get(1)?,
+                    prediction_id: r.get(2)?,
+                    model_version_id: r.get(3)?,
+                    predicted_settings: json_col_or_default(r.get(4)?),
+                    corrected_settings: json_col_or_default(r.get(5)?),
+                    delta: json_col_or_default(r.get(6)?),
+                    correction_magnitude: r.get(7)?,
+                    observed_at: r.get(8)?,
+                    included_in_training_version: r.get(9)?,
+                })
+            },
+        )?)
+    }
+
+    pub fn corrections_for_model(&self, model_version_id: &str) -> DbResult<Vec<Correction>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, asset_id, prediction_id, model_version_id, predicted_settings_json, corrected_settings_json, delta_json,
+                    correction_magnitude, observed_at, included_in_training_version FROM corrections WHERE model_version_id = ?1 ORDER BY observed_at",
+        )?;
+        let rows = stmt.query_map([model_version_id], |r| {
+            Ok(Correction {
+                id: r.get(0)?,
+                asset_id: r.get(1)?,
+                prediction_id: r.get(2)?,
+                model_version_id: r.get(3)?,
+                predicted_settings: json_col_or_default(r.get(4)?),
+                corrected_settings: json_col_or_default(r.get(5)?),
+                delta: json_col_or_default(r.get(6)?),
+                correction_magnitude: r.get(7)?,
+                observed_at: r.get(8)?,
+                included_in_training_version: r.get(9)?,
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::repo_styles::NewModelVersion;
+    use crate::db::NewAsset;
+    use serde_json::json;
+
+    fn seed(db: &Db) -> (Session, String, String) {
+        let style = db.create_style_profile("S", None).unwrap();
+        let mv = db
+            .create_model_version(&NewModelVersion {
+                style_profile_id: style.id.clone(),
+                semantic_version: "1.0.0".into(),
+                model_type: "hybrid".into(),
+                feature_schema_version: "features_v1".into(),
+                edit_schema_version: "1.0".into(),
+                training_set_id: None,
+                training_config: json!({}),
+                metrics: json!({}),
+                artifact_manifest: json!({}),
+                status: "training".into(),
+            })
+            .unwrap();
+        let (asset, _) = db
+            .upsert_asset(&NewAsset {
+                source_path: "/p/a.cr3".into(),
+                file_name: "a.cr3".into(),
+                extension: "cr3".into(),
+                fast_hash: "h".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let session = db.create_session("Wedding", Some("/p"), None, Some(&style.id)).unwrap();
+        db.add_session_asset(&session.id, &asset.id, 0).unwrap();
+        (session, asset.id, mv.id)
+    }
+
+    #[test]
+    fn prediction_supersede_and_apply_batch_accounting() {
+        let db = Db::open_in_memory().unwrap();
+        let (session, asset_id, mv_id) = seed(&db);
+        let p1 = db
+            .insert_prediction(&NewPrediction {
+                session_id: session.id.clone(),
+                asset_id: asset_id.clone(),
+                model_version_id: mv_id.clone(),
+                predicted_settings: json!({"tone": {"exposure": {"raw": 0.3}}}),
+                raw_model_output: json!({}),
+                confidence: 0.9,
+                confidence_components: json!({"knnDistance": 0.1}),
+                nearest_examples: json!([]),
+            })
+            .unwrap();
+        let p2 = db
+            .insert_prediction(&NewPrediction {
+                session_id: session.id.clone(),
+                asset_id: asset_id.clone(),
+                model_version_id: mv_id.clone(),
+                predicted_settings: json!({}),
+                raw_model_output: json!({}),
+                confidence: 0.5,
+                confidence_components: json!({}),
+                nearest_examples: json!([]),
+            })
+            .unwrap();
+        assert_eq!(db.get_prediction(&p1.id).unwrap().unwrap().status, "superseded");
+        assert_eq!(db.session_predictions(&session.id, false).unwrap().len(), 1);
+        assert_eq!(db.session_predictions(&session.id, true).unwrap().len(), 2);
+
+        let batch = db.create_apply_batch(&session.id, Some("cat")).unwrap();
+        db.record_applied_edit(&NewAppliedEdit {
+            apply_batch_id: batch.id.clone(),
+            prediction_id: p2.id.clone(),
+            asset_id: asset_id.clone(),
+            before_settings: Some(json!({"Exposure2012": 0})),
+            applied_settings: json!({"Exposure2012": 0.3}),
+            lightroom_snapshot_name: Some("Mimic Before — t".into()),
+            result: "verify_failed".into(),
+            error: Some(json!({"code": "readback_mismatch"})),
+        })
+        .unwrap();
+        // Retry same item: must not double count.
+        db.record_applied_edit(&NewAppliedEdit {
+            apply_batch_id: batch.id.clone(),
+            prediction_id: p2.id.clone(),
+            asset_id: asset_id.clone(),
+            before_settings: Some(json!({"Exposure2012": 0})),
+            applied_settings: json!({"Exposure2012": 0.3}),
+            lightroom_snapshot_name: Some("Mimic Before — t".into()),
+            result: "applied".into(),
+            error: None,
+        })
+        .unwrap();
+        let b = db.get_apply_batch(&batch.id).unwrap().unwrap();
+        assert_eq!((b.applied_count, b.failed_count), (1, 0));
+        assert!(b.rollback_available);
+        assert_eq!(db.get_prediction(&p2.id).unwrap().unwrap().status, "applied");
+        let done = db.complete_apply_batch(&batch.id, false, None).unwrap();
+        assert_eq!(done.status, "completed");
+        assert_eq!(db.applied_edits(&batch.id).unwrap().len(), 1);
+
+        let c = db
+            .insert_correction(
+                &asset_id,
+                &p2.id,
+                &mv_id,
+                &json!({"e": 0.3}),
+                &json!({"e": 0.5}),
+                &json!({"e": 0.2}),
+                0.2,
+            )
+            .unwrap();
+        assert_eq!(c.correction_magnitude, 0.2);
+        assert_eq!(db.corrections_for_model(&mv_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn batch_with_failure_is_never_completed_clean() {
+        let db = Db::open_in_memory().unwrap();
+        let (session, asset_id, mv_id) = seed(&db);
+        let p = db
+            .insert_prediction(&NewPrediction {
+                session_id: session.id.clone(),
+                asset_id: asset_id.clone(),
+                model_version_id: mv_id,
+                predicted_settings: json!({}),
+                raw_model_output: json!({}),
+                confidence: 0.9,
+                confidence_components: json!({}),
+                nearest_examples: json!([]),
+            })
+            .unwrap();
+        let batch = db.create_apply_batch(&session.id, None).unwrap();
+        db.record_applied_edit(&NewAppliedEdit {
+            apply_batch_id: batch.id.clone(),
+            prediction_id: p.id.clone(),
+            asset_id,
+            before_settings: None,
+            applied_settings: json!({}),
+            lightroom_snapshot_name: None,
+            result: "failed".into(),
+            error: Some(json!({"code": "sdk_error"})),
+        })
+        .unwrap();
+        let done = db.complete_apply_batch(&batch.id, false, None).unwrap();
+        assert_eq!(done.status, "completed_with_failures");
+        assert!(!done.rollback_available);
+        let clusters = db.replace_scene_clusters(&session.id, &[("c1".into(), "Group 1".into(), json!({}))]).unwrap();
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(db.list_sessions(10).unwrap()[0].asset_count, 1);
+    }
+}

@@ -1,0 +1,51 @@
+# JS
+node_modules/
+dist/
+dist-ssr/
+*.local
+.pnpm-store/
+coverage/
+playwright-report/
+test-results/
+
+# Rust
+target/
+apps/desktop/src-tauri/gen/schemas/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+engine/dist/
+engine/build/
+engine/*.spec
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Tauri / release
+apps/desktop/src-tauri/resources/engine/*
+!apps/desktop/src-tauri/resources/engine/README.txt
+apps/desktop/src-tauri/target/
+*.sig
+!fixtures/**/*.sig
+release-artifacts/
+
+# Secrets — never commit
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+tauri-updater.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+
+# Delivery bundles from the build session (not part of the repo)
+.mimic-delivery/

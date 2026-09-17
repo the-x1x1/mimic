@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0",
+  "mappingVersion": "edit_mapping_v1",
+  "global": {
+    "crop": {
+      "hasCrop": {
+        "raw": false,
+        "value": 0.0,
+        "sourceKey": "HasCrop"
+      }
+    },
+    "detail": {
+      "sharpness": {
+        "raw": 25,
+        "value": 0.16666666666666666,
+        "sourceKey": "Sharpness"
+      }
+    },
+    "presence": {
+      "clarity": {
+        "raw": 20,
+        "value": 0.6,
+        "sourceKey": "Clarity"
+      },
+      "saturation": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "Saturation"
+      },
+      "vibrance": {
+        "raw": 10,
+        "value": 0.55,
+        "sourceKey": "Vibrance"
+      }
+    },
+    "tone": {
+      "blacks": {
+        "raw": 8,
+        "value": 0.54,
+        "sourceKey": "Shadows"
+      },
+      "contrast": {
+        "raw": 25,
+        "value": 0.625,
+        "sourceKey": "Contrast"
+      },
+      "exposure": {
+        "raw": 0.75,
+        "value": 0.575,
+        "sourceKey": "Exposure"
+      },
+      "highlights": {
+        "raw": 30,
+        "value": 0.65,
+        "sourceKey": "HighlightRecovery"
+      },
+      "shadows": {
+        "raw": 15,
+        "value": 0.575,
+        "sourceKey": "FillLight"
+      }
+    },
+    "toneCurve": {
+      "name": {
+        "raw": "Medium Contrast",
+        "sourceKey": "ToneCurveName"
+      },
+      "point.rgb": {
+        "raw": [
+          [0.0, 0.0],
+          [32.0, 22.0],
+          [64.0, 56.0],
+          [128.0, 128.0],
+          [192.0, 196.0],
+          [255.0, 255.0]
+        ],
+        "sourceKey": "ToneCurve"
+      }
+    },
+    "whiteBalance": {
+      "mode": {
+        "raw": "Daylight",
+        "sourceKey": "WhiteBalance"
+      },
+      "temperature": {
+        "raw": 5500,
+        "value": 0.31427149312909586,
+        "sourceKey": "Temperature"
+      },
+      "tint": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "Tint"
+      }
+    }
+  },
+  "local": {
+    "status": "unsupported",
+    "observedKeys": [],
+    "operations": []
+  },
+  "lightroom": {
+    "processVersion": "5.7",
+    "crsVersion": "6.7",
+    "hasSettings": true,
+    "heavyEditKeys": []
+  },
+  "unknown": {
+    "Brightness": "+50"
+  },
+  "warnings": [],
+  "rawSettingsHash": "8b5a57f0302f2be37d1ac74310dfeb27f59bd9e5f7e76e934dac3795e55bb212"
+}
