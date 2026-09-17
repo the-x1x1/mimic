@@ -2,17 +2,6 @@
 
 Completed work lives in CHANGELOG.md and PROJECT_STATUS.md, never here.
 
-## 0.2.0 — First Style Brain
-
-- Training-set builder over ingested EditDNA pairs with training filters (missing source, no meaningful edits, parse failure, unsupported process version).
-- Session-grouped train/validation/holdout split (never random across a shoot).
-- Baselines: global median, camera/lens-conditioned median, KNN in feature/embedding space, per-family regressors; hybrid KNN + residual predictor.
-- Immutable model versions with training config, seed, dependency versions, artifact manifest (SHA-256), holdout metrics (MAE/RMSE/nMAE/percentiles per control and family), baseline comparison.
-- Confidence components: neighbour distance, local density, ensemble disagreement, family validation error, coverage, OOD score.
-- Styles UI: Train New Version, Versions tab with activate/compare/archive, real holdout metrics on Home.
-- Onboarding train step with item-based progress.
-- Preview-cache size enforcement.
-
 ## 0.3.0 — New session prediction + Lightroom apply
 
 - Sessions: folder or Lightroom selection, scene grouping (time gaps → embedding clusters → colour refinement), session grid with filters.
@@ -20,6 +9,7 @@ Completed work lives in CHANGELOG.md and PROJECT_STATUS.md, never here.
 - Review: attention-only default, filmstrip/preview/panel, Apply/Reject/Use as Reference, filters (<80 %, OOD, failures, corrected).
 - Apply batches: pre-apply checks (same catalog, capability schema unchanged, prediction fresh), snapshot, plugin-preset apply, read-back, VERIFY_FAILED handling, rollback path via snapshot + `before_settings_json`.
 - Real-Lightroom QA of the plugin apply path and the capability matrix on current Lightroom Classic.
+- Preview-cache size enforcement (setting exists since 0.1).
 
 ## 0.4.0 — Continuous learning
 

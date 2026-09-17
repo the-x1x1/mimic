@@ -46,10 +46,12 @@ export const JOB_KINDS = {
   scanLibrary: "scan_library",
   ingestLightroom: "ingest_lightroom",
   analyzeLibrary: "analyze_library",
+  trainStyle: "train_style",
 } as const;
 
 export const JOB_LABELS: Record<string, string> = {
   scan_library: "Scanning folder library",
   ingest_lightroom: "Capturing from Lightroom",
   analyze_library: "Analyzing photos",
+  train_style: "Training Style Brain",
 };

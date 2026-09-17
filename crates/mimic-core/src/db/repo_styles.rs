@@ -198,6 +198,21 @@ impl Db {
         self.get_model_version(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))
     }
 
+    pub fn set_model_version_training_set(&self, id: &str, training_set_id: &str) -> DbResult<()> {
+        self.conn()
+            .execute("UPDATE model_versions SET training_set_id = ?2 WHERE id = ?1", params![id, training_set_id])?;
+        Ok(())
+    }
+
+    /// Record the configuration the trainer actually used (allowed only while training).
+    pub fn set_model_version_training_config(&self, id: &str, config: &Value, model_type: &str) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE model_versions SET training_config_json = ?2, model_type = ?3 WHERE id = ?1 AND status = 'training'",
+            params![id, config.to_string(), model_type],
+        )?;
+        Ok(())
+    }
+
     pub fn archive_model_version(&self, id: &str) -> DbResult<()> {
         let mv = self.get_model_version(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))?;
         if mv.is_active {

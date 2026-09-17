@@ -10,7 +10,7 @@ from typing import Any
 
 from mimic_engine import PROTOCOL_VERSION, __version__
 
-from .errors import EngineError, InvalidParamsError, NotFoundError
+from .errors import EngineError, InvalidParamsError, NotConfiguredError, NotFoundError
 from .server import Progress, Server
 
 
@@ -194,6 +194,114 @@ class EngineService:
             progress("analyzing", i + 1, total)
         return {"results": results, "featureVersion": "features_v1", "encoder": self.encoder().status()}
 
+    # ----- training / inference (0.2.0) ---------------------------------
+
+    def _require_db(self) -> str:
+        if not self.db_path:
+            raise NotConfiguredError("engine.configure with dbPath is required before training")
+        return self.db_path
+
+    def training_train(self, params: dict[str, Any], progress: Progress) -> dict[str, Any]:
+        db = self._require_db()
+        library_ids = params.get("libraryIds")
+        style_id = params.get("styleId")
+        mv_id = params.get("modelVersionId")
+        if (
+            not isinstance(library_ids, list)
+            or not library_ids
+            or not isinstance(style_id, str)
+            or not isinstance(mv_id, str)
+        ):
+            raise InvalidParamsError("libraryIds (non-empty list), styleId and modelVersionId are required")
+        styles_dir = params.get("stylesDir") or (str(self.styles_dir) if self.styles_dir else None)
+        if not styles_dir:
+            raise NotConfiguredError("stylesDir is not configured")
+        from mimic_engine.training.trainer import InsufficientDataError, train
+
+        try:
+            return train(
+                db,
+                [str(x) for x in library_ids],
+                style_id,
+                mv_id,
+                styles_dir,
+                self.embeddings_dir,
+                params.get("config") or {},
+                progress,
+            )
+        except InsufficientDataError as e:
+            raise EngineError(str(e), code="insufficient_data", details=e.details) from e
+
+    def model_predict(self, params: dict[str, Any], progress: Progress) -> dict[str, Any]:
+        db = self._require_db()
+        model_path = params.get("modelPath")
+        asset_ids = params.get("assetIds")
+        if not isinstance(model_path, str) or not isinstance(asset_ids, list):
+            raise InvalidParamsError("modelPath and assetIds are required")
+        if not Path(model_path).is_file():
+            raise NotFoundError(f"model artifact missing: {model_path}")
+        import json
+
+        import numpy as np
+
+        from mimic_engine.features.stats import FEATURE_VERSION
+        from mimic_engine.inference.predictor import Predictor
+        from mimic_engine.training.dataset import open_readonly
+
+        predictor = Predictor(model_path)
+        results = []
+        with open_readonly(db) as conn:
+            for i, asset_id in enumerate(asset_ids):
+                row = conn.execute(
+                    """SELECT a.id, a.camera_make, a.camera_model, a.lens, a.iso, a.aperture, a.shutter_speed, a.focal_length,
+                              f.histogram_json, f.luminance_json, f.color_json, f.clipping_json, f.sharpness, f.noise_estimate, f.embedding_artifact_id
+                       FROM assets a LEFT JOIN visual_features f ON f.asset_id = a.id AND f.feature_version = ?
+                       WHERE a.id = ?""",
+                    (FEATURE_VERSION, asset_id),
+                ).fetchone()
+                if row is None:
+                    results.append({"assetId": asset_id, "error": {"code": "not_found", "message": "asset not found"}})
+                    continue
+                if row["histogram_json"] is None:
+                    results.append(
+                        {
+                            "assetId": asset_id,
+                            "error": {
+                                "code": "no_features",
+                                "message": "asset has no visual features; analyze it first",
+                            },
+                        }
+                    )
+                    continue
+                stats = {
+                    "histogram": json.loads(row["histogram_json"]),
+                    "luminance": json.loads(row["luminance_json"]),
+                    "color": json.loads(row["color_json"]),
+                    "clipping": json.loads(row["clipping_json"]),
+                    "sharpness": row["sharpness"] or 0.0,
+                    "noiseEstimate": row["noise_estimate"] or 0.0,
+                }
+                metadata = {
+                    "iso": row["iso"],
+                    "aperture": row["aperture"],
+                    "shutterSpeed": row["shutter_speed"],
+                    "focalLength": row["focal_length"],
+                }
+                embedding = None
+                if predictor.hybrid.use_embedding and self.embeddings_dir and row["embedding_artifact_id"]:
+                    ep = self.embeddings_dir / row["embedding_artifact_id"]
+                    if ep.is_file():
+                        embedding = np.load(ep, allow_pickle=False)
+                camera = f"{row['camera_make'] or ''} {row['camera_model'] or ''}".strip() or "unknown"
+                try:
+                    out = predictor.predict_one(stats, metadata, embedding, camera, row["lens"] or "unknown")
+                    out["assetId"] = asset_id
+                    results.append(out)
+                except ValueError as e:
+                    results.append({"assetId": asset_id, "error": {"code": "predict_failed", "message": str(e)}})
+                progress("predicting", i + 1, len(asset_ids))
+        return {"results": results, "modelPath": model_path, "controlNames": predictor.control_names}
+
     # ----- registration --------------------------------------------------
 
     def register(self, server: Server) -> None:
@@ -206,6 +314,8 @@ class EngineService:
         server.register("image.metadata", self.image_metadata)
         server.register("image.analyze", self.image_analyze)
         server.register("image.analyze_batch", self.image_analyze_batch)
+        server.register("training.train", self.training_train)
+        server.register("model.predict", self.model_predict)
 
 
 def build_server() -> Server:

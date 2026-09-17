@@ -129,7 +129,7 @@ function GeneralSection() {
       <Card title="Appearance">
         <Field
           label="Theme"
-          hint="Dark is the reviewed default; light uses the same tokens but has not been visually polished in 0.1."
+          hint="Dark is the reviewed default; light uses the same tokens but has not been visually polished yet."
         >
           <select
             className="input input--narrow"
@@ -277,9 +277,9 @@ function PerformanceSection() {
       </Card>
       <Card title="Visual encoder">
         <p className="muted small">
-          Mimic 0.1 uses the built-in statistical embedding (stats_v1). A downloadable ONNX encoder
-          is manifest-driven and SHA-256 verified; no manifest ships in this build, so nothing is
-          downloaded.
+          Mimic currently uses the built-in statistical embedding (stats_v1). A downloadable ONNX
+          encoder is manifest-driven and SHA-256 verified; no manifest ships in this build, so
+          nothing is downloaded.
         </p>
       </Card>
     </div>

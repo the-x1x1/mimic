@@ -6,7 +6,7 @@ import { useSystemStatus } from "@/hooks/useSystem";
 import { useStyles } from "@/hooks/useStyles";
 import { useLibraries } from "@/hooks/useLibraries";
 import { formatRelative } from "@/lib/format";
-import { JOB_LABELS } from "@mimic/contracts";
+import { JOB_LABELS, primaryError } from "@mimic/contracts";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -90,7 +90,20 @@ export function HomePage() {
                   label="Historical examples"
                   value={style.trainingExamples.toLocaleString()}
                 />
-                <Metric label="No-Touch Rate" value="—" hint="needs applied sessions" />
+                <Metric
+                  label="Holdout error"
+                  value={
+                    style.activeVersion
+                      ? (primaryError(style.activeVersion.metrics)?.toFixed(3) ?? "—")
+                      : "—"
+                  }
+                  hint={
+                    style.activeVersion
+                      ? "nMAE on unseen shoots (lower is better)"
+                      : "train a version to see quality"
+                  }
+                />
+                <Metric label="No-Touch Rate" value="—" hint="needs applied sessions (0.3.0+)" />
               </div>
             ) : (
               <p className="muted">Loading…</p>

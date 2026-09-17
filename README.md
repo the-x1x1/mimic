@@ -6,7 +6,7 @@ Mimic is a local-first Windows desktop app from the Formicaria family. It learns
 
 The product promise is not “apply an AI preset”. It is _“learn how I edit and do the repetitive part the way I would.”_
 
-## Current status — `0.1.0-alpha.1` (foundation + real ingest)
+## Current status — `0.2.0-alpha.1` (first Style Brain)
 
 | Area                                                                                                                                                                             | Status                                                                                                  |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -37,7 +37,8 @@ Releases are published on [GitHub Releases](https://github.com/the-x1x1/mimic/re
 1. Install Mimic and launch it. The onboarding asks how you want to teach it.
 2. **Connect Lightroom Classic**: Mimic prepares `Mimic.lrplugin` under `%LOCALAPPDATA%\Formicaria\Mimic\plugin\`; add that folder in Lightroom › File › Plug-in Manager. “Connected” appears only after a real handshake.
 3. **Or train from folders + sidecars**: pick a folder of edited RAW files. Nothing is written to the folder.
-4. Read the **data quality report**: valid edit pairs, missing edits, ACR-only edits, camera mix, and whether the dataset is sufficient (minimum 30 pairs to train once training ships).
+4. Read the **data quality report**: valid edit pairs, missing edits, ACR-only edits, camera mix, and whether the dataset is sufficient (minimum 30 pairs).
+5. **Train**: a new immutable version is trained on shoots split so validation never sees a training shoot; you get real holdout numbers, and older versions stay available for rollback.
 
 ## Development
 
@@ -60,9 +61,10 @@ Everything stays on this computer. Image analysis, metadata, training data, mode
 
 A Tauri 2 shell (Rust) owns the SQLite database, a persistent job queue, a loopback-only HTTP bridge that the Lightroom plugin polls, and a Python engine child process spoken to over newline-delimited JSON. The engine does deterministic image work: scanning, XMP parsing, RAW previews, statistics, embeddings and (from 0.2.0) training and prediction. A single JSON contract, `packages/contracts/edit_mapping_v1.json`, defines the canonical EditDNA representation shared by Rust, Python and TypeScript, and golden fixtures pin its behaviour in all three. Lightroom stays the source of truth: Mimic never opens the `.lrcat`, never overwrites a RAW, and never mutates XMP.
 
-## Known limitations (0.1.0-alpha.1)
+## Known limitations (0.2.0-alpha.1)
 
-- No training, prediction or apply yet — this build proves ingest end to end.
+- No sessions, review or apply yet — prediction exists in the engine but has no UI until 0.3.0.
+- The model is a KNN + ridge hybrid on statistical features; it is measured against baselines, not against a photographer's acceptance yet.
 - The Lightroom plugin has not been exercised against a real Lightroom Classic installation by CI; the protocol is verified with a fake plugin. Field reports welcome via the _Lightroom compatibility_ issue template.
 - Masks, local adjustments, AI Denoise and other ACR-sidecar “heavy edits” are detected and preserved but never learned or written.
 - The visual embedding is a statistical fallback (`stats_v1`); ONNX encoders are manifest-driven and SHA-256 verified but no manifest ships yet.

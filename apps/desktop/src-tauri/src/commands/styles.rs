@@ -93,9 +93,94 @@ pub async fn get_style_detail(state: State<'_, SharedState>, style_id: String) -
         "style": summary,
         "libraries": reports,
         "versions": versions,
-        "training": {
-            "available": false,
-            "reason": "Training ships in Mimic 0.2.0. Ingest and data-quality reporting are complete; the trainer is not part of this build."
-        }
+        "training": training_availability(&state, &style, &reports),
     }))
+}
+
+fn training_availability(
+    state: &SharedState,
+    style: &mimic_core::db::StyleProfile,
+    reports: &[mimic_core::ingest::DataQualityReport],
+) -> Value {
+    let pairs: i64 = reports.iter().map(|r| r.valid_pairs).sum();
+    let active_training = state
+        .db
+        .list_jobs(20, true)
+        .map(|jobs| {
+            jobs.into_iter()
+                .any(|j| j.kind == mimic_core::training::JOB_TRAIN_STYLE && j.payload["styleId"] == style.id)
+        })
+        .unwrap_or(false);
+    let (available, reason) = if style.library_ids.is_empty() {
+        (false, "Add training data first.".to_string())
+    } else if pairs < mimic_core::ingest::MIN_PAIRS_TO_TRAIN {
+        (
+            false,
+            format!(
+                "{pairs} edited examples ingested; at least {} are needed to train.",
+                mimic_core::ingest::MIN_PAIRS_TO_TRAIN
+            ),
+        )
+    } else if !state.engine.is_ready() {
+        (false, "The analysis engine is not running.".to_string())
+    } else if active_training {
+        (false, "A training run for this Style is already in progress.".to_string())
+    } else {
+        (true, format!("{pairs} edited examples ready. Training creates a new immutable version and never changes the current one."))
+    };
+    serde_json::json!({"available": available, "reason": reason, "pairs": pairs, "minPairs": mimic_core::ingest::MIN_PAIRS_TO_TRAIN, "inProgress": active_training})
+}
+
+#[tauri::command]
+pub async fn train_style(
+    state: State<'_, SharedState>,
+    style_id: String,
+    config: Option<Value>,
+) -> CommandResult<mimic_core::db::Job> {
+    let style =
+        state.db.get_style_profile(&style_id)?.ok_or_else(|| CommandError::new("not_found", "style not found"))?;
+    let mut reports = Vec::new();
+    for lib in &style.library_ids {
+        reports.push(mimic_core::ingest::data_quality_report(&state.db, lib)?);
+    }
+    let avail = training_availability(&state, &style, &reports);
+    if avail["available"] != true {
+        return Err(CommandError::new(
+            "training_unavailable",
+            avail["reason"].as_str().unwrap_or("training unavailable"),
+        ));
+    }
+    let payload = serde_json::json!({"styleId": style_id, "config": config.unwrap_or_else(|| serde_json::json!({}))});
+    Ok(state.jobs.enqueue(mimic_core::training::JOB_TRAIN_STYLE, payload)?)
+}
+
+#[tauri::command]
+pub async fn activate_model_version(
+    state: State<'_, SharedState>,
+    model_version_id: String,
+) -> CommandResult<mimic_core::db::ModelVersion> {
+    Ok(mimic_core::training::activate(&state.db, &model_version_id)?)
+}
+
+#[tauri::command]
+pub async fn archive_model_version(
+    state: State<'_, SharedState>,
+    model_version_id: String,
+) -> CommandResult<mimic_core::db::ModelVersion> {
+    state.db.archive_model_version(&model_version_id)?;
+    state
+        .db
+        .get_model_version(&model_version_id)?
+        .ok_or_else(|| CommandError::new("not_found", "model version not found"))
+}
+
+#[tauri::command]
+pub async fn get_model_version(
+    state: State<'_, SharedState>,
+    model_version_id: String,
+) -> CommandResult<mimic_core::db::ModelVersion> {
+    state
+        .db
+        .get_model_version(&model_version_id)?
+        .ok_or_else(|| CommandError::new("not_found", "model version not found"))
 }

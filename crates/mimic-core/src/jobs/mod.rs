@@ -103,6 +103,71 @@ impl JobContext {
 
 pub type JobFuture = Pin<Box<dyn Future<Output = Result<Value, JobError>> + Send>>;
 
+/// Dispatches to the first executor that declares the job kind.
+pub struct CompositeExecutor {
+    executors: Vec<Arc<dyn JobExecutor>>,
+    kinds: &'static [&'static str],
+}
+
+impl CompositeExecutor {
+    pub fn new(executors: Vec<Arc<dyn JobExecutor>>) -> Self {
+        let kinds: Vec<&'static str> = executors.iter().flat_map(|e| e.kinds().iter().copied()).collect();
+        Self { executors, kinds: Box::leak(kinds.into_boxed_slice()) }
+    }
+
+    fn find(&self, kind: &str) -> Option<&Arc<dyn JobExecutor>> {
+        self.executors.iter().find(|e| e.kinds().contains(&kind))
+    }
+}
+
+impl JobExecutor for CompositeExecutor {
+    fn kinds(&self) -> &'static [&'static str] {
+        self.kinds
+    }
+    fn resumable(&self, kind: &str) -> bool {
+        self.find(kind).map(|e| e.resumable(kind)).unwrap_or(false)
+    }
+    fn execute(&self, ctx: JobContext) -> JobFuture {
+        match self.find(&ctx.job.kind) {
+            Some(e) => e.execute(ctx),
+            None => {
+                let kind = ctx.job.kind.clone();
+                Box::pin(async move { Err(JobError::Failed(format!("no executor for job kind {kind}"))) })
+            }
+        }
+    }
+}
+
+/// Forward `job.progress` events emitted by the engine for this job into the
+/// job record until the returned guard is dropped.
+pub fn forward_engine_progress(engine: &crate::engine::EngineClient, ctx: &JobContext) -> ProgressForwarder {
+    let mut rx = engine.subscribe();
+    let ctx = ctx.clone();
+    let handle = tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(crate::engine::EngineEvent::JobProgress { job_id, phase, current, total, .. })
+                    if job_id == ctx.job.id =>
+                {
+                    ctx.progress(current, total, &phase);
+                }
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
+    });
+    ProgressForwarder(handle)
+}
+
+pub struct ProgressForwarder(tokio::task::JoinHandle<()>);
+
+impl Drop for ProgressForwarder {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Implemented by the ingest/training/apply modules. `kinds()` must list every
 /// job type the executor understands; unknown kinds fail fast.
 pub trait JobExecutor: Send + Sync {

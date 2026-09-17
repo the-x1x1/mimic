@@ -1,12 +1,22 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Badge, Button, Card, EmptyState, InlineError } from "@mimic/ui";
+import { Badge, Button, Card, EmptyState, InlineError, Metric } from "@mimic/ui";
 import { FolderPlus, Play, RefreshCw, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { DataQualityPanel } from "@/components/DataQualityPanel";
 import { PhotoGrid } from "@/components/PhotoGrid";
-import { useDeleteStyle, useStyleDetail } from "@/hooks/useStyles";
+import {
+  useActivateVersion,
+  useArchiveVersion,
+  useDeleteStyle,
+  useStyleDetail,
+  useTrainStyle,
+} from "@/hooks/useStyles";
+import { VersionList } from "@/components/VersionList";
+import { useJobs } from "@/hooks/useJobs";
+import { ProgressBar } from "@mimic/ui";
+import { primaryError } from "@mimic/contracts";
 import { useLibraries, useLibraryAssets, useStartScan } from "@/hooks/useLibraries";
 import { formatDate } from "@/lib/format";
 import { AddTrainingDataDialog } from "./AddTrainingDataDialog";
@@ -21,6 +31,14 @@ export function StyleDetailPage() {
   const [adding, setAdding] = useState(false);
   const [browseLib, setBrowseLib] = useState<string | null>(null);
   const assets = useLibraryAssets(browseLib);
+  const train = useTrainStyle();
+  const activate = useActivateVersion();
+  const archive = useArchiveVersion();
+  const jobs = useJobs(true);
+  const trainingJob = jobs.data?.find(
+    (j) =>
+      j.type === "train_style" && (j.payload as { styleId?: string } | null)?.styleId === styleId,
+  );
 
   if (detail.isError)
     return <InlineError title="Style not found">{(detail.error as Error).message}</InlineError>;
@@ -49,7 +67,14 @@ export function StyleDetailPage() {
             <Button icon={<FolderPlus />} onClick={() => setAdding(true)}>
               Add Training Data
             </Button>
-            <Button variant="primary" icon={<Play />} disabled title={training.reason}>
+            <Button
+              variant="primary"
+              icon={<Play />}
+              disabled={!training.available}
+              title={training.reason}
+              onClick={() => train.mutate({ styleId: style.id })}
+              loading={train.isPending}
+            >
               Train New Version
             </Button>
             <Button
@@ -114,9 +139,33 @@ export function StyleDetailPage() {
                   <DataQualityPanel report={r} />
                 </Card>
               ))}
-              <InlineError title="Training is not part of this build">
-                {training.reason}
-              </InlineError>
+              {trainingJob ? (
+                <Card title="Training in progress">
+                  <ProgressBar
+                    current={trainingJob.progressCurrent}
+                    total={trainingJob.progressTotal}
+                    label={trainingJob.phase ?? "starting"}
+                  />
+                </Card>
+              ) : null}
+              {!training.available && !trainingJob ? (
+                <InlineError title="Training not available yet">{training.reason}</InlineError>
+              ) : (
+                <p className="muted small">{training.reason}</p>
+              )}
+              {style.activeVersion ? (
+                <Card title={`Active version v${style.activeVersion.semanticVersion}`}>
+                  <div className="metric-grid">
+                    <Metric
+                      label="Holdout error (nMAE)"
+                      value={primaryError(style.activeVersion.metrics)?.toFixed(4) ?? "—"}
+                      hint="mean absolute error, 0..1 of each control's range"
+                    />
+                    <Metric label="Model" value={style.activeVersion.modelType} />
+                    <Metric label="Trained" value={formatDate(style.activeVersion.createdAt)} />
+                  </div>
+                </Card>
+              ) : null}
             </div>
           )}
         </Tabs.Content>
@@ -164,18 +213,26 @@ export function StyleDetailPage() {
         <Tabs.Content value="versions" className="tabs__content">
           {versions.length === 0 ? (
             <EmptyState
-              title="No model versions"
-              body="Each training run creates an immutable version with its own holdout metrics. You will be able to activate, compare and roll back versions here once training ships in 0.2.0."
+              title="No model versions yet"
+              body="Each training run creates an immutable version with its own holdout metrics. Activating an older version is the rollback path; nothing is ever overwritten."
+              primary={
+                <Button
+                  variant="primary"
+                  disabled={!training.available}
+                  title={training.reason}
+                  onClick={() => train.mutate({ styleId: style.id })}
+                >
+                  Train first version
+                </Button>
+              }
             />
           ) : (
-            <ul className="plain-list">
-              {versions.map((v) => (
-                <li key={v.id}>
-                  v{v.semanticVersion} · {v.status}
-                  {v.isActive ? " · active" : ""}
-                </li>
-              ))}
-            </ul>
+            <VersionList
+              versions={versions}
+              onActivate={(id) => activate.mutate(id)}
+              onArchive={(id) => archive.mutate(id)}
+              busy={activate.isPending || archive.isPending}
+            />
           )}
         </Tabs.Content>
 
