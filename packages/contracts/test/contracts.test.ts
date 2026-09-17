@@ -28,6 +28,8 @@ import {
   StyleHealth,
   CorrectionRow,
   formatNoTouch,
+  SessionDetail,
+  GroupEdit,
 } from "../src";
 
 const load = (p: string) => JSON.parse(readFileSync(p, "utf8"));
@@ -243,5 +245,34 @@ describe("corrections contracts", () => {
     const row = CorrectionRow.parse(load(sessionFixture("correction_row.json")));
     expect(row.delta[0]?.delta).toBeCloseTo(0.05);
     expect(row.includedInTrainingVersion).toBeNull();
+  });
+});
+
+describe("session intelligence contracts", () => {
+  it("session detail fixture (shared with Rust) parses with group and camera stats", () => {
+    const d = SessionDetail.parse(load(sessionFixture("session_detail.json")));
+    expect(d.groupStats).toHaveLength(2);
+    expect(d.clusters[0]?.referenceAssetId).toBe("asset-1");
+    expect(d.groupingChangedSincePrediction).toBe(true);
+    expect(d.cameraStats.find((c) => c.knownToModel === false)?.camera).toBe("SONY ILCE-7M4");
+  });
+  it("group edits are a tagged union with camelCase fields", () => {
+    GroupEdit.parse({ kind: "move", assetIds: ["a"], into: null, label: "x" });
+    GroupEdit.parse({ kind: "setReference", clusterId: "c", assetId: null });
+    expect(() => GroupEdit.parse({ kind: "move", asset_ids: ["a"] })).toThrow();
+  });
+  it("a group outlier needs attention even at high confidence", () => {
+    const base = SessionPhoto.parse(load(sessionFixture("session_photo.json")));
+    const p = { ...base, lastApply: null, prediction: { ...base.prediction!, confidence: 0.95 } };
+    expect(needsAttention(p)).toBe(false);
+    expect(
+      needsAttention({
+        ...p,
+        prediction: {
+          ...p.prediction,
+          rawModelOutput: { groupOutlier: { control: "tone.exposure", distance: 0.2 } },
+        },
+      }),
+    ).toBe(true);
   });
 });

@@ -2,18 +2,14 @@
 
 Completed work lives in CHANGELOG.md and PROJECT_STATUS.md, never here.
 
-## 0.4.x — Lightroom QA and polish
+## 0.5.x — Lightroom QA and polish
 
 - Real-Lightroom QA of the plugin apply/restore/sync path and the capability matrix on current Lightroom Classic (fake-plugin coverage exists; real-catalog behaviour does not).
-- Review filter for “corrected” photos and _Use as Reference_.
+- Review filter for “corrected” photos.
 - Weighting of correction pairs in training (today corrections join the dataset as ordinary pairs).
-- Automatic sync prompt when a session's Lightroom edits settle (today sync is a button).
+- Burst editing (bursts are detected and shown; they cannot be split or merged separately from groups).
 - Preview-cache size enforcement (setting exists since 0.1).
 - Per-apply-batch item table in the UI (today: counts + Restore; per-photo outcome lives in the photo panel).
-
-## 0.5.0 — Session intelligence
-
-- Reference photo, manual merge/split/rename of scene groups (bursts and groups are detected today but not editable), per-group confidence, per-camera/lens analysis, anomaly detection.
 
 ## 0.6.0 — Adaptive local editing research (capability-gated)
 

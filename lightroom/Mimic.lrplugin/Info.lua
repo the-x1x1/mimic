@@ -24,5 +24,5 @@ return {
   },
 
   -- Kept in lock-step with the desktop app by scripts/sync-version.mjs.
-  VERSION = { major = 0, minor = 4, revision = 0, build = 2, display = "0.4.0-alpha.2" },
+  VERSION = { major = 0, minor = 5, revision = 0, build = 1, display = "0.5.0-alpha.1" },
 }

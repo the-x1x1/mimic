@@ -223,8 +223,8 @@ impl Db {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT c.id, c.session_id, c.label, c.centroid_artifact_id, c.feature_summary_json, c.created_at,
-                    (SELECT COUNT(*) FROM session_assets sa WHERE sa.cluster_id = c.id)
-             FROM scene_clusters c WHERE c.session_id = ?1 ORDER BY c.label",
+                    (SELECT COUNT(*) FROM session_assets sa WHERE sa.cluster_id = c.id), c.reference_asset_id, c.edited_at
+             FROM scene_clusters c WHERE c.session_id = ?1 ORDER BY c.created_at, c.label",
         )?;
         let rows = stmt.query_map([session_id], |r| {
             Ok(SceneCluster {
@@ -235,14 +235,160 @@ impl Db {
                 feature_summary: json_col_or_default(r.get(4)?),
                 created_at: r.get(5)?,
                 asset_count: r.get(6)?,
+                reference_asset_id: r.get(7)?,
+                edited_at: r.get(8)?,
             })
         })?;
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
+    pub fn get_scene_cluster(&self, cluster_id: &str) -> DbResult<Option<SceneCluster>> {
+        let session_id: Option<String> = self
+            .conn()
+            .query_row("SELECT session_id FROM scene_clusters WHERE id = ?1", [cluster_id], |r| r.get(0))
+            .optional()?;
+        let Some(session_id) = session_id else { return Ok(None) };
+        Ok(self.scene_clusters(&session_id)?.into_iter().find(|c| c.id == cluster_id))
+    }
+
     pub fn rename_scene_cluster(&self, cluster_id: &str, label: &str) -> DbResult<()> {
-        self.conn().execute("UPDATE scene_clusters SET label = ?2 WHERE id = ?1", params![cluster_id, label])?;
+        let label = label.trim();
+        if label.is_empty() {
+            return Err(DbError::Invalid("group name is required".into()));
+        }
+        let n = self.conn().execute(
+            "UPDATE scene_clusters SET label = ?2, edited_at = ?3 WHERE id = ?1",
+            params![cluster_id, label, now_rfc3339()],
+        )?;
+        if n == 0 {
+            return Err(DbError::NotFound(cluster_id.to_string()));
+        }
         Ok(())
+    }
+
+    /// Reference photo for a group (must be a member). `None` clears it.
+    pub fn set_cluster_reference(&self, cluster_id: &str, asset_id: Option<&str>) -> DbResult<()> {
+        if let Some(a) = asset_id {
+            let member: i64 = self.conn().query_row(
+                "SELECT COUNT(*) FROM session_assets sa JOIN scene_clusters c ON c.session_id = sa.session_id
+                 WHERE c.id = ?1 AND sa.cluster_id = ?1 AND sa.asset_id = ?2",
+                params![cluster_id, a],
+                |r| r.get(0),
+            )?;
+            if member == 0 {
+                return Err(DbError::Invalid("the reference photo must belong to the group".into()));
+            }
+        }
+        let n = self.conn().execute(
+            "UPDATE scene_clusters SET reference_asset_id = ?2, edited_at = ?3 WHERE id = ?1",
+            params![cluster_id, asset_id, now_rfc3339()],
+        )?;
+        if n == 0 {
+            return Err(DbError::NotFound(cluster_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Move `from`'s photos into `into` and delete `from`. Both must belong to
+    /// the same session. `into` keeps its label and reference.
+    pub fn merge_scene_clusters(&self, into: &str, from: &str) -> DbResult<SceneCluster> {
+        if into == from {
+            return Err(DbError::Invalid("cannot merge a group into itself".into()));
+        }
+        let a = self.get_scene_cluster(into)?.ok_or_else(|| DbError::NotFound(into.to_string()))?;
+        let b = self.get_scene_cluster(from)?.ok_or_else(|| DbError::NotFound(from.to_string()))?;
+        if a.session_id != b.session_id {
+            return Err(DbError::Invalid("groups belong to different sessions".into()));
+        }
+        self.transaction(|tx| {
+            tx.execute(
+                "UPDATE session_assets SET cluster_id = ?1 WHERE session_id = ?3 AND cluster_id = ?2",
+                params![into, from, a.session_id],
+            )?;
+            tx.execute("DELETE FROM scene_clusters WHERE id = ?1", [from])?;
+            tx.execute("UPDATE scene_clusters SET edited_at = ?2 WHERE id = ?1", params![into, now_rfc3339()])?;
+            Ok(())
+        })?;
+        self.get_scene_cluster(into)?.ok_or_else(|| DbError::NotFound(into.to_string()))
+    }
+
+    /// Move photos into a group of the session; with `into = None` a new group
+    /// is created with `new_label`. Photos not in the session are ignored.
+    /// Source groups left empty are deleted. Returns the destination group.
+    pub fn move_session_assets(
+        &self,
+        session_id: &str,
+        asset_ids: &[String],
+        into: Option<&str>,
+        new_label: Option<&str>,
+    ) -> DbResult<SceneCluster> {
+        if asset_ids.is_empty() {
+            return Err(DbError::Invalid("choose at least one photo".into()));
+        }
+        let dest = match into {
+            Some(id) => {
+                let c = self.get_scene_cluster(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))?;
+                if c.session_id != session_id {
+                    return Err(DbError::Invalid("group belongs to another session".into()));
+                }
+                id.to_string()
+            }
+            None => {
+                let label = new_label.map(str::trim).filter(|l| !l.is_empty()).unwrap_or("New group");
+                let id = new_id();
+                self.conn().execute(
+                    "INSERT INTO scene_clusters(id, session_id, label, feature_summary_json, created_at, edited_at) VALUES (?1,?2,?3,'{\"manual\":true}',?4,?4)",
+                    params![id, session_id, label, now_rfc3339()],
+                )?;
+                id
+            }
+        };
+        // Only the groups the photos came from may be deleted when emptied.
+        let mut sources: Vec<String> = Vec::new();
+        for a in asset_ids {
+            let src: Option<Option<String>> = self
+                .conn()
+                .query_row(
+                    "SELECT cluster_id FROM session_assets WHERE session_id = ?1 AND asset_id = ?2",
+                    params![session_id, a],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(Some(c)) = src {
+                if !sources.contains(&c) {
+                    sources.push(c);
+                }
+            }
+        }
+        self.transaction(|tx| {
+            for a in asset_ids {
+                tx.execute(
+                    "UPDATE session_assets SET cluster_id = ?3 WHERE session_id = ?1 AND asset_id = ?2",
+                    params![session_id, a, dest],
+                )?;
+            }
+            // A reference that left its group is no longer valid.
+            tx.execute(
+                "UPDATE scene_clusters SET reference_asset_id = NULL WHERE session_id = ?1 AND reference_asset_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM session_assets sa WHERE sa.session_id = ?1 AND sa.asset_id = scene_clusters.reference_asset_id AND sa.cluster_id = scene_clusters.id)",
+                [session_id],
+            )?;
+            for src in &sources {
+                if src != &dest {
+                    tx.execute(
+                        "DELETE FROM scene_clusters WHERE id = ?1
+                           AND NOT EXISTS (SELECT 1 FROM session_assets sa WHERE sa.cluster_id = ?1)",
+                        [src],
+                    )?;
+                }
+            }
+            tx.execute(
+                "UPDATE scene_clusters SET edited_at = ?2 WHERE id = ?1",
+                params![dest, now_rfc3339()],
+            )?;
+            Ok(())
+        })?;
+        self.get_scene_cluster(&dest)?.ok_or_else(|| DbError::NotFound(dest))
     }
 
     // ----- predictions --------------------------------------------------
@@ -886,8 +1032,33 @@ mod tests {
         let done = db.complete_apply_batch(&batch.id, false, None).unwrap();
         assert_eq!(done.status, "completed_with_failures");
         assert!(!done.rollback_available);
-        let clusters = db.replace_scene_clusters(&session.id, &[("c1".into(), "Group 1".into(), json!({}))]).unwrap();
-        assert_eq!(clusters.len(), 1);
+        let clusters = db
+            .replace_scene_clusters(
+                &session.id,
+                &[("c1".into(), "Group 1".into(), json!({})), ("c2".into(), "Group 2".into(), json!({}))],
+            )
+            .unwrap();
+        assert_eq!(clusters.len(), 2);
+        // Group editing: reference must be a member; move creates/deletes; merge keeps the target.
+        db.assign_cluster(&session.id, &asset_id_copy, Some("c1"), None).unwrap();
+        assert!(matches!(db.set_cluster_reference("c1", Some("missing")), Err(DbError::Invalid(_))));
+        db.set_cluster_reference("c1", Some(&asset_id_copy)).unwrap();
+        assert_eq!(
+            db.get_scene_cluster("c1").unwrap().unwrap().reference_asset_id.as_deref(),
+            Some(asset_id_copy.as_str())
+        );
+        db.rename_scene_cluster("c2", "  Ceremony ").unwrap();
+        assert_eq!(db.get_scene_cluster("c2").unwrap().unwrap().label, "Ceremony");
+        assert!(db.rename_scene_cluster("c2", " ").is_err());
+        let moved =
+            db.move_session_assets(&session.id, std::slice::from_ref(&asset_id_copy), None, Some("Portraits")).unwrap();
+        assert_eq!(moved.label, "Portraits");
+        assert!(moved.edited_at.is_some());
+        assert!(db.get_scene_cluster("c1").unwrap().is_none(), "emptied group is deleted");
+        let merged = db.merge_scene_clusters("c2", &moved.id).unwrap();
+        assert_eq!((merged.id.as_str(), merged.asset_count), ("c2", 1));
+        assert!(db.get_scene_cluster(&moved.id).unwrap().is_none());
+        assert!(matches!(db.merge_scene_clusters("c2", "c2"), Err(DbError::Invalid(_))));
         assert_eq!(db.list_sessions(10).unwrap()[0].asset_count, 1);
         let style_id = db.get_model_version(&mv_id).unwrap().unwrap().style_profile_id;
         assert!(

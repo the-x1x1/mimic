@@ -5,7 +5,7 @@
 use serde_json::{json, Value};
 use tauri::State;
 
-use mimic_core::sessions::{self, SessionSource};
+use mimic_core::sessions::{self, GroupEdit, SessionSource};
 
 use crate::error::{CommandError, CommandResult};
 use crate::SharedState;
@@ -225,4 +225,16 @@ pub async fn sync_corrections(state: State<'_, SharedState>, session_id: String)
         return Err(CommandError::new("busy", "an apply, restore or sync is already running for this session"));
     }
     Ok(state.jobs.enqueue(mimic_core::corrections::JOB_SYNC_CORRECTIONS, json!({"sessionId": session_id}))?)
+}
+
+#[tauri::command]
+pub async fn edit_session_groups(
+    state: State<'_, SharedState>,
+    session_id: String,
+    edit: GroupEdit,
+) -> CommandResult<Vec<mimic_core::db::SceneCluster>> {
+    if session_job_running(&state, &session_id, &[sessions::JOB_GROUP_SESSION, sessions::JOB_PREDICT_SESSION]) {
+        return Err(CommandError::new("busy", "wait for grouping or prediction to finish before editing groups"));
+    }
+    Ok(sessions::edit_groups(&state.db, &session_id, &edit)?)
 }

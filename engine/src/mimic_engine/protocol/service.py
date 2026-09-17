@@ -301,8 +301,8 @@ class EngineService:
                     results.append({"assetId": asset_id, "error": {"code": "predict_failed", "message": str(e)}})
                 progress("predicting", i + 1, len(asset_ids))
         groups = params.get("groups")
-        if isinstance(groups, dict) and params.get("consistency", True):
-            from mimic_engine.session.consistency import apply_consistency
+        if isinstance(groups, dict):
+            from mimic_engine.session.consistency import apply_consistency, detect_outliers
             from mimic_engine.training.mapping import control_by_canonical, raw_for
 
             ok_rows = [r for r in results if "error" not in r]
@@ -312,16 +312,37 @@ class EngineService:
                     [[r["global"][n.split(".", 1)[0]][n.split(".", 1)[1]]["value"] for n in names] for r in ok_rows],
                     dtype=np.float32,
                 )
-                adjusted, shift = apply_consistency(mat, names, [groups.get(r["assetId"]) for r in ok_rows])
-                for r, row, sh in zip(ok_rows, adjusted, shift, strict=True):
-                    for j, n in enumerate(names):
-                        fam, short = n.split(".", 1)
-                        c = control_by_canonical(n)
-                        if c is None:
-                            continue
-                        r["global"][fam][short]["value"] = round(float(row[j]), 5)
-                        r["global"][fam][short]["raw"] = raw_for(c, float(row[j]))
-                    r["consistencyShift"] = round(float(sh), 5)
+                row_groups = [groups.get(r["assetId"]) for r in ok_rows]
+                # Outliers are judged on the raw predictions, before any blending.
+                for r, flag in zip(ok_rows, detect_outliers(mat, names, row_groups), strict=True):
+                    if flag is not None:
+                        r["groupOutlier"] = {"control": flag[0], "distance": flag[1]}
+                        r.setdefault("reasons", []).append(
+                            f"{flag[0]} disagrees with its scene group by {flag[1] * 100:.0f}% of range"
+                        )
+                if params.get("consistency", True):
+                    refs_in = params.get("references") or {}
+                    index_by_asset = {r["assetId"]: i for i, r in enumerate(ok_rows)}
+                    references = {
+                        str(g): index_by_asset[a]
+                        for g, a in refs_in.items()
+                        if isinstance(a, str) and a in index_by_asset
+                    }
+                    adjusted, shift = apply_consistency(mat, names, row_groups, references)
+                    for r, row, sh in zip(ok_rows, adjusted, shift, strict=True):
+                        for j, n in enumerate(names):
+                            fam, short = n.split(".", 1)
+                            c = control_by_canonical(n)
+                            if c is None:
+                                continue
+                            r["global"][fam][short]["value"] = round(float(row[j]), 5)
+                            r["global"][fam][short]["raw"] = raw_for(c, float(row[j]))
+                        r["consistencyShift"] = round(float(sh), 5)
+                        if (
+                            groups.get(r["assetId"]) in references
+                            and index_by_asset[r["assetId"]] == references[groups[r["assetId"]]]
+                        ):
+                            r["isReference"] = True
         return {"results": results, "modelPath": model_path, "controlNames": predictor.control_names}
 
     def session_group(self, params: dict[str, Any], progress: Progress) -> dict[str, Any]:

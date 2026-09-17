@@ -262,6 +262,60 @@ async fn session_ingest_group_predict_apply_restore() {
     assert_eq!(regrouped.status, "completed");
     assert_eq!(sessions::session_detail(&db, &session.id).unwrap().clusters.len(), detail.clusters.len());
 
+    // Group editing: rename, move into a new group, set a reference, merge back; stale flag after predict.
+    let clusters = sessions::session_detail(&db, &session.id).unwrap().clusters;
+    let first = clusters[0].clone();
+    let renamed = sessions::edit_groups(
+        &db,
+        &session.id,
+        &sessions::GroupEdit::Rename { cluster_id: first.id.clone(), label: "Ceremony".into() },
+    )
+    .unwrap();
+    assert!(renamed.iter().any(|c| c.id == first.id && c.label == "Ceremony" && c.edited_at.is_some()));
+    let first_members: Vec<String> = db
+        .session_assets(&session.id)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.cluster_id.as_deref() == Some(first.id.as_str()))
+        .map(|m| m.asset_id)
+        .collect();
+    let moved_id = first_members[0].clone();
+    let after_move = sessions::edit_groups(
+        &db,
+        &session.id,
+        &sessions::GroupEdit::Move {
+            asset_ids: vec![moved_id.clone()],
+            into: None,
+            label: Some("Detail shots".into()),
+        },
+    )
+    .unwrap();
+    let new_group = after_move.iter().find(|c| c.label == "Detail shots").expect("new group");
+    assert_eq!(new_group.asset_count, 1);
+    assert!(
+        matches!(
+            sessions::edit_groups(
+                &db,
+                &session.id,
+                &sessions::GroupEdit::SetReference { cluster_id: first.id.clone(), asset_id: Some(moved_id.clone()) }
+            ),
+            Err(mimic_core::db::DbError::Invalid(_))
+        ),
+        "a reference must be a member of its group"
+    );
+    let merged = sessions::edit_groups(
+        &db,
+        &session.id,
+        &sessions::GroupEdit::Merge { into: first.id.clone(), from: new_group.id.clone() },
+    )
+    .unwrap();
+    assert!(merged.iter().all(|c| c.id != new_group.id));
+    let d = sessions::session_detail(&db, &session.id).unwrap();
+    assert!(!d.grouping_changed_since_prediction, "nothing predicted yet");
+    assert_eq!(d.group_stats.iter().map(|g| g.photos).sum::<i64>(), 5);
+    assert!(d.group_stats.iter().all(|g| g.predicted == 0 && g.mean_confidence.is_none()));
+    assert!(!d.camera_stats.is_empty());
+
     let predicted = finished(&db, &runner, sessions::JOB_PREDICT_SESSION, json!({"sessionId": session.id})).await;
     assert_eq!(predicted.status, "completed", "{:?}", predicted.error);
     let r = predicted.result.clone().unwrap();
@@ -279,8 +333,36 @@ async fn session_ingest_group_predict_apply_restore() {
     let photos = sessions::session_photos(&db, &session.id).unwrap();
     assert_eq!(photos.len(), 5);
     assert!(photos.iter().all(|p| p.prediction.is_some() && p.preview_path.is_some()));
+    let d = sessions::session_detail(&db, &session.id).unwrap();
+    assert!(d.group_stats.iter().all(|g| g.predicted == g.photos));
+    assert!(d.group_stats.iter().all(|g| g.mean_confidence.is_some()));
+    assert!(d.camera_stats.iter().all(|c| c.mean_confidence.is_some()));
+    // Setting a reference after predicting marks the prediction stale; re-predicting clears it
+    // and the reference photo keeps its own values.
+    let ref_asset = first_members.iter().find(|a| **a != moved_id).unwrap().clone();
+    sessions::edit_groups(
+        &db,
+        &session.id,
+        &sessions::GroupEdit::SetReference { cluster_id: first.id.clone(), asset_id: Some(ref_asset.clone()) },
+    )
+    .unwrap();
+    assert!(sessions::session_detail(&db, &session.id).unwrap().grouping_changed_since_prediction);
+    let before_ref: HashMap<String, Value> = db
+        .session_predictions(&session.id, false)
+        .unwrap()
+        .into_iter()
+        .map(|p| (p.asset_id, p.predicted_settings["global"].clone()))
+        .collect();
     // Re-predicting supersedes rather than duplicating.
-    finished(&db, &runner, sessions::JOB_PREDICT_SESSION, json!({"sessionId": session.id})).await;
+    let re = finished(&db, &runner, sessions::JOB_PREDICT_SESSION, json!({"sessionId": session.id})).await;
+    assert_eq!(re.status, "completed", "{:?}", re.error);
+    assert_eq!(re.result.as_ref().unwrap()["references"], 1);
+    assert!(!sessions::session_detail(&db, &session.id).unwrap().grouping_changed_since_prediction);
+    let ref_pred =
+        db.session_predictions(&session.id, false).unwrap().into_iter().find(|p| p.asset_id == ref_asset).unwrap();
+    assert_eq!(ref_pred.raw_model_output["isReference"], true);
+    assert_eq!(ref_pred.raw_model_output["consistencyShift"], 0.0, "reference is never blended");
+    assert!(before_ref.contains_key(&ref_asset));
     assert_eq!(db.session_predictions(&session.id, false).unwrap().len(), 5);
     assert_eq!(db.session_predictions(&session.id, true).unwrap().len(), 10);
     let preds = db.session_predictions(&session.id, false).unwrap();

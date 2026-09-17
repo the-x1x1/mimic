@@ -49,7 +49,49 @@ export const SceneCluster = z.object({
   featureSummary: z.record(z.string(), z.unknown()),
   createdAt: z.string(),
   assetCount: z.number(),
+  referenceAssetId: z.string().nullable(),
+  editedAt: z.string().nullable(),
 });
+
+export const GroupEdit = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("rename"), clusterId: z.string(), label: z.string() }),
+  z.object({
+    kind: z.literal("setReference"),
+    clusterId: z.string(),
+    assetId: z.string().nullable(),
+  }),
+  z.object({ kind: z.literal("merge"), into: z.string(), from: z.string() }),
+  z.object({
+    kind: z.literal("move"),
+    assetIds: z.array(z.string()),
+    into: z.string().nullable(),
+    label: z.string().nullable(),
+  }),
+]);
+export type GroupEdit = z.infer<typeof GroupEdit>;
+
+export const GroupStats = z.object({
+  clusterId: z.string(),
+  photos: z.number(),
+  predicted: z.number(),
+  meanConfidence: z.number().nullable(),
+  minConfidence: z.number().nullable(),
+  lowConfidence: z.number(),
+  outOfDistribution: z.number(),
+  outliers: z.number(),
+  applied: z.number(),
+  rejected: z.number(),
+});
+export type GroupStats = z.infer<typeof GroupStats>;
+
+export const CameraStats = z.object({
+  camera: z.string(),
+  lens: z.string(),
+  photos: z.number(),
+  meanConfidence: z.number().nullable(),
+  knownToModel: z.boolean().nullable(),
+});
+export type CameraStats = z.infer<typeof CameraStats>;
 export type SceneCluster = z.infer<typeof SceneCluster>;
 
 export const PredictionStatus = z.enum([
@@ -110,6 +152,8 @@ export const Prediction = z.object({
       reasons: z.array(z.string()).optional(),
       ood: z.boolean().optional(),
       consistencyShift: z.number().optional(),
+      isReference: z.boolean().optional(),
+      groupOutlier: z.object({ control: z.string(), distance: z.number() }).optional(),
     })
     .passthrough(),
   confidence: z.number(),
@@ -180,12 +224,16 @@ export const SessionDetail = z.object({
   session: Session,
   source: SessionSource.nullable(),
   clusters: z.array(SceneCluster),
+  groupStats: z.array(GroupStats),
+  cameraStats: z.array(CameraStats),
   predictionCounts: z.record(z.string(), z.number()),
   batches: z.array(ApplyBatch),
   correctionSyncs: z.array(CorrectionSync),
   photoCount: z.number(),
   photosWithFeatures: z.number(),
   grouped: z.boolean(),
+  groupingChangedSincePrediction: z.boolean(),
+  syncSuggested: z.boolean(),
 });
 export type SessionDetail = z.infer<typeof SessionDetail>;
 
@@ -250,7 +298,11 @@ export function needsAttention(photo: SessionPhoto, threshold = DEFAULT_REVIEW_T
   )
     return true;
   if (p.status === "applied") return false;
-  return p.confidence < threshold || p.rawModelOutput.ood === true;
+  return (
+    p.confidence < threshold ||
+    p.rawModelOutput.ood === true ||
+    p.rawModelOutput.groupOutlier !== undefined
+  );
 }
 
 /** Flat list of predicted controls with labels, sorted by family then name. */

@@ -6,7 +6,7 @@ Mimic is a local-first Windows desktop app from the Formicaria family. It learns
 
 The product promise is not “apply an AI preset”. It is _“learn how I edit and do the repetitive part the way I would.”_
 
-## Current status — `0.4.0-alpha.2` (continuous learning)
+## Current status — `0.5.0-alpha.1` (session intelligence)
 
 | Area                                                                                                                                                                             | Status                                                                                                  |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -20,6 +20,7 @@ The product promise is not “apply an AI preset”. It is _“learn how I edit 
 | Sessions: ingest a shoot, scene grouping, prediction with confidence, review queue                                                                                               | Implemented and tested with the real engine                                                             |
 | Apply to Lightroom (snapshot, plugin preset, read-back verification) and Restore from recorded before-values                                                                     | Implemented; proven against a scripted plugin over the real bridge. **Needs real-Lightroom QA**         |
 | Corrections sync, measured No-Touch Rate, retraining with corrections, version comparison, style health insights                                                                 | Implemented; sync proven against a scripted plugin over the real bridge. **Needs real-Lightroom QA**    |
+| Scene-group editing (rename, merge, split/move, reference photo), per-group and per-camera confidence, group-outlier flags                                                       | Implemented and tested                                                                                  |
 | Windows installer + signed updater plumbing + GitHub Release workflow                                                                                                            | Implemented in CI; the first published installer is produced by the release workflow, not committed     |
 
 The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). If this README and that file ever disagree, PROJECT_STATUS wins, and the source code wins over both.
@@ -66,11 +67,11 @@ Everything stays on this computer. Image analysis, metadata, training data, mode
 
 A Tauri 2 shell (Rust) owns the SQLite database, a persistent job queue, a loopback-only HTTP bridge that the Lightroom plugin polls, and a Python engine child process spoken to over newline-delimited JSON. The engine does deterministic image work: scanning, XMP parsing, RAW previews, statistics, embeddings, training, prediction and scene grouping. A single JSON contract, `packages/contracts/edit_mapping_v1.json`, defines the canonical EditDNA representation shared by Rust, Python and TypeScript, and golden fixtures pin its behaviour in all three. Lightroom stays the source of truth: Mimic never opens the `.lrcat`, never overwrites a RAW, and never mutates XMP.
 
-## Known limitations (0.4.0-alpha.2)
+## Known limitations (0.5.0-alpha.1)
 
 - Corrections join training as ordinary pairs (no extra weight yet), and syncing is manual (a button on the session).
 - The model is a KNN + ridge hybrid on statistical features; it is measured against baselines, not against a photographer's acceptance yet.
-- Scene groups and bursts are detected but cannot be merged, split or renamed yet.
+- Bursts are detected and shown but cannot be edited separately from their scene group.
 - The Lightroom plugin — including the apply and restore path — has not been exercised against a real Lightroom Classic installation by CI; the protocol is verified with a fake plugin. Field reports welcome via the _Lightroom compatibility_ issue template.
 - Masks, local adjustments, AI Denoise and other ACR-sidecar “heavy edits” are detected and preserved but never learned or written.
 - The visual embedding is a statistical fallback (`stats_v1`); ONNX encoders are manifest-driven and SHA-256 verified but no manifest ships yet.
