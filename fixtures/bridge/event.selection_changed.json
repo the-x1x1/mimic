@@ -1,0 +1,11 @@
+{
+  "events": [
+    {
+      "type": "selection_changed",
+      "at": "2026-09-16T20:12:00Z",
+      "payload": {
+        "count": 3
+      }
+    }
+  ]
+}

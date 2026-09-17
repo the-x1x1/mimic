@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mimic encoder manifest",
+  "type": "object",
+  "required": [
+    "kind",
+    "id",
+    "version",
+    "fileName",
+    "sha256",
+    "sizeBytes",
+    "url",
+    "license",
+    "dim",
+    "inputSize"
+  ],
+  "properties": {
+    "kind": { "const": "image_encoder" },
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "version": { "type": "string" },
+    "fileName": { "type": "string", "pattern": "\\.onnx$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sizeBytes": { "type": "integer", "minimum": 1 },
+    "url": { "type": "string", "format": "uri" },
+    "license": {
+      "type": "object",
+      "required": ["name", "url"],
+      "properties": { "name": { "type": "string" }, "url": { "type": "string" } }
+    },
+    "dim": { "type": "integer", "minimum": 8 },
+    "inputSize": { "type": "integer", "minimum": 32 },
+    "mean": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "std": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "onnxruntimeMin": { "type": "string" },
+        "providers": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "additionalProperties": false
+}

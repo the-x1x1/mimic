@@ -1,0 +1,465 @@
+{
+  "schemaVersion": "1.0",
+  "mappingVersion": "edit_mapping_v1",
+  "global": {
+    "calibration": {
+      "blueHue": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "BlueHue"
+      },
+      "blueSaturation": {
+        "raw": 5,
+        "value": 0.525,
+        "sourceKey": "BlueSaturation"
+      },
+      "greenHue": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "GreenHue"
+      },
+      "greenSaturation": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "GreenSaturation"
+      },
+      "profile": {
+        "raw": "Adobe Color",
+        "sourceKey": "CameraProfile"
+      },
+      "redHue": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "RedHue"
+      },
+      "redSaturation": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "RedSaturation"
+      },
+      "shadowTint": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ShadowTint"
+      }
+    },
+    "colorGrading": {
+      "balance": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "SplitToningBalance"
+      },
+      "blending": {
+        "raw": 50,
+        "value": 0.5,
+        "sourceKey": "ColorGradeBlending"
+      },
+      "global.hue": {
+        "raw": 0,
+        "value": 0.0,
+        "sourceKey": "ColorGradeGlobalHue"
+      },
+      "global.luminance": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ColorGradeGlobalLum"
+      },
+      "global.saturation": {
+        "raw": 0,
+        "value": 0.0,
+        "sourceKey": "ColorGradeGlobalSat"
+      },
+      "highlight.hue": {
+        "raw": 45,
+        "value": 0.125,
+        "sourceKey": "SplitToningHighlightHue"
+      },
+      "highlight.luminance": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ColorGradeHighlightLum"
+      },
+      "highlight.saturation": {
+        "raw": 6,
+        "value": 0.06,
+        "sourceKey": "SplitToningHighlightSaturation"
+      },
+      "midtone.hue": {
+        "raw": 0,
+        "value": 0.0,
+        "sourceKey": "ColorGradeMidtoneHue"
+      },
+      "midtone.luminance": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ColorGradeMidtoneLum"
+      },
+      "midtone.saturation": {
+        "raw": 0,
+        "value": 0.0,
+        "sourceKey": "ColorGradeMidtoneSat"
+      },
+      "shadow.hue": {
+        "raw": 220,
+        "value": 0.6111111111111112,
+        "sourceKey": "SplitToningShadowHue"
+      },
+      "shadow.luminance": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ColorGradeShadowLum"
+      },
+      "shadow.saturation": {
+        "raw": 5,
+        "value": 0.05,
+        "sourceKey": "SplitToningShadowSaturation"
+      }
+    },
+    "crop": {
+      "hasCrop": {
+        "raw": false,
+        "value": 0.0,
+        "sourceKey": "HasCrop"
+      }
+    },
+    "detail": {
+      "colorNoise": {
+        "raw": 25,
+        "value": 0.25,
+        "sourceKey": "ColorNoiseReduction"
+      },
+      "luminanceNoise": {
+        "raw": 0,
+        "value": 0.0,
+        "sourceKey": "LuminanceSmoothing"
+      },
+      "sharpenDetail": {
+        "raw": 25,
+        "value": 0.25,
+        "sourceKey": "SharpenDetail"
+      },
+      "sharpenEdgeMasking": {
+        "raw": 0,
+        "value": 0.0,
+        "sourceKey": "SharpenEdgeMasking"
+      },
+      "sharpenRadius": {
+        "raw": 1.0,
+        "value": 0.2,
+        "sourceKey": "SharpenRadius"
+      },
+      "sharpness": {
+        "raw": 40,
+        "value": 0.26666666666666666,
+        "sourceKey": "Sharpness"
+      }
+    },
+    "effects": {
+      "grainAmount": {
+        "raw": 0,
+        "value": 0.0,
+        "sourceKey": "GrainAmount"
+      },
+      "postCropVignetteAmount": {
+        "raw": -10,
+        "value": 0.45,
+        "sourceKey": "PostCropVignetteAmount"
+      }
+    },
+    "hsl": {
+      "hue.aqua": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "HueAdjustmentAqua"
+      },
+      "hue.blue": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "HueAdjustmentBlue"
+      },
+      "hue.green": {
+        "raw": -15,
+        "value": 0.425,
+        "sourceKey": "HueAdjustmentGreen"
+      },
+      "hue.magenta": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "HueAdjustmentMagenta"
+      },
+      "hue.orange": {
+        "raw": -3,
+        "value": 0.485,
+        "sourceKey": "HueAdjustmentOrange"
+      },
+      "hue.purple": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "HueAdjustmentPurple"
+      },
+      "hue.red": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "HueAdjustmentRed"
+      },
+      "hue.yellow": {
+        "raw": -10,
+        "value": 0.45,
+        "sourceKey": "HueAdjustmentYellow"
+      },
+      "luminance.aqua": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "LuminanceAdjustmentAqua"
+      },
+      "luminance.blue": {
+        "raw": -5,
+        "value": 0.475,
+        "sourceKey": "LuminanceAdjustmentBlue"
+      },
+      "luminance.green": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "LuminanceAdjustmentGreen"
+      },
+      "luminance.magenta": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "LuminanceAdjustmentMagenta"
+      },
+      "luminance.orange": {
+        "raw": 8,
+        "value": 0.54,
+        "sourceKey": "LuminanceAdjustmentOrange"
+      },
+      "luminance.purple": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "LuminanceAdjustmentPurple"
+      },
+      "luminance.red": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "LuminanceAdjustmentRed"
+      },
+      "luminance.yellow": {
+        "raw": 5,
+        "value": 0.525,
+        "sourceKey": "LuminanceAdjustmentYellow"
+      },
+      "saturation.aqua": {
+        "raw": -8,
+        "value": 0.46,
+        "sourceKey": "SaturationAdjustmentAqua"
+      },
+      "saturation.blue": {
+        "raw": -6,
+        "value": 0.47,
+        "sourceKey": "SaturationAdjustmentBlue"
+      },
+      "saturation.green": {
+        "raw": -20,
+        "value": 0.4,
+        "sourceKey": "SaturationAdjustmentGreen"
+      },
+      "saturation.magenta": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "SaturationAdjustmentMagenta"
+      },
+      "saturation.orange": {
+        "raw": -5,
+        "value": 0.475,
+        "sourceKey": "SaturationAdjustmentOrange"
+      },
+      "saturation.purple": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "SaturationAdjustmentPurple"
+      },
+      "saturation.red": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "SaturationAdjustmentRed"
+      },
+      "saturation.yellow": {
+        "raw": -12,
+        "value": 0.44,
+        "sourceKey": "SaturationAdjustmentYellow"
+      }
+    },
+    "lens": {
+      "manualDistortion": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "LensManualDistortionAmount"
+      },
+      "profileEnabled": {
+        "raw": true,
+        "value": 1.0,
+        "sourceKey": "LensProfileEnable"
+      },
+      "vignetteAmount": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "VignetteAmount"
+      }
+    },
+    "presence": {
+      "clarity": {
+        "raw": 5,
+        "value": 0.525,
+        "sourceKey": "Clarity2012"
+      },
+      "dehaze": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "Dehaze"
+      },
+      "saturation": {
+        "raw": -3,
+        "value": 0.485,
+        "sourceKey": "Saturation"
+      },
+      "texture": {
+        "raw": 10,
+        "value": 0.55,
+        "sourceKey": "Texture"
+      },
+      "vibrance": {
+        "raw": 12,
+        "value": 0.56,
+        "sourceKey": "Vibrance"
+      }
+    },
+    "tone": {
+      "blacks": {
+        "raw": -10,
+        "value": 0.45,
+        "sourceKey": "Blacks2012"
+      },
+      "contrast": {
+        "raw": 8,
+        "value": 0.54,
+        "sourceKey": "Contrast2012"
+      },
+      "exposure": {
+        "raw": 0.4,
+        "value": 0.54,
+        "sourceKey": "Exposure2012"
+      },
+      "highlights": {
+        "raw": -55,
+        "value": 0.225,
+        "sourceKey": "Highlights2012"
+      },
+      "shadows": {
+        "raw": 40,
+        "value": 0.7,
+        "sourceKey": "Shadows2012"
+      },
+      "whites": {
+        "raw": 12,
+        "value": 0.56,
+        "sourceKey": "Whites2012"
+      }
+    },
+    "toneCurve": {
+      "parametric.darks": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ParametricDarks"
+      },
+      "parametric.highlightSplit": {
+        "raw": 75,
+        "value": 0.75,
+        "sourceKey": "ParametricHighlightSplit"
+      },
+      "parametric.highlights": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ParametricHighlights"
+      },
+      "parametric.lights": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ParametricLights"
+      },
+      "parametric.midtoneSplit": {
+        "raw": 50,
+        "value": 0.5,
+        "sourceKey": "ParametricMidtoneSplit"
+      },
+      "parametric.shadowSplit": {
+        "raw": 25,
+        "value": 0.25,
+        "sourceKey": "ParametricShadowSplit"
+      },
+      "parametric.shadows": {
+        "raw": 0,
+        "value": 0.5,
+        "sourceKey": "ParametricShadows"
+      },
+      "point.blue": {
+        "raw": [
+          [0.0, 0.0],
+          [255.0, 255.0]
+        ],
+        "sourceKey": "ToneCurvePV2012Blue"
+      },
+      "point.green": {
+        "raw": [
+          [0.0, 0.0],
+          [255.0, 255.0]
+        ],
+        "sourceKey": "ToneCurvePV2012Green"
+      },
+      "point.red": {
+        "raw": [
+          [0.0, 0.0],
+          [255.0, 255.0]
+        ],
+        "sourceKey": "ToneCurvePV2012Red"
+      },
+      "point.rgb": {
+        "raw": [
+          [0.0, 0.0],
+          [64.0, 60.0],
+          [192.0, 198.0],
+          [255.0, 255.0]
+        ],
+        "sourceKey": "ToneCurvePV2012"
+      }
+    },
+    "whiteBalance": {
+      "mode": {
+        "raw": "Custom",
+        "sourceKey": "WhiteBalance"
+      },
+      "temperature": {
+        "raw": 5200,
+        "value": 0.296846320583541,
+        "sourceKey": "Temperature"
+      },
+      "tint": {
+        "raw": 6,
+        "value": 0.52,
+        "sourceKey": "Tint"
+      }
+    }
+  },
+  "local": {
+    "status": "unsupported",
+    "observedKeys": [],
+    "operations": []
+  },
+  "lightroom": {
+    "processVersion": "11.0",
+    "crsVersion": "16.2",
+    "hasSettings": true,
+    "heavyEditKeys": []
+  },
+  "unknown": {},
+  "warnings": [],
+  "rawSettingsHash": "1ab9b67e19b4fa424b03f78a72b151c779ee25ee8a537c6a4d73aa0e5e110521"
+}

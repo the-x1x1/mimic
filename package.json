@@ -1,0 +1,33 @@
+{
+  "name": "mimic-workspace",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Mimic — teach Lightroom Classic your editing habits. Formicaria product family.",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @mimic/desktop tauri dev",
+    "dev:web": "pnpm --filter @mimic/desktop dev",
+    "build": "pnpm -r --filter './packages/**' build && pnpm --filter @mimic/desktop build",
+    "build:tauri": "pnpm --filter @mimic/desktop tauri build",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "sync-version": "node scripts/sync-version.mjs",
+    "verify-version": "node scripts/sync-version.mjs --check",
+    "contracts:fixtures": "pnpm --filter @mimic/contracts test"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

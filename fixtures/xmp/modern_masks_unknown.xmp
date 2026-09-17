@@ -1,0 +1,103 @@
+<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.2-c000 1.000000, 0000/00/00-00:00:00">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:tiff="http://ns.adobe.com/tiff/1.0/"
+    xmlns:exif="http://ns.adobe.com/exif/1.0/"
+    xmlns:exifEX="http://cipa.jp/exif/1.0/"
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    xmlns:future="http://example.invalid/ns/future-lightroom/1.0/"
+   xmp:CreatorTool="Adobe Photoshop Lightroom Classic 15.0 (Windows)"
+   tiff:Make="SONY"
+   tiff:Model="ILCE-7M4"
+   exif:ExposureTime="1/640"
+   exif:FNumber="18/10"
+   exif:ISOSpeedRatings="100"
+   exif:FocalLength="85/1"
+   exif:DateTimeOriginal="2025-06-21T18:05:09"
+   exifEX:LensModel="FE 85mm F1.8"
+   crs:Version="17.0"
+   crs:ProcessVersion="15.4"
+   crs:WhiteBalance="As Shot"
+   crs:Temperature="5600"
+   crs:Tint="+10"
+   crs:Exposure2012="-0.25"
+   crs:Contrast2012="+15"
+   crs:Highlights2012="-70"
+   crs:Shadows2012="+25"
+   crs:Whites2012="+5"
+   crs:Blacks2012="-20"
+   crs:Texture="0"
+   crs:Clarity2012="0"
+   crs:Dehaze="+8"
+   crs:Vibrance="+20"
+   crs:Saturation="0"
+   crs:Sharpness="55"
+   crs:LuminanceSmoothing="15"
+   crs:ColorNoiseReduction="25"
+   crs:LensProfileEnable="1"
+   crs:LensProfileName="Adobe (SONY FE 85mm F1.8)"
+   crs:PostCropVignetteAmount="0"
+   crs:GrainAmount="15"
+   crs:GrainSize="25"
+   crs:GrainFrequency="50"
+   crs:CameraProfile="Adobe Portrait"
+   crs:HasSettings="True"
+   crs:HasCrop="True"
+   crs:CropTop="0.05"
+   crs:CropLeft="0.1"
+   crs:CropBottom="0.95"
+   crs:CropRight="0.9"
+   crs:CropAngle="-1.5"
+   crs:CropConstrainToWarp="0"
+   crs:LensBlur="{&quot;Active&quot;:false}"
+   crs:PointColors="{&quot;version&quot;:1}"
+   crs:SomeNewSlider2027="+42"
+   future:Experimental="yes">
+   <crs:MaskGroupBasedCorrections>
+    <rdf:Seq>
+     <rdf:li>
+      <rdf:Description
+       crs:What="Correction"
+       crs:CorrectionAmount="1.000000"
+       crs:CorrectionActive="true"
+       crs:CorrectionName="Subject 1"
+       crs:LocalExposure2012="0.35"
+       crs:LocalShadows2012="0.2">
+       <crs:CorrectionMasks>
+        <rdf:Seq>
+         <rdf:li
+          crs:What="Mask/Image"
+          crs:MaskActive="true"
+          crs:MaskName="Subject 1"
+          crs:MaskSubType="1"
+          crs:MaskValue="1.000000"
+          crs:ReferencePoint="0.500000 0.450000"/>
+        </rdf:Seq>
+       </crs:CorrectionMasks>
+      </rdf:Description>
+     </rdf:li>
+    </rdf:Seq>
+   </crs:MaskGroupBasedCorrections>
+   <crs:ToneCurvePV2012>
+    <rdf:Seq>
+     <rdf:li>0, 12</rdf:li>
+     <rdf:li>255, 250</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012>
+   <crs:Look>
+    <rdf:Description
+     crs:Name="Adobe Color"
+     crs:Amount="1"
+     crs:UUID="B952C231111CD8E0ECCF14B86BAA7077"
+     crs:SupportsAmount="false">
+     <crs:Parameters>
+      <rdf:Description crs:CameraProfile="Adobe Standard" crs:ConvertToGrayscale="False"/>
+     </crs:Parameters>
+    </rdf:Description>
+   </crs:Look>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>

@@ -1,0 +1,21 @@
+name: Lightroom compatibility report
+description: A develop setting or SDK behaviour differs on your Lightroom version.
+labels: ["lightroom-compat"]
+body:
+  - type: input
+    id: lightroom
+    attributes:
+      label: Lightroom Classic version
+    validations:
+      required: true
+  - type: textarea
+    id: matrix
+    attributes:
+      label: Capability matrix
+      description: Settings › Lightroom › Capability matrix (copy the table or the diagnostic bundle's bridge section).
+  - type: textarea
+    id: details
+    attributes:
+      label: What differs
+    validations:
+      required: true

@@ -1,0 +1,11 @@
+{
+  "commandId": "c-3001",
+  "ok": false,
+  "error": {
+    "code": "catalog_write_denied",
+    "message": "withWriteAccessDo timed out after 10s",
+    "details": {
+      "timeoutMs": 10000
+    }
+  }
+}

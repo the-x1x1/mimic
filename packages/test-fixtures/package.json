@@ -1,0 +1,8 @@
+{
+  "name": "@mimic/test-fixtures",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "description": "Paths to the repository's golden fixtures for JS tests.",
+  "main": "./index.ts"
+}

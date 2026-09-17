@@ -1,0 +1,28 @@
+{
+  "parserVersion": "xmp_parser_v1",
+  "rawSettings": {
+    "Version": "6.7",
+    "ProcessVersion": "5.7",
+    "WhiteBalance": "Daylight",
+    "Temperature": "5500",
+    "Tint": "0",
+    "Exposure": "+0.75",
+    "Shadows": "8",
+    "Brightness": "+50",
+    "Contrast": "+25",
+    "FillLight": "15",
+    "HighlightRecovery": "30",
+    "Clarity": "+20",
+    "Vibrance": "+10",
+    "Saturation": "0",
+    "Sharpness": "25",
+    "HasSettings": "True",
+    "HasCrop": "False",
+    "ToneCurveName": "Medium Contrast",
+    "ToneCurve": ["0, 0", "32, 22", "64, 56", "128, 128", "192, 196", "255, 255"]
+  },
+  "metadata": {
+    "tiff:Make": "NIKON CORPORATION",
+    "tiff:Model": "NIKON D700"
+  }
+}

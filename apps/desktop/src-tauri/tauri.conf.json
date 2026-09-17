@@ -1,0 +1,83 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mimic",
+  "version": "0.1.0-alpha.1",
+  "identifier": "com.formicaria.mimic",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Mimic",
+        "label": "main",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "center": true,
+        "theme": "Dark",
+        "backgroundColor": "#141517",
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPLOCALDATA/**", "$LOCALDATA/Formicaria/Mimic/**"]
+      }
+    },
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "publisher": "Formicaria",
+    "copyright": "\u00a9 2026 Formicaria",
+    "category": "Photography",
+    "shortDescription": "Teach Lightroom Classic your editing habits.",
+    "longDescription": "Mimic learns how you edit in Lightroom Classic and reproduces your global develop decisions on new sessions, with confidence scoring, review and rollback.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../../lightroom/Mimic.lrplugin/": "plugin/Mimic.lrplugin/",
+      "../../../packages/contracts/edit_mapping_v1.json": "contracts/edit_mapping_v1.json",
+      "../../../models/manifests/": "models/manifests/",
+      "resources/engine/": "engine/",
+      "../../../fixtures/images/": "fixtures/images/",
+      "../../../fixtures/xmp/": "fixtures/xmp/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English"],
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": ["https://github.com/the-x1x1/mimic/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwNDEyQ0Y3MDdERjQwMgpSV1FDOUgxd3p4SUVEY2xtM2xuaG1qeVRXd3MzRE5pRisrWm9CRGtXRmRiT3hzQUhNOEtlcnppLwo=",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

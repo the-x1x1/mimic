@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = ["crates/mimic-core", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0-alpha.1"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/the-x1x1/mimic"
+authors = ["the-x1x1 <connersalt123@outlook.com>"]
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde", "clock"], default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+axum = { version = "0.8", features = ["json", "tokio", "http1", "query"], default-features = false }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["limit"] }
+rand = "0.9"
+sha2 = "0.10"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3"
+mimic-core = { path = "crates/mimic-core" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "unwind"
+strip = true

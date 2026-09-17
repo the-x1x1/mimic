@@ -1,0 +1,30 @@
+{
+  "commandId": "c-2001",
+  "commandType": "apply_settings_as_plugin_preset",
+  "payload": {
+    "items": [
+      {
+        "photoId": 4021,
+        "predictionId": "p-1",
+        "snapshotName": "Mimic Before \u2014 2026-09-16T20:11:04Z",
+        "settings": {
+          "Exposure2012": 0.35,
+          "Contrast2012": 12,
+          "Highlights2012": -48,
+          "Shadows2012": 36
+        }
+      },
+      {
+        "photoId": 4022,
+        "predictionId": "p-2",
+        "snapshotName": "Mimic Before \u2014 2026-09-16T20:11:04Z",
+        "settings": {
+          "Exposure2012": 0.2,
+          "Contrast2012": 8
+        }
+      }
+    ],
+    "createSnapshot": true,
+    "readBack": true
+  }
+}

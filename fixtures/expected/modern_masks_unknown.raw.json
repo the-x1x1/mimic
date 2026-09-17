@@ -1,0 +1,84 @@
+{
+  "parserVersion": "xmp_parser_v1",
+  "rawSettings": {
+    "Version": "17.0",
+    "ProcessVersion": "15.4",
+    "WhiteBalance": "As Shot",
+    "Temperature": "5600",
+    "Tint": "+10",
+    "Exposure2012": "-0.25",
+    "Contrast2012": "+15",
+    "Highlights2012": "-70",
+    "Shadows2012": "+25",
+    "Whites2012": "+5",
+    "Blacks2012": "-20",
+    "Texture": "0",
+    "Clarity2012": "0",
+    "Dehaze": "+8",
+    "Vibrance": "+20",
+    "Saturation": "0",
+    "Sharpness": "55",
+    "LuminanceSmoothing": "15",
+    "ColorNoiseReduction": "25",
+    "LensProfileEnable": "1",
+    "LensProfileName": "Adobe (SONY FE 85mm F1.8)",
+    "PostCropVignetteAmount": "0",
+    "GrainAmount": "15",
+    "GrainSize": "25",
+    "GrainFrequency": "50",
+    "CameraProfile": "Adobe Portrait",
+    "HasSettings": "True",
+    "HasCrop": "True",
+    "CropTop": "0.05",
+    "CropLeft": "0.1",
+    "CropBottom": "0.95",
+    "CropRight": "0.9",
+    "CropAngle": "-1.5",
+    "CropConstrainToWarp": "0",
+    "LensBlur": "{\"Active\":false}",
+    "PointColors": "{\"version\":1}",
+    "SomeNewSlider2027": "+42",
+    "MaskGroupBasedCorrections": [
+      {
+        "What": "Correction",
+        "CorrectionAmount": "1.000000",
+        "CorrectionActive": "true",
+        "CorrectionName": "Subject 1",
+        "LocalExposure2012": "0.35",
+        "LocalShadows2012": "0.2",
+        "CorrectionMasks": [
+          {
+            "What": "Mask/Image",
+            "MaskActive": "true",
+            "MaskName": "Subject 1",
+            "MaskSubType": "1",
+            "MaskValue": "1.000000",
+            "ReferencePoint": "0.500000 0.450000"
+          }
+        ]
+      }
+    ],
+    "ToneCurvePV2012": ["0, 12", "255, 250"],
+    "Look": {
+      "Name": "Adobe Color",
+      "Amount": "1",
+      "UUID": "B952C231111CD8E0ECCF14B86BAA7077",
+      "SupportsAmount": "false",
+      "Parameters": {
+        "CameraProfile": "Adobe Standard",
+        "ConvertToGrayscale": "False"
+      }
+    }
+  },
+  "metadata": {
+    "xmp:CreatorTool": "Adobe Photoshop Lightroom Classic 15.0 (Windows)",
+    "tiff:Make": "SONY",
+    "tiff:Model": "ILCE-7M4",
+    "exif:ExposureTime": "1/640",
+    "exif:FNumber": "18/10",
+    "exif:ISOSpeedRatings": "100",
+    "exif:FocalLength": "85/1",
+    "exif:DateTimeOriginal": "2025-06-21T18:05:09",
+    "exifEX:LensModel": "FE 85mm F1.8"
+  }
+}
