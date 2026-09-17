@@ -15,6 +15,8 @@ import {
   CapabilityMatrixResponse,
   CommandError,
   ConnectionTest,
+  CorrectionRow,
+  StyleHealth,
   DataQualityReport,
   DiagnosticsBundle,
   EngineStatus,
@@ -122,6 +124,9 @@ export const ipc = {
     call("archive_model_version", ModelVersion, { modelVersionId }),
   modelVersion: (modelVersionId: string) =>
     call("get_model_version", ModelVersion, { modelVersionId }),
+  styleHealth: (styleId: string) => call("get_style_health", StyleHealth, { styleId }),
+  corrections: (styleId: string, limit = 200) =>
+    call("list_corrections", CorrectionRow.array(), { styleId, limit }),
 
   sessions: () => call("list_sessions", Session.array()),
   createSession: (name: string, source: SessionSource, styleId: string | null) =>
@@ -145,6 +150,7 @@ export const ipc = {
     call("list_applied_edits", AppliedEdit.array(), { applyBatchId }),
   restoreApplyBatch: (applyBatchId: string) => call("restore_apply_batch", Job, { applyBatchId }),
   prediction: (predictionId: string) => call("get_prediction", PredictionDetail, { predictionId }),
+  syncCorrections: (sessionId: string) => call("sync_corrections", Job, { sessionId }),
 
   jobs: (limit = 50, activeOnly = false) => call("list_jobs", Job.array(), { limit, activeOnly }),
   job: (jobId: string) => call("get_job", Job, { jobId }),

@@ -25,6 +25,9 @@ import {
   predictedControlRows,
   JOB_LABELS,
   JOB_KINDS,
+  StyleHealth,
+  CorrectionRow,
+  formatNoTouch,
 } from "../src";
 
 const load = (p: string) => JSON.parse(readFileSync(p, "utf8"));
@@ -226,5 +229,19 @@ describe("session contracts", () => {
   });
   it("every session job kind has a label", () => {
     for (const kind of Object.values(JOB_KINDS)) expect(JOB_LABELS[kind]).toBeTruthy();
+  });
+});
+
+describe("corrections contracts", () => {
+  it("style health and correction row fixtures (shared with Rust) parse", () => {
+    const h = StyleHealth.parse(load(sessionFixture("style_health.json")));
+    expect(h.noTouch).toHaveLength(3);
+    expect(h.noTouch[2]?.rate).toBeNull();
+    expect(formatNoTouch(h.activeNoTouchRate)).toBe("82%");
+    expect(formatNoTouch(null)).toBe("—");
+    expect(h.mostCorrected[0]?.canonical).toBe("tone.exposure");
+    const row = CorrectionRow.parse(load(sessionFixture("correction_row.json")));
+    expect(row.delta[0]?.delta).toBeCloseTo(0.05);
+    expect(row.includedInTrainingVersion).toBeNull();
   });
 });

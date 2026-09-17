@@ -47,6 +47,13 @@ fn fixtures_match_types() {
     let photos = listing.result.unwrap()["photos"].clone();
     assert_eq!(photos.as_array().unwrap().len(), 2);
     assert!(photos[0]["photoId"].is_i64() && photos[0]["path"].is_string());
+    let corr: CommandResultBody = serde_json::from_str(fixture!("collect_correction_state.result.json")).unwrap();
+    let corr = corr.result.unwrap();
+    assert!(corr["collectedAt"].is_string());
+    assert!(
+        corr["items"][0]["settings"]["Exposure2012"].is_number()
+            && corr["items"][1]["error"]["code"] == "photo_not_found"
+    );
     let err: CommandResultBody = serde_json::from_str(fixture!("command_error.result.json")).unwrap();
     assert!(!err.ok);
     assert_eq!(err.error.unwrap().code, "catalog_write_denied");

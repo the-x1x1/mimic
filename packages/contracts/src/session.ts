@@ -164,12 +164,25 @@ export const AppliedEdit = z.object({
 });
 export type AppliedEdit = z.infer<typeof AppliedEdit>;
 
+export const CorrectionSync = z.object({
+  id: z.string(),
+  sessionId: z.string(),
+  lightroomCatalogFingerprint: z.string().nullable(),
+  syncedAt: z.string(),
+  checkedCount: z.number(),
+  untouchedCount: z.number(),
+  correctedCount: z.number(),
+  unresolvedCount: z.number(),
+});
+export type CorrectionSync = z.infer<typeof CorrectionSync>;
+
 export const SessionDetail = z.object({
   session: Session,
   source: SessionSource.nullable(),
   clusters: z.array(SceneCluster),
   predictionCounts: z.record(z.string(), z.number()),
   batches: z.array(ApplyBatch),
+  correctionSyncs: z.array(CorrectionSync),
   photoCount: z.number(),
   photosWithFeatures: z.number(),
   grouped: z.boolean(),

@@ -14,6 +14,8 @@ pub struct StyleSummary {
     pub cameras: Vec<String>,
     pub active_version: Option<mimic_core::db::ModelVersion>,
     pub version_count: usize,
+    /// No-Touch Rate of the active version; `None` until a corrections sync has checked applied photos.
+    pub no_touch_rate: Option<f64>,
 }
 
 fn summarize(state: &SharedState, style: mimic_core::db::StyleProfile) -> CommandResult<StyleSummary> {
@@ -28,11 +30,19 @@ fn summarize(state: &SharedState, style: mimic_core::db::StyleProfile) -> Comman
         }
     }
     let versions = state.db.list_model_versions(&style.id)?;
+    let active_version = versions.iter().find(|v| v.is_active).cloned();
+    let no_touch_rate = match &active_version {
+        Some(a) => {
+            state.db.no_touch_stats(&style.id)?.into_iter().find(|n| n.model_version_id == a.id).and_then(|n| n.rate)
+        }
+        None => None,
+    };
     Ok(StyleSummary {
         training_examples: examples,
         cameras,
-        active_version: versions.iter().find(|v| v.is_active).cloned(),
+        active_version,
         version_count: versions.len(),
+        no_touch_rate,
         style,
     })
 }
@@ -94,7 +104,25 @@ pub async fn get_style_detail(state: State<'_, SharedState>, style_id: String) -
         "libraries": reports,
         "versions": versions,
         "training": training_availability(&state, &style, &reports),
+        "health": mimic_core::corrections::style_health(&state.db, &style.id)?,
     }))
+}
+
+#[tauri::command]
+pub async fn get_style_health(
+    state: State<'_, SharedState>,
+    style_id: String,
+) -> CommandResult<mimic_core::corrections::StyleHealth> {
+    Ok(mimic_core::corrections::style_health(&state.db, &style_id)?)
+}
+
+#[tauri::command]
+pub async fn list_corrections(
+    state: State<'_, SharedState>,
+    style_id: String,
+    limit: Option<usize>,
+) -> CommandResult<Vec<mimic_core::db::CorrectionRow>> {
+    Ok(state.db.corrections_for_style(&style_id, limit.unwrap_or(200).min(2000))?)
 }
 
 fn training_availability(

@@ -78,14 +78,14 @@ def open_readonly(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def _group_key(row: sqlite3.Row, library_index: dict[str, int]) -> str:
+def _group_key(row: sqlite3.Row, library_index: dict[str, int], is_correction: bool = False) -> str:
     """Shoot identity used for leakage-free splits: library + capture day (fallback: folder).
 
     The library is identified by its position in the requested list rather than
     its UUID so the seeded split is reproducible across databases holding the
     same photos.
     """
-    lib = f"L{library_index.get(row['library_id'], 0)}"
+    lib = "C" if is_correction else f"L{library_index.get(row['library_id'], 0)}"
     day = (row["captured_at"] or "")[:10]
     if day:
         return f"{lib}|{day}"
@@ -104,7 +104,17 @@ def _stats_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def load_dataset(db_path: str | Path, library_ids: list[str], embeddings_dir: str | Path | None) -> Dataset:
+def load_dataset(
+    db_path: str | Path,
+    library_ids: list[str],
+    embeddings_dir: str | Path | None,
+    correction_asset_ids: list[str] | None = None,
+) -> Dataset:
+    """Load training pairs from the Style's libraries plus, optionally, assets
+    outside those libraries whose latest observed snapshot is a `correction`
+    (the photographer's final edit after a Mimic apply). Correction assets are
+    grouped as their own shoot key (`C|<day>`) so the split treats a corrected
+    session like any other shoot."""
     controls = predictable_controls()
     control_names = [c["canonical"] for c in controls]
     excluded: dict[str, int] = {
@@ -118,8 +128,15 @@ def load_dataset(db_path: str | Path, library_ids: list[str], embeddings_dir: st
     pairs: list[Pair] = []
     provider: str | None = None
     provider_conflict = False
+    correction_ids = [str(a) for a in (correction_asset_ids or [])]
+    correction_set = set(correction_ids)
     with open_readonly(db_path) as conn:
         placeholders = ",".join("?" for _ in library_ids)
+        extra_clause = ""
+        extra_args: list[str] = []
+        if correction_ids:
+            extra_clause = f" OR a.id IN ({','.join('?' for _ in correction_ids)})"
+            extra_args = correction_ids
         rows = conn.execute(
             f"""
             SELECT a.id AS asset_id, a.library_id, a.source_path, a.camera_make, a.camera_model, a.lens, a.iso, a.aperture,
@@ -131,13 +148,18 @@ def load_dataset(db_path: str | Path, library_ids: list[str], embeddings_dir: st
                 SELECT id FROM edit_snapshots WHERE asset_id = a.id AND source IN ('xmp','lightroom_sdk','correction')
                 ORDER BY observed_at DESC LIMIT 1)
             LEFT JOIN visual_features f ON f.asset_id = a.id AND f.feature_version = ?
-            WHERE a.library_id IN ({placeholders})
+            WHERE a.library_id IN ({placeholders}){extra_clause}
             ORDER BY a.captured_at, a.file_name
             """,
-            [FEATURE_VERSION, *library_ids],
+            [FEATURE_VERSION, *library_ids, *extra_args],
         ).fetchall()
     feature_names: list[str] = []
     for row in rows:
+        is_correction = row["asset_id"] in correction_set and row["library_id"] not in library_index
+        if is_correction and row["source"] != "correction":
+            # Only the photographer's final edit counts; a bare prediction never trains itself.
+            excluded["notCorrected"] = excluded.get("notCorrected", 0) + 1
+            continue
         if row["normalized_settings_json"] is None:
             excluded["noSnapshot"] += 1
             continue
@@ -198,7 +220,7 @@ def load_dataset(db_path: str | Path, library_ids: list[str], embeddings_dir: st
             Pair(
                 asset_id=row["asset_id"],
                 library_id=row["library_id"],
-                group_key=_group_key(row, library_index),
+                group_key=_group_key(row, library_index, is_correction),
                 camera=f"{row['camera_make'] or ''} {row['camera_model'] or ''}".strip() or "unknown",
                 lens=row["lens"] or "unknown",
                 captured_at=row["captured_at"],

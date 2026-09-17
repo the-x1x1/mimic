@@ -404,6 +404,44 @@ pub struct Correction {
     pub included_in_training_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CorrectionSync {
+    pub id: String,
+    pub session_id: String,
+    pub lightroom_catalog_fingerprint: Option<String>,
+    pub synced_at: String,
+    pub checked_count: i64,
+    pub untouched_count: i64,
+    pub corrected_count: i64,
+    pub unresolved_count: i64,
+}
+
+/// A correction joined with what the UI needs to show it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CorrectionRow {
+    #[serde(flatten)]
+    pub correction: Correction,
+    pub session_id: String,
+    pub file_name: String,
+    pub semantic_version: String,
+}
+
+/// No-Touch Rate for one model version: applied photos the photographer left
+/// untouched after a corrections sync, over all applied photos in synced sessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoTouchStats {
+    pub model_version_id: String,
+    pub semantic_version: String,
+    pub applied_checked: i64,
+    pub corrected: i64,
+    pub untouched: i64,
+    /// `None` until at least one applied photo has been checked by a sync.
+    pub rate: Option<f64>,
+}
+
 pub(crate) fn json_col(s: Option<String>) -> Option<Value> {
     s.and_then(|s| serde_json::from_str(&s).ok())
 }

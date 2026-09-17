@@ -1,4 +1,5 @@
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -145,3 +146,62 @@ def test_insufficient_data_is_a_structured_failure(tmp_path):
         train(db, [info["libraryId"]], "s", "m", tmp_path / "styles", None)
     assert ei.value.details["pairs"] == 12
     assert not (tmp_path / "styles").exists(), "no artifacts on failure"
+
+
+def _clone_asset_into_session_library(conn, src_asset_id: str, new_id: str, lib_id: str) -> None:
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(assets)").fetchall()]
+    row = dict(zip(cols, conn.execute("SELECT * FROM assets WHERE id = ?", (src_asset_id,)).fetchone(), strict=True))
+    row["id"] = new_id
+    row["library_id"] = lib_id
+    row["normalized_path"] = row["normalized_path"] + f"/{new_id}"
+    conn.execute(f"INSERT INTO assets({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})", [row[c] for c in cols])
+    fcols = [r[1] for r in conn.execute("PRAGMA table_info(visual_features)").fetchall()]
+    frow = dict(
+        zip(
+            fcols,
+            conn.execute("SELECT * FROM visual_features WHERE asset_id = ?", (src_asset_id,)).fetchone(),
+            strict=True,
+        )
+    )
+    frow["asset_id"] = new_id
+    conn.execute(
+        f"INSERT INTO visual_features({','.join(fcols)}) VALUES ({','.join('?' for _ in fcols)})",
+        [frow[c] for c in fcols],
+    )
+
+
+def test_dataset_includes_only_corrected_session_assets(synth_db, tmp_path):
+    db, info = synth_db
+    work = tmp_path / "corr.db"
+    shutil.copy(db, work)
+    with sqlite3.connect(work) as conn:
+        conn.execute(
+            "INSERT INTO libraries(id,name,source_type,created_at,status,purpose) VALUES ('sess','Session: x','folder_sidecars','t','scanned','session')"
+        )
+        src = info["assetIds"][0]
+        snap = conn.execute(
+            "SELECT normalized_settings_json, raw_settings_json, mapping_version FROM edit_snapshots WHERE asset_id = ? AND source = 'xmp'",
+            (src,),
+        ).fetchone()
+        for new_id in ("corrected", "predicted-only"):
+            _clone_asset_into_session_library(conn, src, new_id, "sess")
+            conn.execute(
+                "INSERT INTO edit_snapshots(id, asset_id, source, normalized_settings_json, raw_settings_json, mapping_version, observed_at) VALUES (?,?,?,?,?,?,?)",
+                (f"p-{new_id}", new_id, "prediction", snap[0], snap[1], snap[2], "2026-01-01T00:00:00Z"),
+            )
+        conn.execute(
+            "INSERT INTO edit_snapshots(id, asset_id, source, normalized_settings_json, raw_settings_json, mapping_version, observed_at) VALUES (?,?,?,?,?,?,?)",
+            ("c-corrected", "corrected", "correction", snap[0], snap[1], snap[2], "2026-01-02T00:00:00Z"),
+        )
+    base = load_dataset(work, [info["libraryId"]], None)
+    assert len(base) == 160, "session assets never leak into a library-only dataset"
+    ds = load_dataset(work, [info["libraryId"]], None, ["corrected", "predicted-only", "missing"])
+    assert len(ds) == 161
+    extra = [p for p in ds.pairs if p.asset_id == "corrected"]
+    assert extra and extra[0].source == "correction" and extra[0].group_key.startswith("C|")
+    assert ds.excluded["notCorrected"] == 1, "a prediction-only asset is not a training pair"
+    r = train(
+        work, [info["libraryId"]], "s", "m", tmp_path / "styles", None, {"seed": 3, "correctionAssetIds": ["corrected"]}
+    )
+    assert r["counts"]["correctionPairs"] == 1
+    assert r["trainingSet"]["correctionAssetIds"] == ["corrected"]

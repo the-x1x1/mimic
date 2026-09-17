@@ -15,6 +15,7 @@ pub struct Migration {
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "init", sql: include_str!("migrations/0001_init.sql") },
     Migration { version: 2, name: "sessions", sql: include_str!("migrations/0002_sessions.sql") },
+    Migration { version: 3, name: "corrections", sql: include_str!("migrations/0003_corrections.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -69,7 +70,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 2);
+        assert_eq!(latest_version(), 3);
     }
 
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {
@@ -78,7 +79,7 @@ mod tests {
     }
 
     #[test]
-    fn v1_database_with_data_upgrades_to_v2_keeping_rows() {
+    fn v1_database_with_data_upgrades_to_latest_keeping_rows() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         migrate_to(&mut conn, 1).unwrap();
@@ -125,8 +126,14 @@ mod tests {
         )
         .unwrap();
 
+        conn.execute(
+            "INSERT INTO corrections(id, asset_id, prediction_id, model_version_id, predicted_settings_json, corrected_settings_json, delta_json, correction_magnitude, observed_at)
+             VALUES ('c1', 'a1', 'p1', 'mv', '{}', '{}', '{}', 0.1, 't')",
+            [],
+        )
+        .unwrap();
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![2]);
+        assert_eq!(applied, vec![2, 3]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
         let purpose: String =
             conn.query_row("SELECT purpose FROM libraries WHERE id = 'l1'", [], |r| r.get(0)).unwrap();
@@ -147,6 +154,16 @@ mod tests {
         assert!(
             conn.execute("UPDATE libraries SET purpose = 'bogus' WHERE id = 'l1'", []).is_err(),
             "purpose is constrained"
+        );
+        assert!(column_names(&conn, "correction_syncs").contains(&"untouched_count".to_string()));
+        assert!(
+            conn.execute(
+                "INSERT INTO corrections(id, asset_id, prediction_id, model_version_id, predicted_settings_json, corrected_settings_json, delta_json, correction_magnitude, observed_at)
+                 VALUES ('c2', 'a1', 'p1', 'mv', '{}', '{}', '{}', 0.1, 't')",
+                [],
+            )
+            .is_err(),
+            "one correction per prediction"
         );
         assert!(migrate(&mut conn).unwrap().is_empty(), "idempotent");
     }

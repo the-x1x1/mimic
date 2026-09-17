@@ -522,7 +522,7 @@ pub fn apply_preflight(
 
 /// Map session assets to Lightroom photo ids: direct when the asset came from
 /// this catalog, otherwise by normalized path against the catalog listing.
-async fn resolve_photo_ids(
+pub(crate) async fn resolve_photo_ids(
     bridge: &BridgeHandle,
     conn: &ConnectionInfo,
     db: &Db,
@@ -1020,6 +1020,7 @@ pub struct SessionDetail {
     pub clusters: Vec<SceneCluster>,
     pub prediction_counts: BTreeMap<String, i64>,
     pub batches: Vec<ApplyBatch>,
+    pub correction_syncs: Vec<crate::db::CorrectionSync>,
     pub photo_count: i64,
     pub photos_with_features: i64,
     pub grouped: bool,
@@ -1037,6 +1038,7 @@ pub fn session_detail(db: &Db, session_id: &str) -> Result<SessionDetail, DbErro
         clusters: db.scene_clusters(session_id)?,
         prediction_counts: db.count_session_predictions_by_status(session_id)?.into_iter().collect(),
         batches: db.session_apply_batches(session_id)?,
+        correction_syncs: db.correction_syncs(session_id)?,
         photo_count: members.len() as i64,
         photos_with_features,
         grouped: members.iter().any(|m| m.cluster_id.is_some()),

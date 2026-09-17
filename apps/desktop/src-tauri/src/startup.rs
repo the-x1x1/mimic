@@ -78,6 +78,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         ingest::executor(engine.clone(), bridge.clone()),
         mimic_core::training::executor(engine.clone()),
         mimic_core::sessions::executor(engine.clone(), bridge.clone()),
+        mimic_core::corrections::executor(bridge.clone()),
     ]));
     let jobs = JobRunner::new(db.clone(), executor);
     let (interrupted, requeued) = jobs.recover()?;

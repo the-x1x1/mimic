@@ -329,6 +329,7 @@ mod tests {
             "events",
             "lightroom_connections",
             "update_state",
+            "correction_syncs",
         ] {
             assert!(names.contains(&t), "missing table {t}");
         }

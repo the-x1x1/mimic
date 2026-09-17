@@ -17,6 +17,7 @@ export const qk = {
   report: (id: string) => ["report", id] as const,
   styles: ["styles"] as const,
   styleDetail: (id: string) => ["style", id] as const,
+  corrections: (id: string) => ["corrections", id] as const,
   sessions: ["sessions"] as const,
   sessionDetail: (id: string) => ["session", id] as const,
   sessionPhotos: (id: string) => ["sessionPhotos", id] as const,

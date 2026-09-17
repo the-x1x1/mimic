@@ -82,3 +82,11 @@ export function useArchiveVersion() {
     onError: (e: Error) => toast.danger("Cannot archive", e.message),
   });
 }
+
+export function useCorrections(styleId: string | null) {
+  return useQuery({
+    queryKey: qk.corrections(styleId ?? ""),
+    queryFn: () => ipc.corrections(styleId!),
+    enabled: !!styleId,
+  });
+}

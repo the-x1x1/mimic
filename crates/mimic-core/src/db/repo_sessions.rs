@@ -3,8 +3,8 @@ use serde_json::Value;
 
 use super::models::{json_col, json_col_or_default};
 use super::{
-    AppliedEdit, ApplyBatch, Correction, Db, DbError, DbResult, NewPrediction, Prediction, SceneCluster, Session,
-    SessionAsset,
+    AppliedEdit, ApplyBatch, Correction, CorrectionRow, CorrectionSync, Db, DbError, DbResult, NewPrediction,
+    NoTouchStats, Prediction, SceneCluster, Session, SessionAsset,
 };
 use crate::ids::{new_id, now_rfc3339};
 
@@ -444,6 +444,168 @@ impl Db {
 
     // ----- corrections --------------------------------------------------
 
+    /// Replace the correction for a prediction unless an earlier one was
+    /// already consumed by a training run (that one is immutable history).
+    /// Returns `None` when the existing correction was kept.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_correction(
+        &self,
+        asset_id: &str,
+        prediction_id: &str,
+        model_version_id: &str,
+        predicted: &Value,
+        corrected: &Value,
+        delta: &Value,
+        magnitude: f64,
+    ) -> DbResult<Option<Correction>> {
+        let existing: Option<(String, Option<String>)> = self
+            .conn()
+            .query_row(
+                "SELECT id, included_in_training_version FROM corrections WHERE prediction_id = ?1",
+                [prediction_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match existing {
+            Some((_, Some(_))) => return Ok(None),
+            Some((id, None)) => {
+                self.conn().execute("DELETE FROM corrections WHERE id = ?1", [id])?;
+            }
+            None => {}
+        }
+        self.insert_correction(asset_id, prediction_id, model_version_id, predicted, corrected, delta, magnitude)
+            .map(Some)
+    }
+
+    pub fn record_correction_sync(
+        &self,
+        session_id: &str,
+        catalog_fingerprint: Option<&str>,
+        counts: (i64, i64, i64, i64),
+    ) -> DbResult<CorrectionSync> {
+        let id = new_id();
+        self.conn().execute(
+            "INSERT INTO correction_syncs(id, session_id, lightroom_catalog_fingerprint, synced_at, checked_count, untouched_count, corrected_count, unresolved_count)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![id, session_id, catalog_fingerprint, now_rfc3339(), counts.0, counts.1, counts.2, counts.3],
+        )?;
+        let syncs = self.correction_syncs(session_id)?;
+        syncs.into_iter().find(|s| s.id == id).ok_or(DbError::NotFound(id))
+    }
+
+    pub fn correction_syncs(&self, session_id: &str) -> DbResult<Vec<CorrectionSync>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, lightroom_catalog_fingerprint, synced_at, checked_count, untouched_count, corrected_count, unresolved_count
+             FROM correction_syncs WHERE session_id = ?1 ORDER BY synced_at DESC",
+        )?;
+        let rows = stmt.query_map([session_id], |r| {
+            Ok(CorrectionSync {
+                id: r.get(0)?,
+                session_id: r.get(1)?,
+                lightroom_catalog_fingerprint: r.get(2)?,
+                synced_at: r.get(3)?,
+                checked_count: r.get(4)?,
+                untouched_count: r.get(5)?,
+                corrected_count: r.get(6)?,
+                unresolved_count: r.get(7)?,
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Corrections for every version of a Style, newest first, with the asset
+    /// file name and version label the UI shows.
+    pub fn corrections_for_style(&self, style_id: &str, limit: usize) -> DbResult<Vec<CorrectionRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT c.id, c.asset_id, c.prediction_id, c.model_version_id, c.predicted_settings_json, c.corrected_settings_json,
+                    c.delta_json, c.correction_magnitude, c.observed_at, c.included_in_training_version,
+                    p.session_id, a.file_name, mv.semantic_version
+             FROM corrections c
+             JOIN model_versions mv ON mv.id = c.model_version_id
+             JOIN predictions p ON p.id = c.prediction_id
+             JOIN assets a ON a.id = c.asset_id
+             WHERE mv.style_profile_id = ?1 ORDER BY c.observed_at DESC LIMIT {limit}"
+        ))?;
+        let rows = stmt.query_map([style_id], |r| {
+            Ok(CorrectionRow {
+                correction: Correction {
+                    id: r.get(0)?,
+                    asset_id: r.get(1)?,
+                    prediction_id: r.get(2)?,
+                    model_version_id: r.get(3)?,
+                    predicted_settings: json_col_or_default(r.get(4)?),
+                    corrected_settings: json_col_or_default(r.get(5)?),
+                    delta: json_col_or_default(r.get(6)?),
+                    correction_magnitude: r.get(7)?,
+                    observed_at: r.get(8)?,
+                    included_in_training_version: r.get(9)?,
+                },
+                session_id: r.get(10)?,
+                file_name: r.get(11)?,
+                semantic_version: r.get(12)?,
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Asset ids of corrections for a Style that no training run has used yet.
+    pub fn pending_correction_asset_ids(&self, style_id: &str) -> DbResult<Vec<(String, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.asset_id FROM corrections c JOIN model_versions mv ON mv.id = c.model_version_id
+             WHERE mv.style_profile_id = ?1 AND c.included_in_training_version IS NULL ORDER BY c.observed_at",
+        )?;
+        let rows = stmt.query_map([style_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    pub fn mark_corrections_included(&self, correction_ids: &[String], semantic_version: &str) -> DbResult<usize> {
+        let mut n = 0;
+        self.transaction(|tx| {
+            for id in correction_ids {
+                n += tx.execute(
+                    "UPDATE corrections SET included_in_training_version = ?2 WHERE id = ?1 AND included_in_training_version IS NULL",
+                    params![id, semantic_version],
+                )?;
+            }
+            Ok(())
+        })?;
+        Ok(n)
+    }
+
+    /// No-Touch statistics per model version of a Style. Only applied, verified,
+    /// non-restored photos in sessions that have been synced count.
+    pub fn no_touch_stats(&self, style_id: &str) -> DbResult<Vec<NoTouchStats>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT mv.id, mv.semantic_version,
+                    (SELECT COUNT(*) FROM applied_edits ae JOIN predictions p ON p.id = ae.prediction_id
+                      WHERE p.model_version_id = mv.id AND ae.result = 'applied' AND ae.restore_result IS NULL
+                        AND p.session_id IN (SELECT session_id FROM correction_syncs)),
+                    (SELECT COUNT(*) FROM corrections c JOIN applied_edits ae ON ae.prediction_id = c.prediction_id
+                      JOIN predictions p ON p.id = c.prediction_id
+                      WHERE c.model_version_id = mv.id AND ae.result = 'applied' AND ae.restore_result IS NULL
+                        AND p.session_id IN (SELECT session_id FROM correction_syncs))
+             FROM model_versions mv WHERE mv.style_profile_id = ?1 ORDER BY mv.created_at",
+        )?;
+        let rows = stmt.query_map([style_id], |r| {
+            let checked: i64 = r.get(2)?;
+            let corrected: i64 = r.get(3)?;
+            let corrected = corrected.min(checked);
+            Ok(NoTouchStats {
+                model_version_id: r.get(0)?,
+                semantic_version: r.get(1)?,
+                applied_checked: checked,
+                corrected,
+                untouched: checked - corrected,
+                rate: if checked > 0 { Some((checked - corrected) as f64 / checked as f64) } else { None },
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn insert_correction(
         &self,
@@ -634,6 +796,60 @@ mod tests {
             .unwrap();
         assert_eq!(c.correction_magnitude, 0.2);
         assert_eq!(db.corrections_for_model(&mv_id).unwrap().len(), 1);
+        // Re-sync replaces an unused correction; a used one is kept.
+        let again = db
+            .upsert_correction(&asset_id, &p2.id, &mv_id, &json!({}), &json!({}), &json!({"e": 0.1}), 0.1)
+            .unwrap()
+            .unwrap();
+        assert_ne!(again.id, c.id);
+        assert_eq!(db.corrections_for_model(&mv_id).unwrap().len(), 1);
+        assert_eq!(db.mark_corrections_included(std::slice::from_ref(&again.id), "1.1.0").unwrap(), 1);
+        assert!(db
+            .upsert_correction(&asset_id, &p2.id, &mv_id, &json!({}), &json!({}), &json!({}), 0.5)
+            .unwrap()
+            .is_none());
+        let style_id = db.get_model_version(&mv_id).unwrap().unwrap().style_profile_id;
+        let rows = db.corrections_for_style(&style_id, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].file_name, "a.cr3");
+        assert_eq!(rows[0].correction.included_in_training_version.as_deref(), Some("1.1.0"));
+        assert!(db.pending_correction_asset_ids(&style_id).unwrap().is_empty());
+        // No-Touch: nothing counts until a sync is recorded, and restored edits never count.
+        assert_eq!(db.no_touch_stats(&style_id).unwrap()[0].rate, None);
+        db.record_correction_sync(&session.id, Some("cat"), (0, 0, 0, 0)).unwrap();
+        assert_eq!(db.no_touch_stats(&style_id).unwrap()[0].applied_checked, 0, "p2's edit was restored");
+        let p3 = db
+            .insert_prediction(&NewPrediction {
+                session_id: session.id.clone(),
+                asset_id: asset_id.clone(),
+                model_version_id: mv_id.clone(),
+                predicted_settings: json!({}),
+                raw_model_output: json!({}),
+                confidence: 0.7,
+                confidence_components: json!({}),
+                nearest_examples: json!([]),
+                capability_schema_version: None,
+                cluster_id: None,
+            })
+            .unwrap();
+        let b2 = db.create_apply_batch(&session.id, Some("cat")).unwrap();
+        db.record_applied_edit(&NewAppliedEdit {
+            apply_batch_id: b2.id.clone(),
+            prediction_id: p3.id.clone(),
+            asset_id: asset_id.clone(),
+            before_settings: Some(json!({"Exposure2012": 0})),
+            applied_settings: json!({"Exposure2012": 0.2}),
+            lightroom_snapshot_name: None,
+            result: "applied".into(),
+            error: None,
+        })
+        .unwrap();
+        let nt = &db.no_touch_stats(&style_id).unwrap()[0];
+        assert_eq!((nt.applied_checked, nt.corrected, nt.untouched, nt.rate), (1, 0, 1, Some(1.0)));
+        db.upsert_correction(&asset_id, &p3.id, &mv_id, &json!({}), &json!({}), &json!({}), 0.3).unwrap();
+        let nt = &db.no_touch_stats(&style_id).unwrap()[0];
+        assert_eq!((nt.corrected, nt.untouched, nt.rate), (1, 0, Some(0.0)));
+        assert_eq!(db.correction_syncs(&session.id).unwrap().len(), 1);
     }
 
     #[test]

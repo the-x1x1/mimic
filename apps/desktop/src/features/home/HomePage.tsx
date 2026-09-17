@@ -6,7 +6,7 @@ import { useSystemStatus } from "@/hooks/useSystem";
 import { useStyles } from "@/hooks/useStyles";
 import { useLibraries } from "@/hooks/useLibraries";
 import { formatRelative } from "@/lib/format";
-import { JOB_LABELS, primaryError } from "@mimic/contracts";
+import { JOB_LABELS, formatNoTouch, primaryError } from "@mimic/contracts";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -106,8 +106,12 @@ export function HomePage() {
                 />
                 <Metric
                   label="No-Touch Rate"
-                  value="—"
-                  hint="needs corrections sync to know which applied photos you left untouched (0.4.0)"
+                  value={formatNoTouch(style.noTouchRate)}
+                  hint={
+                    style.noTouchRate === null
+                      ? "measured once you sync corrections from an applied session"
+                      : "applied photos you left untouched after sync"
+                  }
                 />
               </div>
             ) : (
