@@ -319,6 +319,10 @@ pub struct SceneCluster {
     pub feature_summary: Value,
     pub created_at: String,
     pub asset_count: i64,
+    /// Photographer-chosen reference photo for the consistency policy.
+    pub reference_asset_id: Option<String>,
+    /// Last manual rename/merge/split/move; `None` when untouched since grouping.
+    pub edited_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

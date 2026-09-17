@@ -1,6 +1,6 @@
 [project]
 name = "mimic-engine"
-version = "0.4.0a2"
+version = "0.5.0a1"
 description = "Mimic ML/image engine: deterministic feature extraction, XMP ingest, Style Brain training and prediction. Runs as a stdio NDJSON sidecar of the Mimic desktop app."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

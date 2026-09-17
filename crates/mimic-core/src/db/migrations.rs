@@ -16,6 +16,11 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "init", sql: include_str!("migrations/0001_init.sql") },
     Migration { version: 2, name: "sessions", sql: include_str!("migrations/0002_sessions.sql") },
     Migration { version: 3, name: "corrections", sql: include_str!("migrations/0003_corrections.sql") },
+    Migration {
+        version: 4,
+        name: "session_intelligence",
+        sql: include_str!("migrations/0004_session_intelligence.sql"),
+    },
 ];
 
 /// Highest schema version this build knows about.
@@ -70,7 +75,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 3);
+        assert_eq!(latest_version(), 4);
     }
 
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {
@@ -132,8 +137,13 @@ mod tests {
             [],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO scene_clusters(id, session_id, label, created_at) VALUES ('sc1', 's1', 'Group 1', 't')",
+            [],
+        )
+        .unwrap();
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![2, 3]);
+        assert_eq!(applied, vec![2, 3, 4]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
         let purpose: String =
             conn.query_row("SELECT purpose FROM libraries WHERE id = 'l1'", [], |r| r.get(0)).unwrap();
@@ -164,6 +174,13 @@ mod tests {
             )
             .is_err(),
             "one correction per prediction"
+        );
+        let cols = column_names(&conn, "scene_clusters");
+        assert!(cols.contains(&"reference_asset_id".to_string()) && cols.contains(&"edited_at".to_string()));
+        conn.execute("UPDATE scene_clusters SET reference_asset_id = 'a1' WHERE id = 'sc1'", []).unwrap();
+        assert!(
+            conn.execute("UPDATE scene_clusters SET reference_asset_id = 'nope' WHERE id = 'sc1'", []).is_err(),
+            "reference must be an existing asset"
         );
         assert!(migrate(&mut conn).unwrap().is_empty(), "idempotent");
     }

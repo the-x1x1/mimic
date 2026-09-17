@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SessionSource } from "@mimic/contracts";
+import type { GroupEdit, SessionSource } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
@@ -161,5 +161,14 @@ export function useSyncCorrections() {
       toast.info("Sync started", "Reading the current develop settings back from Lightroom.");
     },
     onError: (e: Error) => toast.danger("Cannot sync corrections", e.message),
+  });
+}
+
+export function useEditGroups(sessionId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (edit: GroupEdit) => ipc.editSessionGroups(sessionId, edit),
+    onSuccess: () => invalidateSession(qc, sessionId),
+    onError: (e: Error) => toast.danger("Cannot change groups", e.message),
   });
 }

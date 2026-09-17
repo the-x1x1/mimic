@@ -1,5 +1,5 @@
 -- Generated/updated by scripts/sync-version.mjs. Do not edit by hand.
 return {
-  version = "0.4.0-alpha.2",
+  version = "0.5.0-alpha.1",
   protocolVersion = 1,
 }

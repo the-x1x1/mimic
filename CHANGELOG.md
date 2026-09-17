@@ -2,6 +2,19 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.5.0-alpha.1] — 2026-09-17
+
+Session intelligence: reference photos, group editing, per-group and per-camera confidence, and group-outlier flags.
+
+### Added
+
+- Schema v4 (`0004_session_intelligence.sql`): `scene_clusters.reference_asset_id` (FK to assets) and `edited_at`; the seeded upgrade test now runs v1 → v4.
+- Engine: `model.predict` accepts `references {groupId: assetId}`; the consistency policy pulls a group toward its reference (blend 0.8, same per-family caps) and never changes the reference itself (`isReference`, `consistencyShift = 0`); `detect_outliers` flags photos whose exposure, temperature or tint sits > 12 % of range from their group's median (groups ≥ 4) as `groupOutlier` with a reason line, judged on raw predictions before blending.
+- mimic-core `sessions`: `edit_groups` (rename; set/clear a member-only reference; merge with the target keeping label and reference; move photos into an existing or new group with emptied sources deleted and orphaned references cleared), every edit stamping `edited_at`; `predict_session` passes group references and counts outliers; `session_detail` gains `groupStats` (photos, predicted, mean/min confidence, low-confidence, unfamiliar, outliers, applied, rejected per group), `cameraStats` (photos, mean confidence, known-to-model per camera/lens), `groupingChangedSincePrediction` and `syncSuggested`.
+- Command `edit_session_groups`; `GroupEdit` tagged-union contract and `session_detail.json` fixture round-tripped in Rust and zod (the fixture caught a snake_case field leak).
+- UI: Scene groups table with inline rename, "use selected as reference", two-step merge, move/split of the multi-selected photos (Ctrl/Cmd/Shift-click in the grid); cameras/lenses table when a session mixes bodies or uses one the model has not seen; banners when groups changed after the last prediction and when a corrections sync is due; outlier badge and reference star on tiles; Review's attention queue includes group outliers.
+- Tests: pytest reference/outlier unit tests and service-level reference assertions; repository tests for every group edit; `sessions_e2e` extended with rename → split → invalid reference → merge → predict → reference → stale flag → re-predict; GroupsPanel component tests; contracts tests.
+
 ## [0.4.0-alpha.2] — 2026-09-17
 
 Release-pipeline fix only; application code is identical to 0.4.0-alpha.1 (whose Release workflow never produced an installer).

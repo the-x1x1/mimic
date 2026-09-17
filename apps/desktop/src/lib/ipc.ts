@@ -35,6 +35,8 @@ import {
   SessionDetail,
   SessionPhoto,
   type SessionSource,
+  type GroupEdit,
+  SceneCluster,
   Settings,
   StyleDetail,
   StyleSummary,
@@ -151,6 +153,8 @@ export const ipc = {
   restoreApplyBatch: (applyBatchId: string) => call("restore_apply_batch", Job, { applyBatchId }),
   prediction: (predictionId: string) => call("get_prediction", PredictionDetail, { predictionId }),
   syncCorrections: (sessionId: string) => call("sync_corrections", Job, { sessionId }),
+  editSessionGroups: (sessionId: string, edit: GroupEdit) =>
+    call("edit_session_groups", SceneCluster.array(), { sessionId, edit }),
 
   jobs: (limit = 50, activeOnly = false) => call("list_jobs", Job.array(), { limit, activeOnly }),
   job: (jobId: string) => call("get_job", Job, { jobId }),

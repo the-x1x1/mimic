@@ -1,11 +1,21 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Badge, Button, Card, EmptyState, InlineError, Metric, ProgressBar } from "@mimic/ui";
-import { ImageOff, Layers3, RefreshCw, RotateCcw, Sparkles, Trash2, Upload } from "lucide-react";
+import {
+  ImageOff,
+  Layers3,
+  RefreshCw,
+  RotateCcw,
+  Sparkles,
+  Star,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { JOB_LABELS, needsAttention, type SessionPhoto } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
 import { ApplyResultBadge, ConfidenceBadge } from "@/components/ConfidenceBadge";
 import { PredictionPanel } from "@/components/PredictionPanel";
+import { GroupsPanel } from "@/components/GroupsPanel";
 import { useJobs } from "@/hooks/useJobs";
 import { useLightroomStatus } from "@/hooks/useLightroom";
 import {
@@ -20,6 +30,7 @@ import {
   useSetPredictionReview,
   useSetSessionStyle,
   useSyncCorrections,
+  useEditGroups,
 } from "@/hooks/useSessions";
 import { useStyles } from "@/hooks/useStyles";
 import { previewUrl } from "@/lib/ipc";
@@ -53,7 +64,10 @@ export function SessionDetailPage() {
   const del = useDeleteSession();
   const sync = useSyncCorrections();
   const [clusterFilter, setClusterFilter] = useState<string | "all" | "attention">("all");
-  const [selected, setSelected] = useState<string | null>(null);
+  // Multi-select: plain click selects one (and opens the panel); Ctrl/Cmd-click toggles.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selected = selectedIds.length === 1 ? selectedIds[0]! : null;
+  const editGroups = useEditGroups(sessionId);
   const [confirm, setConfirm] = useState<{ ids?: string[]; label: string } | null>(null);
   const preflight = useApplyPreflight(sessionId, confirm?.ids, confirm !== null);
 
@@ -81,10 +95,14 @@ export function SessionDetailPage() {
     clusters,
     batches,
     correctionSyncs,
+    groupStats,
+    cameraStats,
     predictionCounts,
     grouped,
     photoCount,
     photosWithFeatures,
+    groupingChangedSincePrediction,
+    syncSuggested,
   } = detail.data;
   const appliedVerified = batches.reduce((n, b) => n + b.appliedCount, 0);
   const trainedStyles = (styles.data ?? []).filter((s) => s.activeVersion);
@@ -241,6 +259,26 @@ export function SessionDetailPage() {
         </InlineError>
       ) : null}
 
+      {groupingChangedSincePrediction ? (
+        <InlineError title="Groups changed since the last prediction">
+          Renames, merges, moves or a new reference photo only take effect when you run Predict
+          again.
+        </InlineError>
+      ) : null}
+      {syncSuggested && lrConnected && !busy ? (
+        <Card title="Finished your own pass in Lightroom?" className="mt-3">
+          <div className="row gap-2 wrap">
+            <span className="muted small">
+              Verified applies exist that no sync has checked yet. Syncing turns your changes into
+              corrections and measures the No-Touch Rate.
+            </span>
+            <Button size="sm" icon={<RefreshCw />} onClick={() => sync.mutate(sessionId)}>
+              Sync corrections now
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+
       <div className="metric-grid mt-3">
         <Metric
           label="Scene groups"
@@ -338,6 +376,61 @@ export function SessionDetailPage() {
         </Card>
       ) : null}
 
+      {photoCount > 0 ? (
+        <div className="mt-3">
+          <GroupsPanel
+            clusters={clusters}
+            stats={groupStats}
+            photos={photos.data ?? []}
+            selected={selectedIds}
+            busy={busy || editGroups.isPending}
+            onEdit={(edit) => editGroups.mutate(edit, { onSuccess: () => setSelectedIds([]) })}
+            onFilter={(id) => setClusterFilter(clusterFilter === id ? "all" : id)}
+            activeFilter={clusterFilter}
+          />
+        </div>
+      ) : null}
+      {cameraStats.length > 1 || cameraStats.some((c) => c.knownToModel === false) ? (
+        <Card title="Cameras and lenses in this session" className="mt-3">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Camera</th>
+                <th>Lens</th>
+                <th className="num">Photos</th>
+                <th className="num">Mean confidence</th>
+                <th>Known to the model</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cameraStats.map((c) => (
+                <tr key={`${c.camera}|${c.lens}`}>
+                  <td>{c.camera}</td>
+                  <td>{c.lens}</td>
+                  <td className="num">{c.photos}</td>
+                  <td className="num">
+                    {c.meanConfidence === null ? "—" : `${Math.round(c.meanConfidence * 100)}%`}
+                  </td>
+                  <td>
+                    {c.knownToModel === null ? (
+                      <span className="muted">—</span>
+                    ) : c.knownToModel ? (
+                      <Badge tone="success">yes</Badge>
+                    ) : (
+                      <Badge
+                        tone="warning"
+                        title="No training photos from this camera; expect lower confidence"
+                      >
+                        no
+                      </Badge>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      ) : null}
       {correctionSyncs.length > 0 ? (
         <Card title="Corrections synced" className="mt-3">
           <table className="table">
@@ -417,8 +510,19 @@ export function SessionDetailPage() {
               <SessionTile
                 key={p.asset.id}
                 photo={p}
-                selected={p.asset.id === selected}
-                onSelect={() => setSelected(p.asset.id === selected ? null : p.asset.id)}
+                selected={selectedIds.includes(p.asset.id)}
+                isReference={clusters.some((c) => c.referenceAssetId === p.asset.id)}
+                onSelect={(multi) =>
+                  setSelectedIds((cur) =>
+                    multi
+                      ? cur.includes(p.asset.id)
+                        ? cur.filter((id) => id !== p.asset.id)
+                        : [...cur, p.asset.id]
+                      : cur.length === 1 && cur[0] === p.asset.id
+                        ? []
+                        : [p.asset.id],
+                  )
+                }
               />
             ))}
           </div>
@@ -464,21 +568,29 @@ export function SessionDetailPage() {
 export function SessionTile({
   photo,
   selected,
+  isReference,
   onSelect,
 }: {
   photo: SessionPhoto;
   selected: boolean;
-  onSelect: () => void;
+  isReference?: boolean;
+  onSelect: (multi: boolean) => void;
 }) {
   const src = previewUrl(photo.previewPath);
+  const outlier = photo.prediction?.rawModelOutput.groupOutlier;
   return (
     <button
       className={selected ? "tile tile--selected" : "tile"}
       role="listitem"
       aria-pressed={selected}
-      onClick={onSelect}
-      title={photo.asset.sourcePath}
+      onClick={(e) => onSelect(e.ctrlKey || e.metaKey || e.shiftKey)}
+      title={`${photo.asset.sourcePath}${outlier ? ` · ${outlier.control} disagrees with its group` : ""}`}
     >
+      {isReference ? (
+        <span className="tile__flag" title="Reference photo for its group">
+          <Star size={12} />
+        </span>
+      ) : null}
       <div className="tile__image">
         {src ? (
           <img src={src} alt="" loading="lazy" decoding="async" />
@@ -492,6 +604,13 @@ export function SessionTile({
         <span className="tile__name">{photo.asset.fileName}</span>
         {photo.lastApply && photo.lastApply.result !== "applied" ? (
           <ApplyResultBadge result={photo.lastApply.result} />
+        ) : outlier && photo.prediction?.status !== "applied" ? (
+          <Badge
+            tone="warning"
+            title={`${outlier.control} is ${Math.round(outlier.distance * 100)}% of range from its group`}
+          >
+            outlier
+          </Badge>
         ) : (
           <ConfidenceBadge prediction={photo.prediction} />
         )}

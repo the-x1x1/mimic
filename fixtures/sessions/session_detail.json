@@ -1,0 +1,102 @@
+{
+  "session": {
+    "id": "session-1",
+    "name": "2026-09-12 Elopement",
+    "sourcePath": "D:\\\\Shoots\\\\2026-09-12 Elopement",
+    "sourceLibraryId": "lib-session-1",
+    "capturedStart": "2026-09-12T14:02:11",
+    "capturedEnd": "2026-09-12T19:40:03",
+    "status": "predicted",
+    "activeStyleProfileId": "style-1",
+    "createdAt": "2026-09-16T20:00:00Z",
+    "assetCount": 312
+  },
+  "source": {
+    "kind": "folder",
+    "path": "D:\\\\Shoots\\\\2026-09-12 Elopement"
+  },
+  "clusters": [
+    {
+      "id": "cluster-1",
+      "sessionId": "session-1",
+      "label": "Ceremony",
+      "centroidArtifactId": null,
+      "featureSummary": {
+        "timeBlock": 1,
+        "count": 140,
+        "medianLuminance": 0.42
+      },
+      "createdAt": "2026-09-16T20:02:00Z",
+      "assetCount": 140,
+      "referenceAssetId": "asset-1",
+      "editedAt": "2026-09-16T20:30:00Z"
+    },
+    {
+      "id": "cluster-2",
+      "sessionId": "session-1",
+      "label": "Group 2",
+      "centroidArtifactId": null,
+      "featureSummary": {
+        "timeBlock": 2,
+        "count": 172
+      },
+      "createdAt": "2026-09-16T20:02:00Z",
+      "assetCount": 172,
+      "referenceAssetId": null,
+      "editedAt": null
+    }
+  ],
+  "groupStats": [
+    {
+      "clusterId": "cluster-1",
+      "photos": 140,
+      "predicted": 140,
+      "meanConfidence": 0.81,
+      "minConfidence": 0.44,
+      "lowConfidence": 6,
+      "outOfDistribution": 1,
+      "outliers": 2,
+      "applied": 0,
+      "rejected": 3
+    },
+    {
+      "clusterId": "cluster-2",
+      "photos": 172,
+      "predicted": 172,
+      "meanConfidence": 0.72,
+      "minConfidence": 0.31,
+      "lowConfidence": 19,
+      "outOfDistribution": 4,
+      "outliers": 5,
+      "applied": 0,
+      "rejected": 0
+    }
+  ],
+  "cameraStats": [
+    {
+      "camera": "Canon Canon EOS R6",
+      "lens": "RF50mm F1.2 L USM",
+      "photos": 260,
+      "meanConfidence": 0.8,
+      "knownToModel": true
+    },
+    {
+      "camera": "SONY ILCE-7M4",
+      "lens": "unknown",
+      "photos": 52,
+      "meanConfidence": 0.51,
+      "knownToModel": false
+    }
+  ],
+  "predictionCounts": {
+    "pending": 309,
+    "rejected": 3
+  },
+  "batches": [],
+  "correctionSyncs": [],
+  "photoCount": 312,
+  "photosWithFeatures": 312,
+  "grouped": true,
+  "groupingChangedSincePrediction": true,
+  "syncSuggested": false
+}

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 import numpy as np
+import pytest
 
 from mimic_engine.session.consistency import apply_consistency
 from mimic_engine.session.grouping import SessionItem, group_session
@@ -106,4 +107,59 @@ def test_service_session_group_and_consistent_predict(tmp_path):
         {"modelPath": model_path, "assetIds": ids, "groups": grouped["assignments"], "consistency": False},
         lambda *a: None,
     )
-    assert off["results"] == plain["results"]
+    for a, b in zip(plain["results"], off["results"], strict=True):
+        assert a["global"] == b["global"], "consistency off leaves values alone"
+        assert "consistencyShift" not in b
+    # A reference photo: its own row is untouched and marked, its group-mates move toward it.
+    biggest = max(grouped["clusters"], key=lambda c: c["count"])
+    members = [a for a, g in grouped["assignments"].items() if g == biggest["id"]]
+    ref = members[0]
+    with_ref = svc.model_predict(
+        {
+            "modelPath": model_path,
+            "assetIds": ids,
+            "groups": grouped["assignments"],
+            "references": {biggest["id"]: ref},
+        },
+        lambda *a: None,
+    )
+    by_id = {r["assetId"]: r for r in with_ref["results"]}
+    plain_by_id = {r["assetId"]: r for r in plain["results"]}
+    assert by_id[ref].get("isReference") is True
+    assert by_id[ref]["global"] == plain_by_id[ref]["global"]
+    assert by_id[ref]["consistencyShift"] == 0
+    assert all("isReference" not in by_id[m] for m in members[1:])
+
+
+def test_reference_photo_pulls_group_toward_it_and_stays_untouched():
+    from mimic_engine.session.consistency import REFERENCE_BLEND, apply_consistency
+
+    names = ["tone.exposure", "whiteBalance.temperature"]
+    pred = np.asarray([[0.3, 0.50], [0.8, 0.52], [0.5, 0.90]], dtype=np.float32)
+    out, shift = apply_consistency(pred, names, ["g", "g", "g"], references={"g": 2})
+    assert np.array_equal(out[2], pred[2]), "reference row untouched"
+    assert shift[2] == 0
+    # Others move toward the reference (0.90), capped at 6% of range, never past it.
+    assert out[0, 1] == pytest.approx(0.56, abs=1e-6) and out[1, 1] == pytest.approx(0.58, abs=1e-6)
+    assert REFERENCE_BLEND > 0.5
+    assert np.array_equal(out[:, 0], pred[:, 0]), "exposure never blended"
+    # A reference works even for a two-photo group; an unknown reference falls back to the median rule.
+    out2, _ = apply_consistency(pred[:2], names, ["g", "g"], references={"g": 1})
+    assert out2[0, 1] > pred[0, 1]
+    out3, _ = apply_consistency(pred[:2], names, ["g", "g"], references={"g": 7})
+    assert np.array_equal(out3, pred[:2])
+
+
+def test_outlier_detection_flags_group_disagreement_only():
+    from mimic_engine.session.consistency import OUTLIER_THRESHOLD, detect_outliers
+
+    names = ["tone.exposure", "whiteBalance.temperature", "presence.clarity"]
+    rows = [[0.50, 0.5, 0.1], [0.52, 0.5, 0.9], [0.49, 0.5, 0.1], [0.51, 0.5, 0.1], [0.80, 0.5, 0.1]]
+    pred = np.asarray(rows, dtype=np.float32)
+    flags = detect_outliers(pred, names, ["g"] * 5)
+    assert flags[4] == ("tone.exposure", pytest.approx(0.29, abs=1e-3))  # median is 0.51
+    assert flags[1] is None, "clarity is not an outlier control"
+    assert all(f is None for f in flags[:4])
+    assert detect_outliers(pred[:3], names, ["g"] * 3) == [None, None, None], "small groups are not judged"
+    assert detect_outliers(pred, names, [None] * 5) == [None] * 5
+    assert 0 < OUTLIER_THRESHOLD < 0.3

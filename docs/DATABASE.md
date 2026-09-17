@@ -4,7 +4,7 @@ SQLite at `%LOCALAPPDATA%\Formicaria\Mimic\data\mimic.db`, WAL, `foreign_keys=ON
 
 Conventions: UUID v4 TEXT ids; RFC 3339 UTC TEXT timestamps; JSON columns end in `_json` and are returned to the UI as parsed objects.
 
-## Tables (schema v3)
+## Tables (schema v4)
 
 | Table                                          | Purpose                             | Notes                                                                                                                                                                                                                                                                                                   |
 | ---------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -18,7 +18,7 @@ Conventions: UUID v4 TEXT ids; RFC 3339 UTC TEXT timestamps; JSON columns end in
 | `training_sets`                                | dataset snapshots used by a version | counts per split, strategy, fingerprint                                                                                                                                                                                                                                                                 |
 | `model_versions`                               | immutable versions                  | unique `(style, semver)`; `status ∈ training, ready, failed, archived`; `finalize` only from `training`; exactly one `is_active` per style                                                                                                                                                              |
 | `model_artifacts`                              | files on disk with SHA-256          | never stored in SQLite                                                                                                                                                                                                                                                                                  |
-| `sessions`, `session_assets`, `scene_clusters` | new shoots                          | `sessions.source_library_id` → the hidden `purpose = session` library; source kind stored in `app_settings["session.<id>.source"]`; cluster/burst ids per asset in capture order                                                                                                                        |
+| `sessions`, `session_assets`, `scene_clusters` | new shoots                          | `sessions.source_library_id` → the hidden `purpose = session` library; source kind stored in `app_settings["session.<id>.source"]`; cluster/burst ids per asset in capture order; v4 adds a per-group `reference_asset_id` and `edited_at` (set by rename/merge/move/reference)                         |
 | `predictions`                                  | per asset per session               | `status ∈ pending, reviewed, applied, rejected, superseded`; inserting a new prediction supersedes the pending one; v2 adds `capability_schema_version`, `cluster_id`                                                                                                                                   |
 | `apply_batches`, `applied_edits`               | apply history                       | unique `(batch, prediction)` — retries never double count; counters recomputed from rows; `rollback_available` when a before-state exists; `result ∈ applied, verify_failed, failed, skipped`; v2 adds `restored_at`, `restore_result ∈ restored, verify_failed, failed, skipped`, `restore_error_json` |
 | `corrections`                                  | prediction vs final delta           | one per prediction (unique index, v3); `delta_json` = per-control normalized deltas; `included_in_training_version` set by the training run that used it                                                                                                                                                |
@@ -32,11 +32,12 @@ Indexes exist on every foreign key used in joins plus `assets(captured_at)`, `as
 
 ## Migrations
 
-| Version | File                   | Adds                                                                                                                                                |
-| ------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1       | `0001_init.sql`        | all 21 tables                                                                                                                                       |
-| 2       | `0002_sessions.sql`    | `libraries.purpose`, `applied_edits.restored_at/restore_result/restore_error_json`, `predictions.capability_schema_version/cluster_id`, two indexes |
-| 3       | `0003_corrections.sql` | `correction_syncs` table, unique `corrections(prediction_id)`                                                                                       |
+| Version | File                            | Adds                                                                                                                                                |
+| ------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | `0001_init.sql`                 | all 21 tables                                                                                                                                       |
+| 2       | `0002_sessions.sql`             | `libraries.purpose`, `applied_edits.restored_at/restore_result/restore_error_json`, `predictions.capability_schema_version/cluster_id`, two indexes |
+| 3       | `0003_corrections.sql`          | `correction_syncs` table, unique `corrections(prediction_id)`                                                                                       |
+| 4       | `0004_session_intelligence.sql` | `scene_clusters.reference_asset_id` (FK → assets, SET NULL), `scene_clusters.edited_at`                                                             |
 
 `migrations::tests::v1_database_with_data_upgrades_to_latest_keeping_rows` seeds a v1 database with rows in every touched table (including a correction), migrates through every version, and checks defaults, constraints and idempotence. The engine's test database builder applies every checked-in migration so Python tests see the current schema.
 

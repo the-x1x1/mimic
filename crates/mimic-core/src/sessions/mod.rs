@@ -324,6 +324,13 @@ async fn predict_session(ctx: &JobContext, engine: &EngineClient, bridge: &Bridg
     let groups: Map<String, Value> =
         members.iter().filter_map(|m| m.cluster_id.clone().map(|c| (m.asset_id.clone(), json!(c)))).collect();
     let consistency = ctx.job.payload.get("consistency").and_then(Value::as_bool).unwrap_or(true);
+    // Reference photos chosen by the photographer steer their group's consistency.
+    let references: Map<String, Value> = ctx
+        .db
+        .scene_clusters(&session_id)?
+        .into_iter()
+        .filter_map(|c| c.reference_asset_id.map(|a| (c.id, json!(a))))
+        .collect();
     let capability_version = bridge.connection().map(|c| c.capabilities.schema_version);
     ctx.progress(0, members.len() as i64, "predicting");
     let _forwarder = forward_engine_progress(engine, ctx);
@@ -331,6 +338,7 @@ async fn predict_session(ctx: &JobContext, engine: &EngineClient, bridge: &Bridg
         "modelPath": path,
         "assetIds": members.iter().map(|m| m.asset_id.as_str()).collect::<Vec<_>>(),
         "groups": if groups.is_empty() { Value::Null } else { Value::Object(groups) },
+        "references": references,
         "consistency": consistency,
         "jobId": ctx.job.id,
     });
@@ -341,6 +349,7 @@ async fn predict_session(ctx: &JobContext, engine: &EngineClient, bridge: &Bridg
     let mut failed: Vec<Value> = Vec::new();
     let mut low_confidence = 0usize;
     let mut ood = 0usize;
+    let mut outliers = 0usize;
     for r in out.get("results").and_then(Value::as_array).cloned().unwrap_or_default() {
         ctx.check_cancel()?;
         let Some(asset_id) = r.get("assetId").and_then(Value::as_str).map(str::to_string) else { continue };
@@ -355,6 +364,9 @@ async fn predict_session(ctx: &JobContext, engine: &EngineClient, bridge: &Bridg
         }
         if r["ood"].as_bool().unwrap_or(false) {
             ood += 1;
+        }
+        if r.get("groupOutlier").is_some() {
+            outliers += 1;
         }
         let mut raw_output = r.clone();
         if let Some(o) = raw_output.as_object_mut() {
@@ -391,6 +403,8 @@ async fn predict_session(ctx: &JobContext, engine: &EngineClient, bridge: &Bridg
         "failures": failed,
         "lowConfidence": low_confidence,
         "outOfDistribution": ood,
+        "groupOutliers": outliers,
+        "references": references.len(),
         "consistency": consistency && !cluster_by_asset.values().all(Option::is_none),
         "capabilitySchemaVersion": capability_version,
     });
@@ -1018,13 +1032,50 @@ pub struct SessionDetail {
     pub session: Session,
     pub source: Option<SessionSource>,
     pub clusters: Vec<SceneCluster>,
+    pub group_stats: Vec<GroupStats>,
+    pub camera_stats: Vec<CameraStats>,
     pub prediction_counts: BTreeMap<String, i64>,
     pub batches: Vec<ApplyBatch>,
     pub correction_syncs: Vec<crate::db::CorrectionSync>,
     pub photo_count: i64,
     pub photos_with_features: i64,
     pub grouped: bool,
+    /// A group was renamed/merged/split/re-referenced after the latest prediction;
+    /// Predict again to apply the new grouping.
+    pub grouping_changed_since_prediction: bool,
+    /// Verified applies exist that no sync has checked yet.
+    pub sync_suggested: bool,
 }
+
+/// Per scene group: how sure the model is and what needs eyes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupStats {
+    pub cluster_id: String,
+    pub photos: i64,
+    pub predicted: i64,
+    pub mean_confidence: Option<f64>,
+    pub min_confidence: Option<f64>,
+    pub low_confidence: i64,
+    pub out_of_distribution: i64,
+    pub outliers: i64,
+    pub applied: i64,
+    pub rejected: i64,
+}
+
+/// Per camera/lens in the session, with prediction confidence when present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraStats {
+    pub camera: String,
+    pub lens: String,
+    pub photos: i64,
+    pub mean_confidence: Option<f64>,
+    pub known_to_model: Option<bool>,
+}
+
+/// (photos, confidences, known-to-model) accumulator per camera/lens.
+type CameraAcc = (i64, Vec<f64>, Option<bool>);
 
 pub fn session_detail(db: &Db, session_id: &str) -> Result<SessionDetail, DbError> {
     let session = db.get_session(session_id)?.ok_or_else(|| DbError::NotFound(session_id.to_string()))?;
@@ -1033,17 +1084,152 @@ pub fn session_detail(db: &Db, session_id: &str) -> Result<SessionDetail, DbErro
         Some(lib) => members.len() as i64 - db.assets_missing_features(lib, FEATURE_VERSION)?.len() as i64,
         None => 0,
     };
+    let clusters = db.scene_clusters(session_id)?;
+    let preds = db.session_predictions(session_id, false)?;
+    let pred_by_asset: HashMap<&str, &Prediction> = preds.iter().map(|p| (p.asset_id.as_str(), p)).collect();
+    let latest_prediction_at = preds.iter().map(|p| p.created_at.as_str()).max().map(str::to_string);
+    let grouping_changed_since_prediction = match &latest_prediction_at {
+        Some(t) => clusters.iter().any(|c| c.edited_at.as_deref().is_some_and(|e| e > t.as_str())),
+        None => false,
+    };
+
+    let mut group_stats: Vec<GroupStats> = Vec::new();
+    for c in &clusters {
+        let ids: Vec<&str> = members
+            .iter()
+            .filter(|m| m.cluster_id.as_deref() == Some(c.id.as_str()))
+            .map(|m| m.asset_id.as_str())
+            .collect();
+        let ps: Vec<&Prediction> = ids.iter().filter_map(|a| pred_by_asset.get(a).copied()).collect();
+        let confs: Vec<f64> = ps.iter().map(|p| p.confidence).collect();
+        group_stats.push(GroupStats {
+            cluster_id: c.id.clone(),
+            photos: ids.len() as i64,
+            predicted: ps.len() as i64,
+            mean_confidence: if confs.is_empty() { None } else { Some(confs.iter().sum::<f64>() / confs.len() as f64) },
+            min_confidence: confs.iter().cloned().reduce(f64::min),
+            low_confidence: ps.iter().filter(|p| p.confidence < 0.6).count() as i64,
+            out_of_distribution: ps.iter().filter(|p| p.raw_model_output["ood"] == true).count() as i64,
+            outliers: ps.iter().filter(|p| p.raw_model_output.get("groupOutlier").is_some()).count() as i64,
+            applied: ps.iter().filter(|p| p.status == "applied").count() as i64,
+            rejected: ps.iter().filter(|p| p.status == "rejected").count() as i64,
+        });
+    }
+
+    let mut cams: BTreeMap<(String, String), CameraAcc> = BTreeMap::new();
+    for m in &members {
+        let Some(a) = db.get_asset(&m.asset_id)? else { continue };
+        let camera = format!("{} {}", a.camera_make.as_deref().unwrap_or(""), a.camera_model.as_deref().unwrap_or(""))
+            .trim()
+            .to_string();
+        let key = (
+            if camera.is_empty() { "unknown".to_string() } else { camera },
+            a.lens.clone().unwrap_or_else(|| "unknown".into()),
+        );
+        let e = cams.entry(key).or_insert((0, Vec::new(), None));
+        e.0 += 1;
+        if let Some(p) = pred_by_asset.get(m.asset_id.as_str()) {
+            e.1.push(p.confidence);
+            if let Some(k) = p.confidence_components.get("cameraKnown").and_then(Value::as_bool) {
+                e.2 = Some(e.2.unwrap_or(true) && k);
+            }
+        }
+    }
+    let camera_stats = cams
+        .into_iter()
+        .map(|((camera, lens), (n, confs, known))| CameraStats {
+            camera,
+            lens,
+            photos: n,
+            mean_confidence: if confs.is_empty() { None } else { Some(confs.iter().sum::<f64>() / confs.len() as f64) },
+            known_to_model: known,
+        })
+        .collect();
+
+    let batches = db.session_apply_batches(session_id)?;
+    let syncs = db.correction_syncs(session_id)?;
+    let last_sync = syncs.first().map(|s| s.synced_at.clone());
+    let sync_suggested = batches.iter().any(|b| {
+        b.applied_count > 0
+            && b.status != "running"
+            && last_sync.as_deref().is_none_or(|t| b.completed_at.as_deref().unwrap_or(&b.started_at) > t)
+    });
+
     Ok(SessionDetail {
         source: session_source(db, session_id)?,
-        clusters: db.scene_clusters(session_id)?,
+        clusters,
+        group_stats,
+        camera_stats,
         prediction_counts: db.count_session_predictions_by_status(session_id)?.into_iter().collect(),
-        batches: db.session_apply_batches(session_id)?,
-        correction_syncs: db.correction_syncs(session_id)?,
+        batches,
+        correction_syncs: syncs,
         photo_count: members.len() as i64,
         photos_with_features,
         grouped: members.iter().any(|m| m.cluster_id.is_some()),
+        grouping_changed_since_prediction,
+        sync_suggested,
         session,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Group editing (spec §22.4)
+// ---------------------------------------------------------------------------
+
+/// One edit to a session's scene groups. Every variant records `edited_at`
+/// so the UI can say when a prediction predates the grouping.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
+pub enum GroupEdit {
+    Rename {
+        cluster_id: String,
+        label: String,
+    },
+    SetReference {
+        cluster_id: String,
+        asset_id: Option<String>,
+    },
+    Merge {
+        into: String,
+        from: String,
+    },
+    /// Move photos into an existing group (`into`) or a new one (`into: None`, named `label`).
+    Move {
+        asset_ids: Vec<String>,
+        into: Option<String>,
+        label: Option<String>,
+    },
+}
+
+pub fn edit_groups(db: &Db, session_id: &str, edit: &GroupEdit) -> Result<Vec<SceneCluster>, DbError> {
+    db.get_session(session_id)?.ok_or_else(|| DbError::NotFound(session_id.to_string()))?;
+    let owned = |cluster_id: &str| -> Result<(), DbError> {
+        match db.get_scene_cluster(cluster_id)? {
+            Some(c) if c.session_id == session_id => Ok(()),
+            Some(_) => Err(DbError::Invalid("group belongs to another session".into())),
+            None => Err(DbError::NotFound(cluster_id.to_string())),
+        }
+    };
+    match edit {
+        GroupEdit::Rename { cluster_id, label } => {
+            owned(cluster_id)?;
+            db.rename_scene_cluster(cluster_id, label)?;
+        }
+        GroupEdit::SetReference { cluster_id, asset_id } => {
+            owned(cluster_id)?;
+            db.set_cluster_reference(cluster_id, asset_id.as_deref())?;
+        }
+        GroupEdit::Merge { into, from } => {
+            owned(into)?;
+            owned(from)?;
+            db.merge_scene_clusters(into, from)?;
+        }
+        GroupEdit::Move { asset_ids, into, label } => {
+            db.move_session_assets(session_id, asset_ids, into.as_deref(), label.as_deref())?;
+        }
+    }
+    let _ = db.log_event(&NewEvent::info("sessions", "groups_edited", json!(edit)).entity("session", session_id));
+    db.scene_clusters(session_id)
 }
 
 /// One row of the session grid / review queue.
@@ -1166,6 +1352,14 @@ mod tests {
         let photo: SessionPhoto = serde_json::from_value(photo_json.clone()).unwrap();
         assert_eq!(serde_json::to_value(&photo).unwrap(), photo_json, "field names/shape drifted");
         assert_eq!(photo.last_apply.as_ref().unwrap().result, "verify_failed");
+        let detail_json: Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("session_detail.json")).unwrap()).unwrap();
+        let detail: SessionDetail = serde_json::from_value(detail_json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&detail).unwrap(), detail_json, "session detail drifted");
+        assert!(detail.grouping_changed_since_prediction && detail.clusters[0].reference_asset_id.is_some());
+        let edit: GroupEdit =
+            serde_json::from_value(json!({"kind": "move", "assetIds": ["a"], "into": null, "label": "x"})).unwrap();
+        assert!(matches!(edit, GroupEdit::Move { .. }));
         let pf_json: Value =
             serde_json::from_str(&std::fs::read_to_string(root.join("apply_preflight.refused.json")).unwrap()).unwrap();
         let pf: ApplyPreflight = serde_json::from_value(pf_json.clone()).unwrap();

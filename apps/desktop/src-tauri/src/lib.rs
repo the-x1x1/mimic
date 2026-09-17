@@ -82,6 +82,7 @@ pub fn run() {
             commands::sessions::restore_apply_batch,
             commands::sessions::get_prediction,
             commands::sessions::sync_corrections,
+            commands::sessions::edit_session_groups,
             commands::jobs::list_jobs,
             commands::jobs::get_job,
             commands::jobs::cancel_job,

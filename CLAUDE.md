@@ -54,14 +54,14 @@ docs/                    PROJECT_STATUS (truth table), ARCHITECTURE, EDIT_DNA, L
 .\scripts\test.ps1                      # everything CI runs
 .\scripts\validate.ps1 -Full            # test.ps1 + pre-tag release verification
 .\scripts\build.ps1                     # engine bundle + installer
-node scripts/sync-version.mjs 0.4.0     # bump the single version everywhere (then cargo update -w)
+node scripts/sync-version.mjs 0.5.0     # bump the single version everywhere (then cargo update -w)
 ```
 
 Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`, `cd engine && uv run ruff check . && uv run pytest`, `cd lightroom && lua5.1 tests/json_test.lua`.
 
 Regenerating goldens (only after a reviewed behaviour change): `cd engine && uv run python -m tests.regen_golden`, then `MIMIC_REGEN_GOLDEN=1 cargo test -p mimic-core --test edit_dna_golden`.
 
-## What is implemented (0.4.0-alpha.2)
+## What is implemented (0.5.0-alpha.1)
 
 Foundation + real ingest: shell, onboarding, DB + migrations + backups, jobs with restart recovery, engine protocol with restart/timeouts/size caps, folder + sidecar scanner, XMP parser, ACR detection, EXIF, previews, features, scene heuristics, `stats_v1` embeddings, EditDNA normalization, Lightroom bridge + plugin with fake-plugin integration tests, capability matrix, data quality report, diagnostics, settings, CI, release workflow with signed updater plumbing. See `docs/PROJECT_STATUS.md` for statuses and evidence per item.
 
@@ -71,7 +71,9 @@ Foundation + real ingest: shell, onboarding, DB + migrations + backups, jobs wit
 
 0.4.0 adds continuous learning (`crates/mimic-core/src/corrections`): `sync_corrections` reads applied photos back, records untouched vs corrected (schema v3: `correction_syncs`, one correction per prediction, `correction` edit snapshots), `train_style` consumes pending corrections as training pairs (`correctionAssetIds`), `style_health` derives the measured No-Touch Rate and insights; Corrections tab, version comparison, Home No-Touch metric.
 
-Not implemented: group editing, reference photos, correction weighting. Everything that talks to Lightroom's SDK is `NEEDS REAL-LIGHTROOM QA`.
+0.5.0 adds session intelligence: reference photos steer a group's consistency (engine `references`), group-outlier detection on raw predictions, per-group and per-camera statistics, group editing (`sessions::edit_groups`: rename / reference / merge / move-split; schema v4), stale-grouping and sync-due signals, and the Scene groups UI with multi-select.
+
+Not implemented: correction weighting, burst editing, Review "corrected" filter. Everything that talks to Lightroom's SDK is `NEEDS REAL-LIGHTROOM QA`.
 
 ## How to update PROJECT_STATUS
 
