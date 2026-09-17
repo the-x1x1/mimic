@@ -114,6 +114,19 @@ impl Db {
     }
 
     pub fn delete_style_profile(&self, id: &str) -> DbResult<()> {
+        // Predictions and applied edits reference this Style's model versions
+        // without cascade: apply history must never disappear with a Style.
+        let sessions: i64 = self.conn().query_row(
+            "SELECT COUNT(DISTINCT p.session_id) FROM predictions p
+             JOIN model_versions mv ON mv.id = p.model_version_id WHERE mv.style_profile_id = ?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        if sessions > 0 {
+            return Err(DbError::Invalid(format!(
+                "this Style has predictions in {sessions} session(s); delete those sessions first"
+            )));
+        }
         let n = self.conn().execute("DELETE FROM style_profiles WHERE id = ?1", [id])?;
         if n == 0 {
             return Err(DbError::NotFound(id.to_string()));

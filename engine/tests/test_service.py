@@ -68,7 +68,8 @@ def test_full_ingest_methods(photo_tree, tmp_path, fixtures_dir):
     results = resp["result"]["results"]
     assert len(results) == len(items)
     ok = [r for r in results if "error" not in r]
-    assert len(ok) == 6 and all(r["embeddingArtifactId"] for r in ok)
+    assert len(ok) == 6, [r for r in results if "error" in r]
+    assert all(r["embeddingArtifactId"] for r in ok)
     errs = {r["assetId"]: r["error"]["code"] for r in results if "error" in r}
     assert errs == {"bad": "decode_error", "missing": "not_found"}
     assert events[-1]["current"] == len(items) == events[-1]["total"]

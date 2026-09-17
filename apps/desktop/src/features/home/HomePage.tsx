@@ -53,7 +53,8 @@ export function HomePage() {
               <div>
                 <div className="action-card__title">Edit a New Session</div>
                 <div className="action-card__sub">
-                  Prediction and apply arrive in 0.3.0 — sessions are not available in this build.
+                  Ingest a shoot, group scenes, predict in your Style, apply to Lightroom with
+                  snapshots and read-back.
                 </div>
               </div>
               <ArrowRight size={18} />
@@ -63,7 +64,7 @@ export function HomePage() {
               <div>
                 <div className="action-card__title">Train / Improve a Style</div>
                 <div className="action-card__sub">
-                  Add training data and check dataset quality. Training arrives in 0.2.0.
+                  Add training data, check dataset quality and train immutable versions.
                 </div>
               </div>
               <ArrowRight size={18} />
@@ -103,7 +104,11 @@ export function HomePage() {
                       : "train a version to see quality"
                   }
                 />
-                <Metric label="No-Touch Rate" value="—" hint="needs applied sessions (0.3.0+)" />
+                <Metric
+                  label="No-Touch Rate"
+                  value="—"
+                  hint="needs corrections sync to know which applied photos you left untouched (0.4.0)"
+                />
               </div>
             ) : (
               <p className="muted">Loading…</p>

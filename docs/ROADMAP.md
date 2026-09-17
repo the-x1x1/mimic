@@ -2,14 +2,12 @@
 
 Completed work lives in CHANGELOG.md and PROJECT_STATUS.md, never here.
 
-## 0.3.0 — New session prediction + Lightroom apply
+## 0.3.x — Lightroom QA and session polish
 
-- Sessions: folder or Lightroom selection, scene grouping (time gaps → embedding clusters → colour refinement), session grid with filters.
-- Prediction jobs writing `predictions` with confidence and nearest examples; session consistency policy (bounded smoothing per family).
-- Review: attention-only default, filmstrip/preview/panel, Apply/Reject/Use as Reference, filters (<80 %, OOD, failures, corrected).
-- Apply batches: pre-apply checks (same catalog, capability schema unchanged, prediction fresh), snapshot, plugin-preset apply, read-back, VERIFY_FAILED handling, rollback path via snapshot + `before_settings_json`.
-- Real-Lightroom QA of the plugin apply path and the capability matrix on current Lightroom Classic.
+- Real-Lightroom QA of the plugin apply/restore path and the capability matrix on current Lightroom Classic (fake-plugin coverage exists; real-catalog behaviour does not).
+- Review filter for “corrected” photos (needs 0.4.0 corrections) and _Use as Reference_.
 - Preview-cache size enforcement (setting exists since 0.1).
+- Per-apply-batch item table in the UI (today: counts + Restore; per-photo outcome lives in the photo panel).
 
 ## 0.4.0 — Continuous learning
 
@@ -17,7 +15,7 @@ Completed work lives in CHANGELOG.md and PROJECT_STATUS.md, never here.
 
 ## 0.5.0 — Session intelligence
 
-- Burst awareness, reference photo, manual merge/split/name groups, per-group confidence, per-camera/lens analysis, anomaly detection.
+- Reference photo, manual merge/split/rename of scene groups (bursts and groups are detected today but not editable), per-group confidence, per-camera/lens analysis, anomaly detection.
 
 ## 0.6.0 — Adaptive local editing research (capability-gated)
 

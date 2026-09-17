@@ -33,6 +33,13 @@
 5. `image.analyze_batch` for assets lacking `features_v1`: preview (LibRaw/Pillow, cached), statistics, scene labels, embedding `.npy` → `visual_features` row (embedding referenced by artifact id, never stored in SQLite).
 6. `ingest::data_quality_report` aggregates from SQL.
 
+## Data flow: session → apply (0.3.0)
+
+1. `sessions::create_session` makes a hidden `purpose = session` library plus the `sessions` row; `ingest_session` reuses the folder/Lightroom ingest (same normalizer, features, previews) and fills `session_assets` in capture order.
+2. `group_session` → engine `session.group` → `scene_clusters` + per-asset cluster/burst ids.
+3. `predict_session` → engine `model.predict` with the active version's artifact and the cluster map (`groups`) → `predictions` rows (canonical settings, confidence, components, nearest examples, capability schema version).
+4. Review sets `reviewed`/`rejected`; `apply_session` runs `apply_preflight`, resolves Lightroom photo ids, sends batches of 25 through the bridge with snapshot + read-back, verifies each item with `edit_dna::verify_readback`, records `applied_edits` and a `prediction` edit snapshot; `restore_batch` writes the recorded before-values back and verifies again.
+
 ## Engine protocol (§20)
 
 Request `{"protocolVersion":1,"requestId":"uuid","method":"…","params":{}}`; response `{"protocolVersion":1,"requestId":"uuid","ok":true,"result":{}}` or `ok:false` with `{code,message,details}`; unsolicited events `{"event":"job.progress","jobId":…,"phase":…,"current":n,"total":n}` and `{"event":"log",…}`. Methods: `engine.hello`, `engine.configure`, `engine.health`, `engine.shutdown`, `scan.folder`, `xmp.parse`, `image.metadata`, `image.analyze`, `image.analyze_batch`, `training.train`, `model.predict`. The Rust client (`engine/mod.rs`) enforces timeouts, correlates by id, restarts on exit with a budget of 5, and fails all pending requests when the child dies.
@@ -47,4 +54,4 @@ Root `package.json` is the single source; `scripts/sync-version.mjs` propagates 
 
 ## Extension points prepared, not built
 
-Job kinds are strings dispatched through `CompositeExecutor`; ingest and training executors are registered today, prediction/apply/correction-sync join the same runner. Model artifacts are content-addressed files under `models/styles/`. Capability matrix statuses leave room for `supported` local edits once proven.
+Job kinds are strings dispatched through `CompositeExecutor`; ingest, training and session executors (ingest/group/predict/apply/restore) are registered today, correction-sync joins the same runner in 0.4.0. Model artifacts are content-addressed files under `models/styles/`. Capability matrix statuses leave room for `supported` local edits once proven.

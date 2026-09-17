@@ -165,6 +165,16 @@ fn asset_from_metadata(
 /// Folder + sidecar ingest.
 async fn scan_library(ctx: &JobContext, engine: &EngineClient) -> Result<Value, JobError> {
     let library_id = payload_str(&ctx.job.payload, "libraryId")?;
+    scan_library_by_id(ctx, engine, &library_id).await
+}
+
+/// Folder + sidecar ingest for an explicit library (also used by sessions).
+pub(crate) async fn scan_library_by_id(
+    ctx: &JobContext,
+    engine: &EngineClient,
+    library_id: &str,
+) -> Result<Value, JobError> {
+    let library_id = library_id.to_string();
     let library =
         ctx.db.get_library(&library_id)?.ok_or_else(|| JobError::Failed(format!("library {library_id} not found")))?;
     let root = library.root_path.clone().ok_or_else(|| JobError::Failed("library has no root path".into()))?;
@@ -367,6 +377,19 @@ async fn analyze_missing_features(
 async fn ingest_lightroom(ctx: &JobContext, engine: &EngineClient, bridge: &BridgeHandle) -> Result<Value, JobError> {
     let library_id = payload_str(&ctx.job.payload, "libraryId")?;
     let scope = ctx.job.payload.get("scope").and_then(Value::as_str).unwrap_or("selection").to_string();
+    ingest_lightroom_by_id(ctx, engine, bridge, &library_id, &scope).await
+}
+
+/// Lightroom ingest for an explicit library and scope (also used by sessions).
+pub(crate) async fn ingest_lightroom_by_id(
+    ctx: &JobContext,
+    engine: &EngineClient,
+    bridge: &BridgeHandle,
+    library_id: &str,
+    scope: &str,
+) -> Result<Value, JobError> {
+    let library_id = library_id.to_string();
+    let scope = scope.to_string();
     let conn = bridge.connection().ok_or(crate::bridge::BridgeError::NotConnected)?;
     let library = ctx.db.get_library(&library_id)?.ok_or_else(|| JobError::Failed("library not found".into()))?;
     if let Some(fp) = &library.lightroom_catalog_fingerprint {

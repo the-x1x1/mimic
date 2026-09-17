@@ -13,5 +13,6 @@ export * from "./jobs";
 export * from "./library";
 export * from "./lightroom";
 export * from "./style";
+export * from "./session";
 export * from "./settings";
 export * from "./updater";

@@ -300,7 +300,83 @@ class EngineService:
                 except ValueError as e:
                     results.append({"assetId": asset_id, "error": {"code": "predict_failed", "message": str(e)}})
                 progress("predicting", i + 1, len(asset_ids))
+        groups = params.get("groups")
+        if isinstance(groups, dict) and params.get("consistency", True):
+            from mimic_engine.session.consistency import apply_consistency
+            from mimic_engine.training.mapping import control_by_canonical, raw_for
+
+            ok_rows = [r for r in results if "error" not in r]
+            if ok_rows:
+                names = predictor.control_names
+                mat = np.asarray(
+                    [[r["global"][n.split(".", 1)[0]][n.split(".", 1)[1]]["value"] for n in names] for r in ok_rows],
+                    dtype=np.float32,
+                )
+                adjusted, shift = apply_consistency(mat, names, [groups.get(r["assetId"]) for r in ok_rows])
+                for r, row, sh in zip(ok_rows, adjusted, shift, strict=True):
+                    for j, n in enumerate(names):
+                        fam, short = n.split(".", 1)
+                        c = control_by_canonical(n)
+                        if c is None:
+                            continue
+                        r["global"][fam][short]["value"] = round(float(row[j]), 5)
+                        r["global"][fam][short]["raw"] = raw_for(c, float(row[j]))
+                    r["consistencyShift"] = round(float(sh), 5)
         return {"results": results, "modelPath": model_path, "controlNames": predictor.control_names}
+
+    def session_group(self, params: dict[str, Any], progress: Progress) -> dict[str, Any]:
+        db = self._require_db()
+        asset_ids = params.get("assetIds")
+        if not isinstance(asset_ids, list) or not asset_ids:
+            raise InvalidParamsError("assetIds required")
+        import json
+
+        import numpy as np
+
+        from mimic_engine.features.stats import FEATURE_VERSION
+        from mimic_engine.session.grouping import SessionItem, compact_vector, group_session
+        from mimic_engine.training.dataset import open_readonly
+
+        items: list[SessionItem] = []
+        missing: list[str] = []
+        with open_readonly(db) as conn:
+            for aid in asset_ids:
+                row = conn.execute(
+                    """SELECT a.id, a.captured_at, f.histogram_json, f.luminance_json, f.color_json, f.embedding_artifact_id
+                       FROM assets a LEFT JOIN visual_features f ON f.asset_id = a.id AND f.feature_version = ? WHERE a.id = ?""",
+                    (FEATURE_VERSION, aid),
+                ).fetchone()
+                if row is None or row["histogram_json"] is None:
+                    missing.append(aid)
+                    continue
+                stats = {
+                    "histogram": json.loads(row["histogram_json"]),
+                    "luminance": json.loads(row["luminance_json"]),
+                    "color": json.loads(row["color_json"]),
+                }
+                emb = None
+                if self.embeddings_dir and row["embedding_artifact_id"]:
+                    ep = self.embeddings_dir / row["embedding_artifact_id"]
+                    if ep.is_file():
+                        emb = np.load(ep, allow_pickle=False)
+                items.append(
+                    SessionItem(
+                        asset_id=aid, captured_at=row["captured_at"], features=compact_vector(stats), embedding=emb
+                    )
+                )
+        progress("grouping", 0, len(items))
+        cfg = params.get("config") or {}
+        out = group_session(
+            items,
+            seed=int(cfg.get("seed", 42)),
+            time_gap_s=float(cfg.get("timeGapSeconds", 1200)),
+            burst_gap_s=float(cfg.get("burstGapSeconds", 3.0)),
+            min_cluster=int(cfg.get("minClusterSize", 4)),
+            target_cluster_size=int(cfg.get("targetClusterSize", 25)),
+        )
+        out["missingFeatures"] = missing
+        progress("grouping", len(items), len(items))
+        return out
 
     # ----- registration --------------------------------------------------
 
@@ -316,6 +392,7 @@ class EngineService:
         server.register("image.analyze_batch", self.image_analyze_batch)
         server.register("training.train", self.training_train)
         server.register("model.predict", self.model_predict)
+        server.register("session.group", self.session_group)
 
 
 def build_server() -> Server:

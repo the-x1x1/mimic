@@ -8,6 +8,7 @@ import { HomePage } from "@/features/home/HomePage";
 import { StylesPage } from "@/features/styles/StylesPage";
 import { StyleDetailPage } from "@/features/styles/StyleDetailPage";
 import { SessionsPage } from "@/features/sessions/SessionsPage";
+import { SessionDetailPage } from "@/features/sessions/SessionDetailPage";
 import { ReviewPage } from "@/features/review/ReviewPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { OnboardingFlow } from "@/features/onboarding/OnboardingFlow";
@@ -67,6 +68,7 @@ function Gate() {
         <Route path="/styles" element={<StylesPage />} />
         <Route path="/styles/:styleId" element={<StyleDetailPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
+        <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/review" element={<ReviewPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

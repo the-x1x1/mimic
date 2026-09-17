@@ -52,6 +52,16 @@ Batch rules: bounded by `maxBatchSize` (25), per-photo success/failure, cancella
 2. Per photo inside `catalog:withWriteAccessDo` (15 s timeout): read `before` via `getDevelopSettings`; if a snapshot was requested and `createDevelopSnapshot` fails, **stop for that photo** (never apply without the safety net); `LrApplication.addDevelopPresetForPlugin(_PLUGIN, "Mimic <predictionId>", settings)`; `photo:applyDevelopPreset(preset, _PLUGIN)`; read back.
 3. Desktop compares intended vs read-back (`verify_readback`): mismatch → `verify_failed`, not counted as applied.
 
+## Session apply and restore (0.3.0) — `mimic-core::sessions`
+
+Pre-apply checks (`apply_preflight`, shown verbatim in the confirm dialog and re-run by the job): Lightroom connected; capability matrix reports `canApply` and `canSnapshot` and at least one writable control; the session's catalog fingerprint (Lightroom-sourced sessions) equals the open catalog; no candidate prediction was made under a different capability schema version; no apply already running. Warnings (not blockers): predictions from a no-longer-active model version.
+
+Photo resolution: assets ingested from the same catalog use their `lightroom_local_id`; folder-sourced assets are matched by normalized path against `get_selected_photos {scope: "catalog"}`. Unmatched photos are recorded as `skipped / photo_not_in_catalog`, never guessed.
+
+Apply: batches of 25 `apply_settings_as_plugin_preset {createSnapshot: true, readBack: true}` with one snapshot name per run (`Mimic Before — <timestamp>`); per item the desktop records `before`, the exact settings sent, the snapshot name and the verified result; a read-back that matches produces an `edit_snapshots` row with `source = prediction` (the future correction baseline). Cancellation is honoured between batches. If the bridge fails mid-batch the affected items are recorded as `failed / outcome_unknown` with a pointer to Lightroom's History panel — the desktop never assumes either outcome. A batch with any failure closes as `completed_with_failures`.
+
+Restore (`restore_batch`): for every `applied`/`verify_failed` item with a recorded before-state, write back **only the keys Mimic wrote** with their before-values (`createSnapshot: false`, `readBack: true`, payload flag `restore: true`, `predictionId` = `restore-<appliedEditId>`), verify by read-back, record `restore_result` per item without touching the original apply row, return restored predictions to `pending`, and clear `rollback_available` once nothing is left. Keys without a before-value are reported as `missingKeys`; the Lightroom snapshot remains the fallback.
+
 ## Plugin install experience (§49)
 
 Mimic copies the plugin to `%LOCALAPPDATA%\Formicaria\Mimic\plugin\Mimic.lrplugin` on every launch (idempotent sync) and shows exact Plug-in Manager steps with a copy button and a reveal button. It never edits Lightroom preferences. The plugin exposes _Library › Plug-in Extras › Mimic: Connection Status… / Reconnect Now_ and a Plugin Manager panel to override the bridge file path.
@@ -59,4 +69,5 @@ Mimic copies the plugin to `%LOCALAPPDATA%\Formicaria\Mimic\plugin\Mimic.lrplugi
 ## What has and has not been verified
 
 - Verified in CI: the whole HTTP protocol with a fake plugin (handshake, polling, results, timeout, disconnect, reconnect, events, body cap, auth), fixture round-trips in Rust/TS/Lua, Lua syntax of every plugin file.
+- Verified in CI (0.3.0): the whole session apply/restore path against a scripted plugin over the real bridge — photo resolution by path, snapshot + read-back flags, verify-failed on a mismatching read-back, missing photo skipped, restore writing before-values back (`crates/mimic-core/tests/sessions_e2e.rs`).
 - Not verified (no Lightroom in CI): the SDK calls themselves on a real catalog, `LrHttp` behaviour with long-poll timeouts, snapshot creation, preset application and read-back equality on a real Lightroom version. Track in `docs/LIGHTROOM_CAPABILITY_MATRIX.md` as reports arrive.

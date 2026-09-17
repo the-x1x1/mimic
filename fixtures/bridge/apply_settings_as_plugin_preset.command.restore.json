@@ -1,0 +1,22 @@
+{
+  "commandId": "c-2002",
+  "commandType": "apply_settings_as_plugin_preset",
+  "payload": {
+    "items": [
+      {
+        "photoId": 4021,
+        "predictionId": "restore-ae-1",
+        "settings": {
+          "Exposure2012": 0,
+          "Contrast2012": 0,
+          "Highlights2012": 0,
+          "Shadows2012": 0
+        }
+      }
+    ],
+    "createSnapshot": false,
+    "readBack": true,
+    "applyBatchId": "b-1",
+    "restore": true
+  }
+}

@@ -49,3 +49,5 @@ Thumbs.db
 
 # Delivery bundles from the build session (not part of the repo)
 .mimic-delivery/
+*.tsbuildinfo
+RELEASE_MSG.txt

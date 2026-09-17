@@ -47,6 +47,11 @@ export const JOB_KINDS = {
   ingestLightroom: "ingest_lightroom",
   analyzeLibrary: "analyze_library",
   trainStyle: "train_style",
+  ingestSession: "ingest_session",
+  groupSession: "group_session",
+  predictSession: "predict_session",
+  applySession: "apply_session",
+  restoreBatch: "restore_batch",
 } as const;
 
 export const JOB_LABELS: Record<string, string> = {
@@ -54,4 +59,9 @@ export const JOB_LABELS: Record<string, string> = {
   ingest_lightroom: "Capturing from Lightroom",
   analyze_library: "Analyzing photos",
   train_style: "Training Style Brain",
+  ingest_session: "Ingesting session",
+  group_session: "Grouping scenes",
+  predict_session: "Predicting edits",
+  apply_session: "Applying to Lightroom",
+  restore_batch: "Restoring from before-state",
 };

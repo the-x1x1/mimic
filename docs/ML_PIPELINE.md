@@ -24,6 +24,12 @@
 
 Loads the version's `model.joblib`, rebuilds the feature vector from stored stats + EXIF, requires an embedding only when the model was trained with one, returns per asset: canonical global settings (normalized + raw via the mapping ranges), confidence + components + OOD + reasons, nearest training assets with distances, and raw component outputs. Missing assets or features produce per-item errors, never a failed batch.
 
+## Sessions: grouping, consistency (0.3.0)
+
+- **Scene grouping** (`session/grouping.py`, engine `session.group`): photos sorted by capture time → split into time blocks at gaps > 20 min (untimed frames share one trailing block) → inside each block, seeded k-means on standardized compact visual statistics (luminance mean/std/p5/p95, colour casts, saturation, sky fraction, 8-bin coarse histogram, plus the embedding when every photo has one) with k ≈ √(n / 6), capped so every cluster has ≥ 4 members; tiny clusters merge into the nearest sibling. Bursts are runs of frames ≤ 3 s apart. Same input + seed ⇒ identical output (tested). Clusters are persisted by mimic-core in `scene_clusters` with the engine's summary (median luminance/casts/saturation, time block, start/end).
+- **Session consistency** (`session/consistency.py`, applied inside `model.predict` when `groups` is passed): per family, a bounded pull toward the group's median in normalized units — white balance 60 % blend, cap 6 % of range; colour/HSL/color grading 50 %, cap 5 %; presence/detail/effects 40 %, cap 4 %. Exposure and the tone family are never blended (each frame keeps its own exposure); groups smaller than 3 are untouched. The max per-photo shift is reported as `consistencyShift` and shown in the UI.
+- **Prediction job** (`sessions::predict_session`): uses the Style's active version, refuses when its `feature_schema_version` differs from this build, passes cluster assignments as `groups`, stores canonical `global` settings + confidence components + nearest examples + reasons per photo, supersedes earlier pending predictions, records the Lightroom capability schema version when Lightroom is connected at prediction time.
+
 ## Training data filters (§41)
 
 Applied: missing snapshot, missing features, no meaningful edits, unknown-key threshold, bad feature rows. Not yet exposed as user controls (camera/date/collection/rating exclusions are roadmap).
