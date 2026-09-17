@@ -61,7 +61,7 @@ Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`
 
 Regenerating goldens (only after a reviewed behaviour change): `cd engine && uv run python -m tests.regen_golden`, then `MIMIC_REGEN_GOLDEN=1 cargo test -p mimic-core --test edit_dna_golden`.
 
-## What is implemented (0.4.0-alpha.1)
+## What is implemented (0.4.0-alpha.2)
 
 Foundation + real ingest: shell, onboarding, DB + migrations + backups, jobs with restart recovery, engine protocol with restart/timeouts/size caps, folder + sidecar scanner, XMP parser, ACR detection, EXIF, previews, features, scene heuristics, `stats_v1` embeddings, EditDNA normalization, Lightroom bridge + plugin with fake-plugin integration tests, capability matrix, data quality report, diagnostics, settings, CI, release workflow with signed updater plumbing. See `docs/PROJECT_STATUS.md` for statuses and evidence per item.
 

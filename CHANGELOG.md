@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.4.0-alpha.2] — 2026-09-17
+
+Release-pipeline fix only; application code is identical to 0.4.0-alpha.1 (whose Release workflow never produced an installer).
+
+### Fixed
+
+- `scripts/package-engine.ps1` smoke check treated the two-line stdio reply (`engine.hello` + `engine.shutdown`) as a failure: PowerShell's `-notmatch` on an array returns the non-matching lines rather than a boolean. The reply is now joined before matching, and a non-zero exit of the packaged engine is reported on its own. This is why the 0.3.0-alpha.1 and 0.4.0-alpha.1 release jobs failed at "Package engine" although the bundle worked.
+
 ## [0.4.0-alpha.1] — 2026-09-17
 
 Continuous learning: Mimic now reads applied photos back after your own pass in Lightroom, keeps what you changed as corrections, measures the No-Touch Rate from what you left alone, and trains the next version on those corrections. Proven against a scripted plugin over the real bridge; real-Lightroom behaviour remains unverified.

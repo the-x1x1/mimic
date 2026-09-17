@@ -21,6 +21,9 @@ if (-not (Test-Path $exe)) { $exe = Join-Path $out "mimic-engine" }
 if ($LASTEXITCODE -ne 0) { throw "packaged engine failed to run" }
 # Protocol smoke: hello over stdio must answer with the right protocol version.
 $hello = '{"protocolVersion":1,"requestId":"smoke","method":"engine.hello","params":{}}' + "`n" + '{"protocolVersion":1,"requestId":"bye","method":"engine.shutdown","params":{}}' + "`n"
-$resp = $hello | & $exe serve
-if ($resp -notmatch '"protocolVersion":1' -or $resp -notmatch '"engineVersion"') { throw "packaged engine did not answer engine.hello: $resp" }
+# `& $exe serve` yields one string per output line; join before matching, because
+# `-notmatch` on an array returns the non-matching lines (truthy) instead of a boolean.
+$resp = (($hello | & $exe serve) -join "`n")
+if ($LASTEXITCODE -ne 0) { throw "packaged engine exited with $LASTEXITCODE" }
+if ($resp -notmatch '"engineVersion"' -or $resp -notmatch '"protocolVersion":1') { throw "packaged engine did not answer engine.hello: $resp" }
 Write-Host "engine packaged at $out"
