@@ -1,17 +1,17 @@
-# PROJECT_STATUS — Mimic 0.4.0-alpha.1
+# PROJECT_STATUS — Mimic 0.4.0-alpha.2
 
 Brutally factual. Statuses: **IMPLEMENTED** (test or reproducible check exists) · **PARTIAL** · **BLOCKED** · **PLANNED** · **UNSUPPORTED**. Evidence names the test that proves the row. Anything marked _NEEDS REAL-LIGHTROOM QA_ has not been run against a real Lightroom Classic (there is none in CI).
 
 ## Repository
 
-| Item                                                                                                    | Status                                   | Evidence                                                |
-| ------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------- |
-| Monorepo layout (apps/desktop, crates/mimic-core, engine, lightroom, packages, fixtures, scripts, docs) | IMPLEMENTED                              | tree; `CLAUDE.md` map                                   |
-| Lockfiles committed (pnpm-lock.yaml, Cargo.lock, engine/uv.lock)                                        | IMPLEMENTED                              | files in repo                                           |
-| Single version source + sync/check                                                                      | IMPLEMENTED                              | `scripts/sync-version.mjs --check` in `test.ps1` and CI |
-| CI: frontend, Rust, Python, plugin, security                                                            | IMPLEMENTED                              | `.github/workflows/ci.yml`                              |
-| Release workflow (Windows x64 NSIS, signed updater, latest.json, checksums, draft release)              | IMPLEMENTED (not yet exercised by a tag) | `.github/workflows/release.yml`                         |
-| Nightly Windows debug build                                                                             | IMPLEMENTED (workflow)                   | `.github/workflows/nightly-smoke.yml`                   |
+| Item                                                                                                    | Status                                                                                                                                                                                        | Evidence                                                   |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Monorepo layout (apps/desktop, crates/mimic-core, engine, lightroom, packages, fixtures, scripts, docs) | IMPLEMENTED                                                                                                                                                                                   | tree; `CLAUDE.md` map                                      |
+| Lockfiles committed (pnpm-lock.yaml, Cargo.lock, engine/uv.lock)                                        | IMPLEMENTED                                                                                                                                                                                   | files in repo                                              |
+| Single version source + sync/check                                                                      | IMPLEMENTED                                                                                                                                                                                   | `scripts/sync-version.mjs --check` in `test.ps1` and CI    |
+| CI: frontend, Rust, Python, plugin, security                                                            | IMPLEMENTED                                                                                                                                                                                   | `.github/workflows/ci.yml`                                 |
+| Release workflow (Windows x64 NSIS, signed updater, latest.json, checksums, draft release)              | IMPLEMENTED; v0.3.0-alpha.1 and v0.4.0-alpha.1 tags reached "Package engine" and failed on the smoke-check bug fixed in 0.4.0-alpha.2; the Tauri build step has not yet completed on a runner | `.github/workflows/release.yml`; run log of v0.4.0-alpha.1 |
+| Nightly Windows debug build                                                                             | IMPLEMENTED (workflow)                                                                                                                                                                        | `.github/workflows/nightly-smoke.yml`                      |
 
 ## Desktop shell
 

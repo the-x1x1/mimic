@@ -6,7 +6,7 @@ Mimic is a local-first Windows desktop app from the Formicaria family. It learns
 
 The product promise is not “apply an AI preset”. It is _“learn how I edit and do the repetitive part the way I would.”_
 
-## Current status — `0.4.0-alpha.1` (continuous learning)
+## Current status — `0.4.0-alpha.2` (continuous learning)
 
 | Area                                                                                                                                                                             | Status                                                                                                  |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -66,7 +66,7 @@ Everything stays on this computer. Image analysis, metadata, training data, mode
 
 A Tauri 2 shell (Rust) owns the SQLite database, a persistent job queue, a loopback-only HTTP bridge that the Lightroom plugin polls, and a Python engine child process spoken to over newline-delimited JSON. The engine does deterministic image work: scanning, XMP parsing, RAW previews, statistics, embeddings, training, prediction and scene grouping. A single JSON contract, `packages/contracts/edit_mapping_v1.json`, defines the canonical EditDNA representation shared by Rust, Python and TypeScript, and golden fixtures pin its behaviour in all three. Lightroom stays the source of truth: Mimic never opens the `.lrcat`, never overwrites a RAW, and never mutates XMP.
 
-## Known limitations (0.4.0-alpha.1)
+## Known limitations (0.4.0-alpha.2)
 
 - Corrections join training as ordinary pairs (no extra weight yet), and syncing is manual (a button on the session).
 - The model is a KNN + ridge hybrid on statistical features; it is measured against baselines, not against a photographer's acceptance yet.
