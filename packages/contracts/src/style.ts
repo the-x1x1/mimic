@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DataQualityReport } from "./library";
+import { StyleHealth } from "./corrections";
 
 export const ModelVersion = z.object({
   id: z.string(),
@@ -34,6 +35,7 @@ export const StyleSummary = StyleProfile.extend({
   cameras: z.array(z.string()),
   activeVersion: ModelVersion.nullable(),
   versionCount: z.number(),
+  noTouchRate: z.number().nullable(),
 });
 export type StyleSummary = z.infer<typeof StyleSummary>;
 
@@ -48,6 +50,7 @@ export const StyleDetail = z.object({
     minPairs: z.number(),
     inProgress: z.boolean(),
   }),
+  health: StyleHealth,
 });
 export type StyleDetail = z.infer<typeof StyleDetail>;
 
@@ -98,4 +101,18 @@ export function controlMae(metrics: unknown, model: string, control: string): nu
   >;
   const v = m[set]?.[model]?.perControl?.[control]?.mae;
   return typeof v === "number" ? v : null;
+}
+
+/** Per-family hybrid nMAE on the evaluation set, for side-by-side version comparison. */
+export function familyErrors(metrics: unknown): Record<string, number> {
+  const set = evaluationSet(metrics);
+  if (!set) return {};
+  const m = metrics as Record<
+    string,
+    Record<string, { perFamily?: Record<string, { nMae?: number }> }>
+  >;
+  const fam = m[set]?.["hybrid"]?.perFamily ?? {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(fam)) if (typeof v?.nMae === "number") out[k] = v.nMae;
+  return out;
 }

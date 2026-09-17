@@ -8,6 +8,7 @@
  */
 export * from "./app";
 export * from "./bridge";
+export * from "./corrections";
 export * from "./edit-mapping";
 export * from "./jobs";
 export * from "./library";

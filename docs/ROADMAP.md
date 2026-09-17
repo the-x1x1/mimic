@@ -2,16 +2,14 @@
 
 Completed work lives in CHANGELOG.md and PROJECT_STATUS.md, never here.
 
-## 0.3.x — Lightroom QA and session polish
+## 0.4.x — Lightroom QA and polish
 
-- Real-Lightroom QA of the plugin apply/restore path and the capability matrix on current Lightroom Classic (fake-plugin coverage exists; real-catalog behaviour does not).
-- Review filter for “corrected” photos (needs 0.4.0 corrections) and _Use as Reference_.
+- Real-Lightroom QA of the plugin apply/restore/sync path and the capability matrix on current Lightroom Classic (fake-plugin coverage exists; real-catalog behaviour does not).
+- Review filter for “corrected” photos and _Use as Reference_.
+- Weighting of correction pairs in training (today corrections join the dataset as ordinary pairs).
+- Automatic sync prompt when a session's Lightroom edits settle (today sync is a button).
 - Preview-cache size enforcement (setting exists since 0.1).
 - Per-apply-batch item table in the UI (today: counts + Restore; per-photo outcome lives in the photo panel).
-
-## 0.4.0 — Continuous learning
-
-- Sync corrections; prediction vs final delta; corrections UI; retrain with corrections; version comparison; observed acceptance / No-Touch tracking after review-session close; style health insights.
 
 ## 0.5.0 — Session intelligence
 

@@ -59,8 +59,16 @@ async fn train_style(ctx: &JobContext, engine: &EngineClient) -> Result<Value, J
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| JobError::Failed("job payload missing styleId".into()))?;
-    let config = ctx.job.payload.get("config").cloned().unwrap_or_else(|| json!({}));
+    let mut config = ctx.job.payload.get("config").cloned().unwrap_or_else(|| json!({}));
     let style = ctx.db.get_style_profile(&style_id)?.ok_or_else(|| JobError::Failed("style not found".into()))?;
+    // Corrections the photographer made after earlier applies join the
+    // training set as pairs (their latest snapshot is `source = correction`).
+    let include_corrections = config.get("includeCorrections").and_then(Value::as_bool).unwrap_or(true);
+    let pending_corrections =
+        if include_corrections { ctx.db.pending_correction_asset_ids(&style_id)? } else { Vec::new() };
+    if !pending_corrections.is_empty() {
+        config["correctionAssetIds"] = json!(pending_corrections.iter().map(|(_, a)| a.clone()).collect::<Vec<_>>());
+    }
     if style.library_ids.is_empty() {
         return Err(JobError::Failed("this Style has no training data attached".into()));
     }
@@ -131,9 +139,13 @@ async fn train_style(ctx: &JobContext, engine: &EngineClient) -> Result<Value, J
         "split": result.get("split"),
     });
     let counts = result.get("counts").cloned().unwrap_or(json!({}));
+    let used_corrections: Vec<String> = result["trainingSet"]["correctionAssetIds"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
     let ts = ctx.db.create_training_set(
         &style_id,
-        &json!({"libraryIds": style.library_ids}),
+        &json!({"libraryIds": style.library_ids, "correctionAssetIds": used_corrections}),
         (
             result["trainingSet"]["assetCount"].as_i64().unwrap_or(0),
             result["trainingSet"]["validPairCount"].as_i64().unwrap_or(0),
@@ -162,6 +174,12 @@ async fn train_style(ctx: &JobContext, engine: &EngineClient) -> Result<Value, J
         )?;
     }
     let finalized = ctx.db.finalize_model_version(&mv.id, "ready", &metrics, &manifest)?;
+    let correction_ids: Vec<String> = pending_corrections
+        .iter()
+        .filter(|(_, asset)| used_corrections.contains(asset))
+        .map(|(id, _)| id.clone())
+        .collect();
+    let corrections_included = ctx.db.mark_corrections_included(&correction_ids, &semver)?;
 
     // Activation policy (§14.5).
     let new_err = primary_error(&metrics);
@@ -193,6 +211,7 @@ async fn train_style(ctx: &JobContext, engine: &EngineClient) -> Result<Value, J
         "activationReason": reason,
         "counts": counts,
         "holdoutNmae": new_err,
+        "correctionsIncluded": corrections_included,
         "beatsBaselines": result.get("beatsBaselines"),
         "warnings": training_config.get("warnings"),
     });

@@ -5,10 +5,12 @@
 
 mod support;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mimic_core::bridge::{BridgeConfig, BridgeServer, HandshakeRequest};
+use mimic_core::corrections;
 use mimic_core::db::Db;
 use mimic_core::jobs::{CompositeExecutor, JobRunner};
 use mimic_core::sessions::{self, SessionSource};
@@ -25,6 +27,10 @@ struct FakeLightroom {
     photos: Vec<(i64, String)>,
     mismatch: Option<String>,
     missing: Option<String>,
+    /// Overrides for `collect_correction_state`: path -> settings the
+    /// "photographer" ended with. Photos not listed echo what was applied.
+    current: Mutex<HashMap<String, Map<String, Value>>>,
+    applied: Mutex<HashMap<i64, Map<String, Value>>>,
     received: Arc<Mutex<Vec<Value>>>,
 }
 
@@ -37,6 +43,8 @@ impl FakeLightroom {
             photos,
             mismatch: None,
             missing: None,
+            current: Mutex::new(HashMap::new()),
+            applied: Mutex::new(HashMap::new()),
             received: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -83,6 +91,7 @@ impl FakeLightroom {
                             }
                         };
                         let settings = it["settings"].as_object().unwrap().clone();
+                        self.applied.lock().unwrap().insert(pid, settings.clone());
                         let mut read_back = settings.clone();
                         let is_restore = payload["restore"].as_bool().unwrap_or(false);
                         if self.mismatch.as_deref() == Some(path.as_str()) && !is_restore {
@@ -102,6 +111,28 @@ impl FakeLightroom {
                     })
                     .collect();
                 json!({"ok": true, "result": {"items": items, "canceled": false}})
+            }
+            "collect_correction_state" => {
+                let items: Vec<Value> = payload["photoIds"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(Value::as_i64)
+                    .map(|pid| {
+                        let path =
+                            self.photos.iter().find(|(id, _)| *id == pid).map(|(_, p)| p.clone()).unwrap_or_default();
+                        let applied = self.applied.lock().unwrap().get(&pid).cloned().unwrap_or_default();
+                        let mut settings = applied;
+                        if let Some(over) = self.current.lock().unwrap().get(&path) {
+                            for (k, v) in over {
+                                settings.insert(k.clone(), v.clone());
+                            }
+                        }
+                        settings.insert("ProcessVersion".into(), json!("15.4"));
+                        json!({"photoId": pid, "path": path, "settings": settings})
+                    })
+                    .collect();
+                json!({"ok": true, "result": {"items": items, "collectedAt": "2026-09-17T09:00:00Z"}})
             }
             other => json!({"ok": false, "error": {"code": "unknown_command", "message": other}}),
         }
@@ -192,6 +223,7 @@ async fn session_ingest_group_predict_apply_restore() {
         mimic_core::ingest::executor(engine.clone(), bridge.handle.clone()),
         training::executor(engine.clone()),
         sessions::executor(engine.clone(), bridge.handle.clone()),
+        corrections::executor(bridge.handle.clone()),
     ]));
     let runner = JobRunner::new(db.clone(), executor);
     let trained = finished(&db, &runner, training::JOB_TRAIN_STYLE, json!({"styleId": style.id})).await;
@@ -352,6 +384,64 @@ async fn session_ingest_group_predict_apply_restore() {
     assert!(!pf.ok && pf.stale_count == 1, "{:?}", pf);
     db.set_prediction_status(&stale_row.id, "rejected").unwrap();
     stale.capability_schema_version = None;
+
+    // Corrections sync: files[0] was re-edited by the photographer (+0.5 EV and a
+    // different Temperature), files[3] left alone. verify_failed/skipped photos are not checked.
+    let ok0_applied_exposure = ok0.applied_settings["Exposure2012"].as_f64().unwrap();
+    fake.current.lock().unwrap().insert(
+        files[0].clone(),
+        [("Exposure2012".to_string(), json!(ok0_applied_exposure + 0.5)), ("Temperature".to_string(), json!(7100))]
+            .into_iter()
+            .collect(),
+    );
+    let synced = finished(&db, &runner, corrections::JOB_SYNC_CORRECTIONS, json!({"sessionId": session.id})).await;
+    assert_eq!(synced.status, "completed", "{:?}", synced.error);
+    let r = synced.result.clone().unwrap();
+    assert_eq!(
+        (r["checked"].as_i64(), r["untouched"].as_i64(), r["corrected"].as_i64()),
+        (Some(2), Some(1), Some(1)),
+        "{r}"
+    );
+    assert_eq!(r["noTouchRate"], 0.5);
+    let most: Vec<&str> =
+        r["mostCorrected"].as_array().unwrap().iter().filter_map(|m| m["canonical"].as_str()).collect();
+    assert_eq!(most.len(), 2, "{r}");
+    assert!(most.contains(&"tone.exposure") && most.contains(&"whiteBalance.temperature"));
+    let corr_rows = db.corrections_for_style(&style.id, 10).unwrap();
+    assert_eq!(corr_rows.len(), 1);
+    let corr = &corr_rows[0].correction;
+    assert_eq!(corr.asset_id, ok0.asset_id);
+    assert!(corr.included_in_training_version.is_none());
+    let deltas = corr.delta.as_array().unwrap();
+    let exp = deltas.iter().find(|d| d["canonical"] == "tone.exposure").unwrap();
+    assert!((exp["delta"].as_f64().unwrap() - 0.05).abs() < 1e-6, "{exp}");
+    assert!(corr.correction_magnitude > 0.0);
+    assert!(db.snapshots_for_asset(&ok0.asset_id).unwrap().iter().any(|s| s.source == "correction"));
+    let health = corrections::style_health(&db, &style.id).unwrap();
+    assert_eq!(health.active_no_touch_rate, Some(0.5), "{:?}", health.no_touch);
+    assert_eq!(health.corrections_pending_training, 1);
+    assert_eq!(health.most_corrected.len(), 2);
+    assert!(health.most_corrected.iter().any(|c| c.canonical == "tone.exposure" && c.mean_delta > 0.0));
+    assert!(health.insights.iter().any(|i| i.contains("No-Touch Rate 50%")), "{:?}", health.insights);
+    // Re-sync is idempotent: same counts, still one correction.
+    let again = finished(&db, &runner, corrections::JOB_SYNC_CORRECTIONS, json!({"sessionId": session.id})).await;
+    assert_eq!(again.status, "completed");
+    assert_eq!(db.corrections_for_style(&style.id, 10).unwrap().len(), 1);
+    assert_eq!(db.correction_syncs(&session.id).unwrap().len(), 2);
+
+    // Retrain: the correction becomes a training pair and is marked as used.
+    let retrained = finished(&db, &runner, training::JOB_TRAIN_STYLE, json!({"styleId": style.id})).await;
+    assert_eq!(retrained.status, "completed", "{:?}", retrained.error);
+    let rr = retrained.result.clone().unwrap();
+    assert_eq!(rr["counts"]["correctionPairs"], 1, "{rr}");
+    assert_eq!(rr["correctionsIncluded"], 1);
+    let corr_rows = db.corrections_for_style(&style.id, 10).unwrap();
+    assert_eq!(corr_rows[0].correction.included_in_training_version.as_deref(), rr["semanticVersion"].as_str());
+    assert_eq!(corrections::style_health(&db, &style.id).unwrap().corrections_pending_training, 0);
+    // A sync before any apply in a session is a clean failure.
+    let fresh = sessions::create_session(&db, "Empty", &src, Some(&style.id), None).unwrap();
+    let nothing = finished(&db, &runner, corrections::JOB_SYNC_CORRECTIONS, json!({"sessionId": fresh.id})).await;
+    assert_eq!(nothing.status, "failed");
 
     // Restore the batch: applied + verify_failed items go back to their before values.
     let restored = finished(&db, &runner, sessions::JOB_RESTORE_BATCH, json!({"applyBatchId": batches[0].id})).await;

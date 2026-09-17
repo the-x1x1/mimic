@@ -6,7 +6,7 @@ Mimic is a local-first Windows desktop app from the Formicaria family. It learns
 
 The product promise is not “apply an AI preset”. It is _“learn how I edit and do the repetitive part the way I would.”_
 
-## Current status — `0.3.0-alpha.1` (sessions, prediction, apply)
+## Current status — `0.4.0-alpha.1` (continuous learning)
 
 | Area                                                                                                                                                                             | Status                                                                                                  |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -19,7 +19,7 @@ The product promise is not “apply an AI preset”. It is _“learn how I edit 
 | Training a Style Brain (immutable versions, holdout metrics, activation policy, rollback)                                                                                        | Implemented and tested with the real engine                                                             |
 | Sessions: ingest a shoot, scene grouping, prediction with confidence, review queue                                                                                               | Implemented and tested with the real engine                                                             |
 | Apply to Lightroom (snapshot, plugin preset, read-back verification) and Restore from recorded before-values                                                                     | Implemented; proven against a scripted plugin over the real bridge. **Needs real-Lightroom QA**         |
-| Corrections sync, No-Touch Rate                                                                                                                                                  | **Not in this build** (0.4.0)                                                                           |
+| Corrections sync, measured No-Touch Rate, retraining with corrections, version comparison, style health insights                                                                 | Implemented; sync proven against a scripted plugin over the real bridge. **Needs real-Lightroom QA**    |
 | Windows installer + signed updater plumbing + GitHub Release workflow                                                                                                            | Implemented in CI; the first published installer is produced by the release workflow, not committed     |
 
 The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). If this README and that file ever disagree, PROJECT_STATUS wins, and the source code wins over both.
@@ -43,6 +43,7 @@ Releases are published on [GitHub Releases](https://github.com/the-x1x1/mimic/re
 5. **Train**: a new immutable version is trained on shoots split so validation never sees a training shoot; you get real holdout numbers, and older versions stay available for rollback.
 6. **New Session**: point Mimic at a new shoot (folder or Lightroom selection). _Analyze scenes_ groups it by time and look, _Predict_ writes a proposal with a confidence score and reasons for every photo, **Review** shows only the photos that need your eyes.
 7. **Apply to Lightroom**: Mimic creates a _Mimic Before_ snapshot on every photo, applies the settings as a plugin preset in batches of 25, reads every photo back and counts it as applied only when the read-back matches. _Restore_ writes the recorded before-values back.
+8. **Sync corrections**: after your own pass in Lightroom, Mimic reads the applied photos back once more. What you changed becomes a correction (and a training pair for the next version); what you left alone is the No-Touch Rate. The Style's Corrections tab shows which controls it keeps getting wrong.
 
 ## Development
 
@@ -65,9 +66,9 @@ Everything stays on this computer. Image analysis, metadata, training data, mode
 
 A Tauri 2 shell (Rust) owns the SQLite database, a persistent job queue, a loopback-only HTTP bridge that the Lightroom plugin polls, and a Python engine child process spoken to over newline-delimited JSON. The engine does deterministic image work: scanning, XMP parsing, RAW previews, statistics, embeddings, training, prediction and scene grouping. A single JSON contract, `packages/contracts/edit_mapping_v1.json`, defines the canonical EditDNA representation shared by Rust, Python and TypeScript, and golden fixtures pin its behaviour in all three. Lightroom stays the source of truth: Mimic never opens the `.lrcat`, never overwrites a RAW, and never mutates XMP.
 
-## Known limitations (0.3.0-alpha.1)
+## Known limitations (0.4.0-alpha.1)
 
-- No corrections sync yet: Mimic does not learn from what you change after an apply, and the No-Touch Rate stays “—” (0.4.0).
+- Corrections join training as ordinary pairs (no extra weight yet), and syncing is manual (a button on the session).
 - The model is a KNN + ridge hybrid on statistical features; it is measured against baselines, not against a photographer's acceptance yet.
 - Scene groups and bursts are detected but cannot be merged, split or renamed yet.
 - The Lightroom plugin — including the apply and restore path — has not been exercised against a real Lightroom Classic installation by CI; the protocol is verified with a fake plugin. Field reports welcome via the _Lightroom compatibility_ issue template.

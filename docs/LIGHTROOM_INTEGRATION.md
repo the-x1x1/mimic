@@ -62,6 +62,10 @@ Apply: batches of 25 `apply_settings_as_plugin_preset {createSnapshot: true, rea
 
 Restore (`restore_batch`): for every `applied`/`verify_failed` item with a recorded before-state, write back **only the keys Mimic wrote** with their before-values (`createSnapshot: false`, `readBack: true`, payload flag `restore: true`, `predictionId` = `restore-<appliedEditId>`), verify by read-back, record `restore_result` per item without touching the original apply row, return restored predictions to `pending`, and clear `rollback_available` once nothing is left. Keys without a before-value are reported as `missingKeys`; the Lightroom snapshot remains the fallback.
 
+## Corrections sync (0.4.0) — `mimic-core::corrections`
+
+Read-only. Requires the catalog the session was applied to. Resolves photos like apply does, then `collect_correction_state {photoIds}` in chunks of 25; each item's `settings` is compared with the keys Mimic wrote (read-back tolerances). Photos missing from the listing are `unresolved`; a `photo_not_found` item is skipped, never counted as untouched. Fixture: `fixtures/bridge/collect_correction_state.result.json`.
+
 ## Plugin install experience (§49)
 
 Mimic copies the plugin to `%LOCALAPPDATA%\Formicaria\Mimic\plugin\Mimic.lrplugin` on every launch (idempotent sync) and shows exact Plug-in Manager steps with a copy button and a reveal button. It never edits Lightroom preferences. The plugin exposes _Library › Plug-in Extras › Mimic: Connection Status… / Reconnect Now_ and a Plugin Manager panel to override the bridge file path.
@@ -69,5 +73,6 @@ Mimic copies the plugin to `%LOCALAPPDATA%\Formicaria\Mimic\plugin\Mimic.lrplugi
 ## What has and has not been verified
 
 - Verified in CI: the whole HTTP protocol with a fake plugin (handshake, polling, results, timeout, disconnect, reconnect, events, body cap, auth), fixture round-trips in Rust/TS/Lua, Lua syntax of every plugin file.
+- Verified in CI (0.4.0): corrections sync against the scripted plugin — one re-edited photo becomes a correction with the expected normalized delta, one untouched photo counts toward No-Touch, re-sync is idempotent, and the correction is consumed by the next training run (`tests/sessions_e2e.rs`).
 - Verified in CI (0.3.0): the whole session apply/restore path against a scripted plugin over the real bridge — photo resolution by path, snapshot + read-back flags, verify-failed on a mismatching read-back, missing photo skipped, restore writing before-values back (`crates/mimic-core/tests/sessions_e2e.rs`).
 - Not verified (no Lightroom in CI): the SDK calls themselves on a real catalog, `LrHttp` behaviour with long-poll timeouts, snapshot creation, preset application and read-back equality on a real Lightroom version. Track in `docs/LIGHTROOM_CAPABILITY_MATRIX.md` as reports arrive.

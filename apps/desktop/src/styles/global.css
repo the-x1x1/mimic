@@ -931,3 +931,6 @@ p {
 .filmstrip__item--on {
   border-color: var(--accent);
 }
+.mr-2 {
+  margin-right: var(--space-2);
+}

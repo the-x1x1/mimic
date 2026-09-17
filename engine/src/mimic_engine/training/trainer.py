@@ -72,7 +72,9 @@ def train(
     report = lambda phase, cur, tot: progress(phase, cur, tot) if progress else None  # noqa: E731
 
     report("loading training pairs", 0, 0)
-    ds = load_dataset(db_path, library_ids, embeddings_dir)
+    correction_ids = [str(a) for a in (cfg.get("correctionAssetIds") or [])]
+    ds = load_dataset(db_path, library_ids, embeddings_dir, correction_ids)
+    correction_pairs = sum(1 for p in ds.pairs if p.source == "correction")
     if len(ds) < int(cfg["minPairs"]):
         raise InsufficientDataError(
             f"{len(ds)} usable pairs; at least {cfg['minPairs']} are needed",
@@ -181,7 +183,13 @@ def train(
             "joblib": joblib.__version__,
             "mimic_engine": __version__,
         },
-        "counts": {"pairs": len(ds), "train": len(tr), "validation": len(va), "holdout": len(ho)},
+        "counts": {
+            "pairs": len(ds),
+            "train": len(tr),
+            "validation": len(va),
+            "holdout": len(ho),
+            "correctionPairs": correction_pairs,
+        },
         "excluded": ds.excluded,
         "warnings": ds.warnings + split.warnings,
         "trainedAt": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -214,6 +222,8 @@ def train(
             "fingerprint": training_config["trainingDataFingerprint"],
             "assetCount": len(ds) + sum(ds.excluded.values()),
             "validPairCount": len(ds),
+            "correctionPairs": correction_pairs,
+            "correctionAssetIds": [p.asset_id for p in ds.pairs if p.source == "correction"],
         },
     }
 

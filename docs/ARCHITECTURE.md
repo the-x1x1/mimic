@@ -39,6 +39,7 @@
 2. `group_session` → engine `session.group` → `scene_clusters` + per-asset cluster/burst ids.
 3. `predict_session` → engine `model.predict` with the active version's artifact and the cluster map (`groups`) → `predictions` rows (canonical settings, confidence, components, nearest examples, capability schema version).
 4. Review sets `reviewed`/`rejected`; `apply_session` runs `apply_preflight`, resolves Lightroom photo ids, sends batches of 25 through the bridge with snapshot + read-back, verifies each item with `edit_dna::verify_readback`, records `applied_edits` and a `prediction` edit snapshot; `restore_batch` writes the recorded before-values back and verifies again.
+5. `sync_corrections` (0.4.0) reads the applied photos back with `collect_correction_state`, records untouched vs corrected per photo (`corrections`, `correction_syncs`, `correction` edit snapshots); the next `train_style` consumes pending corrections as training pairs and `style_health` derives the No-Touch Rate and insights.
 
 ## Engine protocol (§20)
 
@@ -54,4 +55,4 @@ Root `package.json` is the single source; `scripts/sync-version.mjs` propagates 
 
 ## Extension points prepared, not built
 
-Job kinds are strings dispatched through `CompositeExecutor`; ingest, training and session executors (ingest/group/predict/apply/restore) are registered today, correction-sync joins the same runner in 0.4.0. Model artifacts are content-addressed files under `models/styles/`. Capability matrix statuses leave room for `supported` local edits once proven.
+Job kinds are strings dispatched through `CompositeExecutor`; ingest, training, session (ingest/group/predict/apply/restore) and corrections (sync) executors are registered. Model artifacts are content-addressed files under `models/styles/`. Capability matrix statuses leave room for `supported` local edits once proven.

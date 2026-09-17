@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Badge, Button, Card, EmptyState, InlineError, Metric, ProgressBar } from "@mimic/ui";
-import { ImageOff, Layers3, RotateCcw, Sparkles, Trash2, Upload } from "lucide-react";
+import { ImageOff, Layers3, RefreshCw, RotateCcw, Sparkles, Trash2, Upload } from "lucide-react";
 import { JOB_LABELS, needsAttention, type SessionPhoto } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
 import { ApplyResultBadge, ConfidenceBadge } from "@/components/ConfidenceBadge";
@@ -19,6 +19,7 @@ import {
   useSessionPhotos,
   useSetPredictionReview,
   useSetSessionStyle,
+  useSyncCorrections,
 } from "@/hooks/useSessions";
 import { useStyles } from "@/hooks/useStyles";
 import { previewUrl } from "@/lib/ipc";
@@ -32,6 +33,7 @@ const SESSION_JOBS = [
   "predict_session",
   "apply_session",
   "restore_batch",
+  "sync_corrections",
 ];
 
 export function SessionDetailPage() {
@@ -49,6 +51,7 @@ export function SessionDetailPage() {
   const review = useSetPredictionReview(sessionId);
   const setStyle = useSetSessionStyle();
   const del = useDeleteSession();
+  const sync = useSyncCorrections();
   const [clusterFilter, setClusterFilter] = useState<string | "all" | "attention">("all");
   const [selected, setSelected] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ ids?: string[]; label: string } | null>(null);
@@ -73,8 +76,17 @@ export function SessionDetailPage() {
   if (detail.isError)
     return <InlineError title="Session not found">{(detail.error as Error).message}</InlineError>;
   if (!detail.data) return <p className="muted">Loading…</p>;
-  const { session, clusters, batches, predictionCounts, grouped, photoCount, photosWithFeatures } =
-    detail.data;
+  const {
+    session,
+    clusters,
+    batches,
+    correctionSyncs,
+    predictionCounts,
+    grouped,
+    photoCount,
+    photosWithFeatures,
+  } = detail.data;
+  const appliedVerified = batches.reduce((n, b) => n + b.appliedCount, 0);
   const trainedStyles = (styles.data ?? []).filter((s) => s.activeVersion);
   const style = (styles.data ?? []).find((s) => s.id === session.activeStyleProfileId);
   const lrConnected = lr.data?.bridge.connected ?? false;
@@ -94,6 +106,14 @@ export function SessionDetailPage() {
           ? "Wait for the running job."
           : undefined;
   const canApply = pending > 0 && lrConnected && !busy;
+  const canSync = appliedVerified > 0 && lrConnected && !busy;
+  const syncReason = !lrConnected
+    ? "Lightroom is not connected."
+    : appliedVerified === 0
+      ? "Nothing applied yet: sync compares your final edits with what Mimic applied."
+      : busy
+        ? "Wait for the running job."
+        : undefined;
   const applyReason = !lrConnected
     ? "Lightroom is not connected."
     : pending === 0
@@ -168,6 +188,18 @@ export function SessionDetailPage() {
               title={applyReason ?? "Apply pending predictions to Lightroom"}
             >
               Apply to Lightroom
+            </Button>
+            <Button
+              icon={<RefreshCw />}
+              onClick={() => sync.mutate(sessionId)}
+              disabled={!canSync}
+              loading={sync.isPending}
+              title={
+                syncReason ??
+                "Read the applied photos back from Lightroom; what you changed becomes a correction"
+              }
+            >
+              Sync corrections
             </Button>
             <Button
               variant="danger"
@@ -303,6 +335,40 @@ export function SessionDetailPage() {
               ))}
             </tbody>
           </table>
+        </Card>
+      ) : null}
+
+      {correctionSyncs.length > 0 ? (
+        <Card title="Corrections synced" className="mt-3">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th className="num">Checked</th>
+                <th className="num">Untouched</th>
+                <th className="num">Corrected</th>
+                <th className="num">No-Touch</th>
+              </tr>
+            </thead>
+            <tbody>
+              {correctionSyncs.map((c) => (
+                <tr key={c.id}>
+                  <td>{formatDate(c.syncedAt)}</td>
+                  <td className="num">{c.checkedCount}</td>
+                  <td className="num">{c.untouchedCount}</td>
+                  <td className="num">{c.correctedCount}</td>
+                  <td className="num">
+                    {c.checkedCount > 0
+                      ? `${Math.round((c.untouchedCount / c.checkedCount) * 100)}%`
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted small mt-2">
+            Corrections feed the Style's next training run; see the Style's Corrections tab.
+          </p>
         </Card>
       ) : null}
 

@@ -150,3 +150,16 @@ export function useRestoreBatch(sessionId: string) {
     onError: (e: Error) => toast.danger("Cannot restore", e.message),
   });
 }
+
+export function useSyncCorrections() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => ipc.syncCorrections(sessionId),
+    onSuccess: (_j, sessionId) => {
+      invalidateSession(qc, sessionId);
+      qc.invalidateQueries({ queryKey: qk.styles });
+      toast.info("Sync started", "Reading the current develop settings back from Lightroom.");
+    },
+    onError: (e: Error) => toast.danger("Cannot sync corrections", e.message),
+  });
+}

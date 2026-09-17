@@ -2,6 +2,19 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.4.0-alpha.1] — 2026-09-17
+
+Continuous learning: Mimic now reads applied photos back after your own pass in Lightroom, keeps what you changed as corrections, measures the No-Touch Rate from what you left alone, and trains the next version on those corrections. Proven against a scripted plugin over the real bridge; real-Lightroom behaviour remains unverified.
+
+### Added
+
+- Schema v3 (`0003_corrections.sql`): `correction_syncs` (one row per sync: checked / untouched / corrected / unresolved) and a unique `corrections(prediction_id)`; the migration test now upgrades a seeded v1 database through every version.
+- mimic-core `corrections`: `sync_corrections` job (same catalog required; photos resolved like apply; `collect_correction_state` in chunks of 25; keys Mimic wrote compared with read-back tolerances; per-control normalized deltas and magnitude; `correction` edit snapshot with the photographer's final settings; re-sync replaces an unused correction and keeps one already used by training), `no_touch_stats` (per version, synced sessions only, restored edits excluded), `style_health` (active No-Touch, corrections pending training, most-corrected controls with signed bias, computed insight sentences).
+- Training with corrections: `train_style` passes the Style's pending corrections as `correctionAssetIds`; the engine's dataset loader adds those assets only when their latest snapshot is a `correction`, groups them as their own shoot, reports `correctionPairs`; the job marks them `included_in_training_version`.
+- Commands: `sync_corrections`, `get_style_health`, `list_corrections`; `StyleSummary.noTouchRate`; `StyleDetail.health`; `SessionDetail.correctionSyncs`; zod contracts with fixtures shared with the Rust round-trip tests (`style_health.json`, `correction_row.json`) and a `collect_correction_state` bridge fixture.
+- UI: Style Corrections tab (No-Touch per version, insights, most-corrected controls, correction list with trained/pending state, honest empty state), Versions tab side-by-side comparison (overall and per-family holdout error, measured No-Touch), session _Sync corrections_ button with reasons and a sync history table, Home and active-version cards show the measured No-Touch Rate or “—”.
+- Tests: pytest dataset test for correction assets, Rust unit tests for the diff and health, `sessions_e2e` extended with sync → idempotent re-sync → retrain consuming the correction → clean failure on a session without applies, component tests for the Corrections panel and version comparison.
+
 ## [0.3.0-alpha.1] — 2026-09-17
 
 Sessions, scene grouping, prediction with confidence, Review, and the Lightroom apply/restore path with read-back verification. Everything that touches a catalog is proven against a scripted plugin over the real bridge; behaviour on a real Lightroom Classic is still unverified.
@@ -21,6 +34,7 @@ Sessions, scene grouping, prediction with confidence, Review, and the Lightroom 
 
 - Home and Settings no longer describe Sessions/Review as future work; the unhonoured “create a snapshot before applying” toggle was removed — snapshot + read-back are mandatory and stated as such.
 - `apps/desktop/tsconfig.tsbuildinfo` is no longer tracked (it is a build cache and blocked fast-forward pulls).
+- Styles with predictions cannot be deleted (apply history references their versions); delete the sessions first. The UI reports the reason.
 
 ## [0.2.0-alpha.1] — 2026-09-17
 

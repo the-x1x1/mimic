@@ -9,14 +9,17 @@ import { PhotoGrid } from "@/components/PhotoGrid";
 import {
   useActivateVersion,
   useArchiveVersion,
+  useCorrections,
   useDeleteStyle,
   useStyleDetail,
   useTrainStyle,
 } from "@/hooks/useStyles";
 import { VersionList } from "@/components/VersionList";
+import { VersionCompare } from "@/components/VersionCompare";
+import { CorrectionsPanel } from "@/components/CorrectionsPanel";
 import { useJobs } from "@/hooks/useJobs";
 import { ProgressBar } from "@mimic/ui";
-import { primaryError } from "@mimic/contracts";
+import { formatNoTouch, primaryError } from "@mimic/contracts";
 import { useLibraries, useLibraryAssets, useStartScan } from "@/hooks/useLibraries";
 import { formatDate } from "@/lib/format";
 import { AddTrainingDataDialog } from "./AddTrainingDataDialog";
@@ -35,6 +38,7 @@ export function StyleDetailPage() {
   const activate = useActivateVersion();
   const archive = useArchiveVersion();
   const jobs = useJobs(true);
+  const corrections = useCorrections(styleId);
   const trainingJob = jobs.data?.find(
     (j) =>
       j.type === "train_style" && (j.payload as { styleId?: string } | null)?.styleId === styleId,
@@ -43,7 +47,7 @@ export function StyleDetailPage() {
   if (detail.isError)
     return <InlineError title="Style not found">{(detail.error as Error).message}</InlineError>;
   if (!detail.data) return <p className="muted">Loading…</p>;
-  const { style, libraries: reports, versions, training } = detail.data;
+  const { style, libraries: reports, versions, training, health } = detail.data;
   const libById = new Map((libraries.data ?? []).map((l) => [l.id, l]));
 
   return (
@@ -163,6 +167,15 @@ export function StyleDetailPage() {
                     />
                     <Metric label="Model" value={style.activeVersion.modelType} />
                     <Metric label="Trained" value={formatDate(style.activeVersion.createdAt)} />
+                    <Metric
+                      label="No-Touch Rate"
+                      value={formatNoTouch(style.noTouchRate)}
+                      hint={
+                        style.noTouchRate === null
+                          ? "measured after you sync corrections from an applied session"
+                          : "applied photos left untouched after sync"
+                      }
+                    />
                   </div>
                 </Card>
               ) : null}
@@ -227,20 +240,20 @@ export function StyleDetailPage() {
               }
             />
           ) : (
-            <VersionList
-              versions={versions}
-              onActivate={(id) => activate.mutate(id)}
-              onArchive={(id) => archive.mutate(id)}
-              busy={activate.isPending || archive.isPending}
-            />
+            <div className="stack gap-3">
+              <VersionList
+                versions={versions}
+                onActivate={(id) => activate.mutate(id)}
+                onArchive={(id) => archive.mutate(id)}
+                busy={activate.isPending || archive.isPending}
+              />
+              <VersionCompare versions={versions} noTouch={health.noTouch} />
+            </div>
           )}
         </Tabs.Content>
 
         <Tabs.Content value="corrections" className="tabs__content">
-          <EmptyState
-            title="No corrections yet"
-            body="When you adjust a Mimic-edited photo in Lightroom and sync corrections, the differences appear here and feed the next version (0.4.0)."
-          />
+          <CorrectionsPanel health={health} corrections={corrections.data} />
         </Tabs.Content>
       </Tabs.Root>
       <AddTrainingDataDialog styleId={style.id} open={adding} onOpenChange={setAdding} />

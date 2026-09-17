@@ -14,6 +14,7 @@
 
 pub mod bridge;
 pub mod capability;
+pub mod corrections;
 pub mod db;
 pub mod diagnostics;
 pub mod edit_dna;

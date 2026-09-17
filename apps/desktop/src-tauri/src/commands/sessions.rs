@@ -209,3 +209,20 @@ pub async fn get_prediction(state: State<'_, SharedState>, prediction_id: String
         "modelVersion": mv,
     }))
 }
+
+#[tauri::command]
+pub async fn sync_corrections(state: State<'_, SharedState>, session_id: String) -> CommandResult<mimic_core::db::Job> {
+    state.db.get_session(&session_id)?.ok_or_else(|| CommandError::new("not_found", "session not found"))?;
+    state
+        .bridge
+        .connection()
+        .ok_or_else(|| CommandError::new("lightroom_not_connected", "Lightroom is not connected."))?;
+    if session_job_running(
+        &state,
+        &session_id,
+        &[mimic_core::corrections::JOB_SYNC_CORRECTIONS, sessions::JOB_APPLY_SESSION, sessions::JOB_RESTORE_BATCH],
+    ) {
+        return Err(CommandError::new("busy", "an apply, restore or sync is already running for this session"));
+    }
+    Ok(state.jobs.enqueue(mimic_core::corrections::JOB_SYNC_CORRECTIONS, json!({"sessionId": session_id}))?)
+}

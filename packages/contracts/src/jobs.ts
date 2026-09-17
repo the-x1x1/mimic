@@ -52,6 +52,7 @@ export const JOB_KINDS = {
   predictSession: "predict_session",
   applySession: "apply_session",
   restoreBatch: "restore_batch",
+  syncCorrections: "sync_corrections",
 } as const;
 
 export const JOB_LABELS: Record<string, string> = {
@@ -64,4 +65,5 @@ export const JOB_LABELS: Record<string, string> = {
   predict_session: "Predicting edits",
   apply_session: "Applying to Lightroom",
   restore_batch: "Restoring from before-state",
+  sync_corrections: "Syncing corrections from Lightroom",
 };

@@ -1,0 +1,47 @@
+{
+  "styleId": "style-1",
+  "noTouch": [
+    {
+      "modelVersionId": "mv-1",
+      "semanticVersion": "1.0.0",
+      "appliedChecked": 40,
+      "corrected": 14,
+      "untouched": 26,
+      "rate": 0.65
+    },
+    {
+      "modelVersionId": "mv-2",
+      "semanticVersion": "1.1.0",
+      "appliedChecked": 22,
+      "corrected": 4,
+      "untouched": 18,
+      "rate": 0.8181818181818182
+    },
+    {
+      "modelVersionId": "mv-3",
+      "semanticVersion": "1.2.0",
+      "appliedChecked": 0,
+      "corrected": 0,
+      "untouched": 0,
+      "rate": null
+    }
+  ],
+  "activeNoTouchRate": 0.8181818181818182,
+  "correctionsTotal": 18,
+  "correctionsPendingTraining": 4,
+  "mostCorrected": [
+    { "canonical": "tone.exposure", "corrections": 12, "meanAbsDelta": 0.031, "meanDelta": 0.028 },
+    {
+      "canonical": "whiteBalance.temperature",
+      "corrections": 7,
+      "meanAbsDelta": 0.042,
+      "meanDelta": -0.01
+    }
+  ],
+  "insights": [
+    "No-Touch Rate 82% over 22 applied photo(s) checked after sync.",
+    "4 correction(s) have not been used by any training run; Train New Version will include them.",
+    "tone.exposure is consistently corrected upward (mean 2.8% of range across 12 photos); the model is biased on it.",
+    "No-Touch Rate went from 65% (v1.0.0) to 82% (v1.1.0)."
+  ]
+}
