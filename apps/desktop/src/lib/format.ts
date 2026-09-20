@@ -29,10 +29,9 @@ export function formatDate(iso: string | null | undefined): string {
     : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-export function formatShutter(seconds: number | null | undefined): string {
-  if (!seconds) return "—";
-  if (seconds >= 1) return `${seconds.toFixed(1)}s`;
-  return `1/${Math.round(1 / seconds)}`;
+/** A count with its noun, pluralized. `countOf(1, "message")` → "1 message". */
+export function countOf(n: number, noun: string, plural = `${noun}s`): string {
+  return `${n.toLocaleString()} ${n === 1 ? noun : plural}`;
 }
 
 export function pct(n: number): string {

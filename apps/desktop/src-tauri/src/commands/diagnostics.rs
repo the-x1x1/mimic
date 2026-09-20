@@ -3,6 +3,15 @@ use tauri::State;
 use crate::error::CommandResult;
 use crate::SharedState;
 
+/// Which providers exist and which is active. Never a credential.
+fn provider_summary(state: &SharedState) -> serde_json::Value {
+    let registry = state.providers.read().unwrap_or_else(|p| p.into_inner());
+    serde_json::json!({
+        "active": state.db.get_setting::<String>("generation.provider").ok().flatten(),
+        "available": registry.list().iter().map(|p| serde_json::json!({"id": p.id, "local": p.local, "model": p.model})).collect::<Vec<_>>(),
+    })
+}
+
 #[tauri::command]
 pub async fn get_diagnostics_bundle(
     state: State<'_, SharedState>,
@@ -11,7 +20,7 @@ pub async fn get_diagnostics_bundle(
     Ok(mimic_core::diagnostics::build_bundle(
         &state.db,
         serde_json::to_value(state.engine.status())?,
-        serde_json::to_value(state.bridge.status())?,
+        serde_json::to_value(provider_summary(&state))?,
         include_paths,
     )?)
 }
@@ -31,10 +40,8 @@ pub async fn restart_engine(state: State<'_, SharedState>) -> CommandResult<mimi
     let status = state.engine.restart().await?;
     let cfg = serde_json::json!({
         "dbPath": state.db.path().map(|p| p.to_string_lossy().to_string()),
-        "previewsDir": state.paths.previews_cache(),
         "embeddingsDir": state.paths.embeddings_cache(),
         "encodersDir": state.paths.encoders_dir(),
-        "stylesDir": state.paths.styles_dir(),
         "manifestsDir": state.manifests_dir(),
     });
     state.engine.call("engine.configure", cfg).await?;

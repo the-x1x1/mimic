@@ -21,6 +21,7 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "session_intelligence",
         sql: include_str!("migrations/0004_session_intelligence.sql"),
     },
+    Migration { version: 5, name: "communication", sql: include_str!("migrations/0005_communication.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -75,7 +76,13 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 4);
+        assert_eq!(latest_version(), 5);
+    }
+
+    fn table_names(conn: &Connection) -> Vec<String> {
+        let mut stmt =
+            conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0)).unwrap().map(Result::unwrap).collect()
     }
 
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {
@@ -83,105 +90,166 @@ mod tests {
         stmt.query_map([], |r| r.get::<_, String>(1)).unwrap().map(Result::unwrap).collect()
     }
 
+    /// A photography install upgrades cleanly: the generic tables keep their
+    /// rows, every photography table is gone, and the communication schema is
+    /// in place with its constraints.
     #[test]
-    fn v1_database_with_data_upgrades_to_latest_keeping_rows() {
+    fn photography_database_upgrades_to_the_communication_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        migrate_to(&mut conn, 1).unwrap();
-        assert_eq!(current_version(&conn), Ok(1));
-        assert!(!column_names(&conn, "libraries").contains(&"purpose".to_string()));
+        migrate_to(&mut conn, 4).unwrap();
+        assert_eq!(current_version(&conn), Ok(4));
+
+        // Seed a realistic v4 install: photography rows plus the generic rows
+        // that must survive.
         conn.execute(
-            "INSERT INTO libraries(id, name, source_type, created_at) VALUES ('l1', 'Old', 'folder_sidecars', 't')",
+            "INSERT INTO libraries(id, name, source_type, created_at) VALUES ('l1','Old','folder_sidecars','t')",
             [],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO assets(id, library_id, source_path, normalized_path, file_name, extension, fast_hash, created_at, updated_at)
-             VALUES ('a1', 'l1', '/p/a.cr3', '/p/a.cr3', 'a.cr3', 'cr3', 'h', 't', 't')",
+             VALUES ('a1','l1','/p/a.cr3','/p/a.cr3','a.cr3','cr3','h','t','t')",
             [],
         )
         .unwrap();
-        conn.execute("INSERT INTO sessions(id, name, created_at) VALUES ('s1', 'S', 't')", []).unwrap();
+        conn.execute("INSERT INTO sessions(id, name, created_at) VALUES ('s1','S','t')", []).unwrap();
+        conn.execute("INSERT INTO style_profiles(id, name, created_at, updated_at) VALUES ('st','Style','t','t')", [])
+            .unwrap();
         conn.execute(
-            "INSERT INTO style_profiles(id, name, created_at, updated_at) VALUES ('st', 'Style', 't', 't')",
+            "INSERT INTO app_settings(key, value_json, updated_at) VALUES ('general.theme','\"dark\"','t')",
             [],
         )
         .unwrap();
+        conn.execute("INSERT INTO jobs(id, type, status, created_at) VALUES ('j1','import','completed','t')", [])
+            .unwrap();
         conn.execute(
-            "INSERT INTO model_versions(id, style_profile_id, semantic_version, model_type, feature_schema_version, edit_schema_version, created_at, status)
-             VALUES ('mv', 'st', '1.0.0', 'hybrid', 'f1', '1.0', 't', 'ready')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO predictions(id, session_id, asset_id, model_version_id, predicted_settings_json, confidence, created_at, status)
-             VALUES ('p1', 's1', 'a1', 'mv', '{}', 0.5, 't', 'pending')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO apply_batches(id, session_id, started_at, status) VALUES ('b1', 's1', 't', 'completed')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO applied_edits(id, apply_batch_id, prediction_id, asset_id, applied_settings_json, result, applied_at)
-             VALUES ('e1', 'b1', 'p1', 'a1', '{}', 'applied', 't')",
+            "INSERT INTO events(level, category, event_type, created_at) VALUES ('info','app','started','t')",
             [],
         )
         .unwrap();
 
-        conn.execute(
-            "INSERT INTO corrections(id, asset_id, prediction_id, model_version_id, predicted_settings_json, corrected_settings_json, delta_json, correction_magnitude, observed_at)
-             VALUES ('c1', 'a1', 'p1', 'mv', '{}', '{}', '{}', 0.1, 't')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO scene_clusters(id, session_id, label, created_at) VALUES ('sc1', 's1', 'Group 1', 't')",
-            [],
-        )
-        .unwrap();
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![2, 3, 4]);
+        assert_eq!(applied, vec![5]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
-        let purpose: String =
-            conn.query_row("SELECT purpose FROM libraries WHERE id = 'l1'", [], |r| r.get(0)).unwrap();
-        assert_eq!(purpose, "training", "existing libraries default to training");
-        let cols = column_names(&conn, "applied_edits");
-        for c in ["restored_at", "restore_result", "restore_error_json"] {
-            assert!(cols.contains(&c.to_string()), "missing {c}");
+
+        let tables = table_names(&conn);
+        for gone in [
+            "libraries",
+            "assets",
+            "sidecars",
+            "edit_snapshots",
+            "visual_features",
+            "style_profiles",
+            "style_profile_libraries",
+            "sessions",
+            "session_assets",
+            "scene_clusters",
+            "training_sets",
+            "model_versions",
+            "model_artifacts",
+            "predictions",
+            "apply_batches",
+            "applied_edits",
+            "corrections",
+            "correction_syncs",
+            "lightroom_connections",
+        ] {
+            assert!(!tables.contains(&gone.to_string()), "photography table {gone} survived");
         }
-        let cols = column_names(&conn, "predictions");
-        assert!(cols.contains(&"capability_schema_version".to_string()));
-        assert!(cols.contains(&"cluster_id".to_string()));
-        let (result, restored): (String, Option<String>) = conn
-            .query_row("SELECT result, restore_result FROM applied_edits WHERE id = 'e1'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .unwrap();
-        assert_eq!((result.as_str(), restored), ("applied", None));
-        assert!(
-            conn.execute("UPDATE libraries SET purpose = 'bogus' WHERE id = 'l1'", []).is_err(),
-            "purpose is constrained"
-        );
-        assert!(column_names(&conn, "correction_syncs").contains(&"untouched_count".to_string()));
-        assert!(
-            conn.execute(
-                "INSERT INTO corrections(id, asset_id, prediction_id, model_version_id, predicted_settings_json, corrected_settings_json, delta_json, correction_magnitude, observed_at)
-                 VALUES ('c2', 'a1', 'p1', 'mv', '{}', '{}', '{}', 0.1, 't')",
+        for kept in ["app_settings", "jobs", "events", "update_state"] {
+            assert!(tables.contains(&kept.to_string()), "generic table {kept} was dropped");
+        }
+        for created in [
+            "user_identity",
+            "user_identifiers",
+            "sources",
+            "participants",
+            "participant_identifiers",
+            "conversations",
+            "conversation_participants",
+            "messages",
+            "message_embeddings",
+            "situations",
+            "message_situations",
+            "voice_profiles",
+            "voice_preferences",
+            "representative_examples",
+            "drafts",
+            "draft_feedback",
+            "analysis_runs",
+            "evaluations",
+            "evaluation_cases",
+        ] {
+            assert!(tables.contains(&created.to_string()), "missing table {created}");
+        }
+
+        // Generic rows survived the drop.
+        let theme: String =
+            conn.query_row("SELECT value_json FROM app_settings WHERE key='general.theme'", [], |r| r.get(0)).unwrap();
+        assert_eq!(theme, "\"dark\"");
+        let jobs: i64 = conn.query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0)).unwrap();
+        let events: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0)).unwrap();
+        assert_eq!((jobs, events), (1, 1));
+
+        assert!(column_names(&conn, "messages").contains(&"direction".to_string()));
+        assert!(migrate(&mut conn).unwrap().is_empty(), "idempotent");
+    }
+
+    /// The constraints that keep the communication model honest.
+    #[test]
+    fn communication_schema_enforces_its_invariants() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO sources(id, connector, name, channel, created_at) VALUES ('s','mbox','M','email','t')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO participants(id, display_name, created_at, updated_at) VALUES ('p','Ada','t','t')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversations(id, source_id, external_id, channel, created_at) VALUES ('c','s','x','email','t')",
+            [],
+        )
+        .unwrap();
+
+        // direction is a closed vocabulary
+        assert!(conn
+            .execute(
+                "INSERT INTO messages(id, conversation_id, source_id, external_id, direction, channel, body, body_hash, imported_at)
+                 VALUES ('m0','c','s','m0','sideways','email','hi','h','t')",
                 [],
             )
-            .is_err(),
-            "one correction per prediction"
-        );
-        let cols = column_names(&conn, "scene_clusters");
-        assert!(cols.contains(&"reference_asset_id".to_string()) && cols.contains(&"edited_at".to_string()));
-        conn.execute("UPDATE scene_clusters SET reference_asset_id = 'a1' WHERE id = 'sc1'", []).unwrap();
-        assert!(
-            conn.execute("UPDATE scene_clusters SET reference_asset_id = 'nope' WHERE id = 'sc1'", []).is_err(),
-            "reference must be an existing asset"
-        );
-        assert!(migrate(&mut conn).unwrap().is_empty(), "idempotent");
+            .is_err());
+
+        conn.execute(
+            "INSERT INTO messages(id, conversation_id, source_id, external_id, participant_id, direction, channel, body, body_hash, imported_at)
+             VALUES ('m1','c','s','ext-1','p','other','email','hi','h','t')",
+            [],
+        )
+        .unwrap();
+        // (source_id, external_id) is the import identity key
+        assert!(conn
+            .execute(
+                "INSERT INTO messages(id, conversation_id, source_id, external_id, direction, channel, body, body_hash, imported_at)
+                 VALUES ('m2','c','s','ext-1','self','email','hi','h','t')",
+                [],
+            )
+            .is_err());
+
+        // Deleting a participant takes their messages with them.
+        conn.execute("DELETE FROM participants WHERE id='p'", []).unwrap();
+        let left: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0, "messages must cascade from their participant");
+
+        // Deleting a source takes its conversations with them.
+        conn.execute("DELETE FROM sources WHERE id='s'", []).unwrap();
+        let convos: i64 = conn.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0)).unwrap();
+        assert_eq!(convos, 0);
     }
 }

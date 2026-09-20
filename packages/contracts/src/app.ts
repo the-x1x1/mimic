@@ -4,8 +4,8 @@ import { UpdateState } from "./updater";
 
 export const AppInfo = z.object({
   version: z.string(),
-  bridgeProtocolVersion: z.number(),
   engineProtocolVersion: z.number(),
+  analysisVersion: z.string(),
   dataRoot: z.string(),
   startedAt: z.string(),
   schemaVersion: z.number(),
@@ -42,13 +42,29 @@ export const EngineEvent = z.discriminatedUnion("event", [
 ]);
 export type EngineEvent = z.infer<typeof EngineEvent>;
 
+/**
+ * Each step is a fact about the database, not a checkbox the UI ticks. A user
+ * who deletes everything goes back to step one, which is correct.
+ */
 export const OnboardingState = z.object({
   completed: z.boolean(),
-  hasLibrary: z.boolean(),
-  hasStyle: z.boolean(),
-  lightroomEverConnected: z.boolean(),
+  hasIdentity: z.boolean(),
+  hasSource: z.boolean(),
+  hasOwnMessages: z.boolean(),
+  hasVoiceProfile: z.boolean(),
 });
 export type OnboardingState = z.infer<typeof OnboardingState>;
+
+/** The first unfinished step, or null when there is nothing left to do. */
+export function nextOnboardingStep(
+  s: OnboardingState,
+): "identity" | "source" | "import" | "analyze" | null {
+  if (!s.hasIdentity) return "identity";
+  if (!s.hasSource) return "source";
+  if (!s.hasOwnMessages) return "import";
+  if (!s.hasVoiceProfile) return "analyze";
+  return null;
+}
 
 export const EventRow = z.object({
   id: z.number(),
@@ -70,7 +86,7 @@ export const DiagnosticsBundle = z.object({
   dbSchemaVersion: z.number(),
   tableCounts: z.array(z.tuple([z.string(), z.number()])),
   engine: z.unknown(),
-  bridge: z.unknown(),
+  providers: z.unknown(),
   updateState: z.unknown(),
   recentErrors: z.array(z.unknown()),
   jobSummaries: z.array(z.unknown()),
@@ -78,19 +94,16 @@ export const DiagnosticsBundle = z.object({
 });
 export type DiagnosticsBundle = z.infer<typeof DiagnosticsBundle>;
 
-// Deferred import to avoid a cycle: lightroom.ts imports nothing from app.ts.
-import { BridgeStatus } from "./lightroom";
-
 export const SystemStatus = z.object({
   engine: EngineStatus,
-  lightroom: BridgeStatus,
   activeJobs: z.array(Job),
   update: UpdateState,
   counts: z.object({
-    libraries: z.number(),
-    styles: z.number(),
-    assets: z.number(),
-    sessions: z.number(),
+    sources: z.number(),
+    messages: z.number(),
+    ownMessages: z.number(),
+    people: z.number(),
+    drafts: z.number(),
   }),
 });
 export type SystemStatus = z.infer<typeof SystemStatus>;

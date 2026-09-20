@@ -1,0 +1,127 @@
+import { z } from "zod";
+
+export const VoiceLayer = z.enum(["global", "channel", "relationship", "situational"]);
+export type VoiceLayer = z.infer<typeof VoiceLayer>;
+
+/**
+ * Every rate is nullable on purpose. `null` means "not measured"; `0` means
+ * "measured, and it is zero". The UI must not render the two the same way.
+ */
+export const VoiceMetrics = z.object({
+  sampleSize: z.number(),
+  measurable: z.boolean(),
+  avgWordsPerMessage: z.number().nullable(),
+  medianWordsPerMessage: z.number().nullable(),
+  p90WordsPerMessage: z.number().nullable(),
+  avgSentencesPerMessage: z.number().nullable(),
+  multiParagraphRate: z.number().nullable(),
+  terminalPeriodRate: z.number().nullable(),
+  questionRate: z.number().nullable(),
+  exclamationRate: z.number().nullable(),
+  ellipsisRate: z.number().nullable(),
+  emojiRate: z.number().nullable(),
+  lowercaseStartRate: z.number().nullable(),
+  allLowercaseRate: z.number().nullable(),
+  contractionsPer100Words: z.number().nullable(),
+  greetingRate: z.number().nullable(),
+  signOffRate: z.number().nullable(),
+  topGreetings: z.array(z.tuple([z.string(), z.number()])),
+  topSignOffs: z.array(z.tuple([z.string(), z.number()])),
+  topPhrases: z.array(z.tuple([z.string(), z.number()])),
+  medianResponseSeconds: z.number().nullable(),
+});
+export type VoiceMetrics = z.infer<typeof VoiceMetrics>;
+
+export const ResolvedLayer = z.object({
+  layer: z.string(),
+  scopeKey: z.string(),
+  label: z.string(),
+  sampleSize: z.number(),
+  measurable: z.boolean(),
+  metrics: VoiceMetrics,
+  stale: z.boolean(),
+});
+export type ResolvedLayer = z.infer<typeof ResolvedLayer>;
+
+export const VoiceOverview = z.object({
+  analysisVersion: z.string(),
+  ownMessages: z.number(),
+  channels: z.array(z.tuple([z.string(), z.number()])),
+  profiles: z.array(ResolvedLayer),
+  peopleWithProfiles: z.number(),
+  stale: z.boolean(),
+  lastAnalyzedAt: z.string().nullable(),
+  messagesUntilMeasurable: z.number(),
+});
+export type VoiceOverview = z.infer<typeof VoiceOverview>;
+
+export const RepresentativeExample = z.object({
+  id: z.string(),
+  messageId: z.string(),
+  layer: z.string(),
+  scopeKey: z.string(),
+  participantId: z.string().nullable(),
+  reason: z.string(),
+  score: z.number(),
+  body: z.string(),
+  sentAt: z.string().nullable(),
+});
+export type RepresentativeExample = z.infer<typeof RepresentativeExample>;
+
+export const VoicePreference = z.object({
+  id: z.string(),
+  layer: z.string(),
+  scopeKey: z.string(),
+  key: z.string(),
+  value: z.unknown(),
+  note: z.string().nullable(),
+  updatedAt: z.string(),
+});
+export type VoicePreference = z.infer<typeof VoicePreference>;
+
+/** Below this many of the user's own messages nothing is measured. */
+export const MIN_SAMPLE = 20;
+
+/** A percentage, or the honest absence of one. Never "0%" for unknown. */
+export function formatRate(rate: number | null): string {
+  if (rate === null) return "not measured yet";
+  return `${Math.round(rate * 100)}%`;
+}
+
+/** A measured metric in one readable sentence, or null when unmeasured. */
+export function describeMetric(key: keyof VoiceMetrics, m: VoiceMetrics): string | null {
+  if (!m.measurable) return null;
+  switch (key) {
+    case "medianWordsPerMessage":
+      return m.medianWordsPerMessage === null
+        ? null
+        : `${Math.round(m.medianWordsPerMessage)} words in a typical message`;
+    case "terminalPeriodRate":
+      return m.terminalPeriodRate === null
+        ? null
+        : `${formatRate(m.terminalPeriodRate)} of messages end with a full stop`;
+    case "emojiRate":
+      return m.emojiRate === null
+        ? null
+        : `${formatRate(m.emojiRate)} of messages contain an emoji`;
+    case "greetingRate":
+      return m.greetingRate === null ? null : `${formatRate(m.greetingRate)} open with a greeting`;
+    case "signOffRate":
+      return m.signOffRate === null ? null : `${formatRate(m.signOffRate)} end with a sign-off`;
+    case "lowercaseStartRate":
+      return m.lowercaseStartRate === null
+        ? null
+        : `${formatRate(m.lowercaseStartRate)} start in lowercase`;
+    default:
+      return null;
+  }
+}
+
+/** Seconds as something a person would say. */
+export function formatDuration(seconds: number | null): string {
+  if (seconds === null) return "not measured yet";
+  if (seconds < 90) return `${Math.round(seconds)} seconds`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)} minutes`;
+  if (seconds < 172800) return `${Math.round(seconds / 3600)} hours`;
+  return `${Math.round(seconds / 86400)} days`;
+}

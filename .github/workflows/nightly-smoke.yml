@@ -1,7 +1,9 @@
 name: Nightly smoke
 
-# Full test suite on a schedule plus a Windows debug build of the Tauri app,
-# so platform regressions surface before a release tag. Never publishes.
+# Windows debug build plus the packaged-engine smoke, on a schedule, so
+# platform regressions surface before a release tag. The import, voice and
+# generation pipeline is covered by `cargo test --workspace`, which runs here
+# too. Never publishes.
 on:
   schedule:
     - cron: "17 9 * * *"
@@ -30,7 +32,16 @@ jobs:
         shell: pwsh
       - run: cargo test --workspace
       - run: pnpm --filter @mimic/desktop tauri build --debug --no-bundle
-      - name: Engine + bridge smoke against the debug binary
+      - name: Packaged engine answers its own protocol
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem apps/desktop/src-tauri/resources/engine -Filter "mimic-engine.exe" -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "packaged engine missing" }
+          $hello = '{"protocolVersion":1,"requestId":"1","method":"engine.hello","params":{}}'
+          $resp = (($hello | & $exe.FullName serve) -join "`n")
+          if ($LASTEXITCODE -ne 0) { throw "packaged engine exited with $LASTEXITCODE" }
+          if ($resp -notmatch '"engineVersion"' -or $resp -notmatch '"protocolVersion":1') { throw "packaged engine did not answer engine.hello: $resp" }
+      - name: Debug binary exists
         shell: pwsh
         run: |
           $exe = Get-ChildItem target/debug -Filter "mimic-desktop.exe" | Select-Object -First 1

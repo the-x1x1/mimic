@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { BridgeEvent, EngineEvent, EngineStatus, JobEvent } from "@mimic/contracts";
+import { EngineEvent, EngineStatus, JobEvent } from "@mimic/contracts";
 import { isTauri } from "./tauri";
 
 type Handler<T> = (payload: T) => void;
@@ -22,7 +22,5 @@ export const events = {
     on("engine://event", (r) => EngineEvent.safeParse(r).data ?? null, h),
   onEngineStatus: (h: Handler<EngineStatus>) =>
     on("engine://status", (r) => EngineStatus.safeParse(r).data ?? null, h),
-  onLightroom: (h: Handler<BridgeEvent>) =>
-    on("lightroom://event", (r) => BridgeEvent.safeParse(r).data ?? null, h),
   onReady: (h: Handler<unknown>) => on("app://ready", (r) => r, h),
 };

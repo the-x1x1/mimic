@@ -91,7 +91,6 @@ jobs:
           if (-not $nsis -or -not $sig) { throw "installer or signature missing" }
           Copy-Item $nsis.FullName (Join-Path $out "Mimic_${v}_x64-setup.exe")
           Copy-Item $sig.FullName (Join-Path $out "Mimic_${v}_x64-setup.exe.sig")
-          Compress-Archive -Path lightroom/Mimic.lrplugin -DestinationPath (Join-Path $out "Mimic.lrplugin-$v.zip") -Force
           $notes = (Get-Content CHANGELOG.md -Raw) -split "`n## \[" | Where-Object { $_ -like "$v]*" } | Select-Object -First 1
           $latest = @{
             version = $v
@@ -137,7 +136,7 @@ jobs:
         run: |
           V="${{ needs.windows.outputs.version }}"
           gh release view "v$V" --json assets -q '.assets[].name' | tee assets.txt
-          for f in "Mimic_${V}_x64-setup.exe" "Mimic_${V}_x64-setup.exe.sig" latest.json SHA256SUMS.txt "Mimic.lrplugin-$V.zip"; do
+          for f in "Mimic_${V}_x64-setup.exe" "Mimic_${V}_x64-setup.exe.sig" latest.json SHA256SUMS.txt; do
             grep -qx "$f" assets.txt || { echo "missing asset $f"; exit 1; }
           done
           echo "Draft release v$V is complete. Publish with: gh release edit v$V --draft=false --latest"

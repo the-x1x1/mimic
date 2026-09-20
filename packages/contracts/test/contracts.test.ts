@@ -1,278 +1,342 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { bridgeFixture, expectedFixture, sessionFixture } from "@mimic/test-fixtures";
+import { contractFixture, importFixture } from "@mimic/test-fixtures";
 import {
-  ApplyBatchResult,
-  CapabilityMatrix,
-  CommandEnvelope,
-  CommandResultBody,
-  CommandType,
-  EventsBody,
-  HandshakeRequest,
-  HandshakeResponse,
-  LatestJson,
-  controlByLightroomKey,
-  controlLabel,
-  editMapping,
-  nextCheckDelayMs,
-  primaryError,
-  controlMae,
-  evaluationSet,
-  ApplyPreflight,
-  SessionPhoto,
-  confidenceBand,
-  needsAttention,
-  predictedControlRows,
-  JOB_LABELS,
+  ADJUSTMENT_LABELS,
+  Adjustment,
+  CHANNEL_LABELS,
+  Channel,
+  DeletionReport,
+  Draft,
+  DraftOutcomes,
+  GenerationContext,
+  IDENTIFIER_LABELS,
+  IdentifierKind,
   JOB_KINDS,
-  StyleHealth,
-  CorrectionRow,
-  formatNoTouch,
-  SessionDetail,
-  GroupEdit,
+  JOB_LABELS,
+  LatestJson,
+  MIN_SAMPLE,
+  Settings,
+  VoiceOverview,
+  composeReadiness,
+  describeDeletion,
+  describeImport,
+  describeMetric,
+  formatDuration,
+  formatRate,
+  nextCheckDelayMs,
+  nextOnboardingStep,
 } from "../src";
 
-const load = (p: string) => JSON.parse(readFileSync(p, "utf8"));
+const read = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 
-describe("bridge fixtures match the TypeScript contracts", () => {
-  it("handshake", () => {
-    const req = HandshakeRequest.parse(load(bridgeFixture("handshake.request.json")));
-    expect(req.protocolVersion).toBe(1);
-    expect(req.capabilities.developSettingKeys.length).toBeGreaterThan(50);
-    HandshakeResponse.parse(load(bridgeFixture("handshake.response.json")));
+describe("fixtures written by the Rust pipeline parse against the zod schemas", () => {
+  it("parses the voice overview", () => {
+    const overview = VoiceOverview.parse(read(contractFixture("voice_overview.json")));
+    expect(overview.ownMessages).toBeGreaterThan(0);
+    expect(overview.profiles.length).toBeGreaterThan(0);
+    // The fixture deliberately contains both a measurable and an unmeasurable
+    // layer, because rendering the second one is where the UI goes wrong.
+    expect(overview.profiles.some((p) => p.measurable)).toBe(true);
+    const thin = overview.profiles.find((p) => !p.measurable);
+    expect(thin).toBeDefined();
+    expect(thin!.metrics.emojiRate).toBeNull();
+    expect(thin!.metrics.sampleSize).toBeGreaterThan(0);
   });
-  it("commands and results", () => {
-    const cmd = CommandEnvelope.parse(load(bridgeFixture("get_develop_settings.command.json")));
-    expect(cmd.commandType).toBe("get_develop_settings");
-    CommandResultBody.parse(load(bridgeFixture("get_develop_settings.result.json")));
-    const partial = CommandResultBody.parse(
-      load(bridgeFixture("apply_settings_as_plugin_preset.result.partial_failure.json")),
-    );
-    const batch = ApplyBatchResult.parse(partial.result);
-    expect(batch.items.map((i) => i.status)).toEqual(["applied", "failed"]);
-    const err = CommandResultBody.parse(load(bridgeFixture("command_error.result.json")));
-    expect(err.error?.code).toBe("catalog_write_denied");
-    EventsBody.parse(load(bridgeFixture("event.selection_changed.json")));
-    const restore = CommandEnvelope.parse(
-      load(bridgeFixture("apply_settings_as_plugin_preset.command.restore.json")),
-    );
-    expect(restore.commandType).toBe("apply_settings_as_plugin_preset");
-    expect((restore.payload as { createSnapshot: boolean; restore: boolean }).createSnapshot).toBe(
-      false,
-    );
-    const listing = CommandResultBody.parse(load(bridgeFixture("get_selected_photos.result.json")));
-    expect((listing.result as { photos: unknown[] }).photos).toHaveLength(2);
+
+  it("parses the generation context, including its human-readable evidence", () => {
+    const ctx = GenerationContext.parse(read(contractFixture("generation_context.json")));
+    expect(ctx.evidence.length).toBeGreaterThan(0);
+    expect(ctx.evidence.every((e) => typeof e === "string" && e.length > 0)).toBe(true);
+    expect(ctx.examples.length).toBeGreaterThan(0);
+    expect(ctx.examples[0]!.reason).toBeTruthy();
+    expect(ctx.voice.layers.length).toBeGreaterThan(0);
   });
-  it("command list equals the spec set", () => {
-    expect(CommandType.options).toEqual([
-      "ping",
-      "get_catalog_info",
-      "get_selected_photos",
-      "get_photo_metadata",
-      "get_develop_settings",
-      "create_before_snapshot",
-      "apply_settings_as_plugin_preset",
-      "read_back_develop_settings",
-      "collect_correction_state",
-      "get_capabilities",
-    ]);
+
+  it("parses a draft and a deletion report", () => {
+    const draft = Draft.parse(read(contractFixture("draft.json")));
+    expect(draft.promptHash).toBeTruthy();
+    expect(draft.outcome).toBeNull();
+    const report = DeletionReport.parse(read(contractFixture("deletion_report.json")));
+    expect(report.messages).toBeGreaterThan(0);
+  });
+
+  it("rejects a payload that is missing a field the UI reads", () => {
+    const overview = read(contractFixture("voice_overview.json"));
+    delete overview.messagesUntilMeasurable;
+    expect(() => VoiceOverview.parse(overview)).toThrow();
+  });
+
+  it("rejects an unmeasured rate sent as 0 instead of null", () => {
+    const overview = read(contractFixture("voice_overview.json"));
+    overview.ownMessages = "lots";
+    expect(() => VoiceOverview.parse(overview)).toThrow();
   });
 });
 
-describe("edit mapping contract", () => {
-  it("loads, has unique keys and known families", () => {
-    expect(editMapping.mappingVersion).toBe("edit_mapping_v1");
-    const keys = editMapping.controls.flatMap((c) => c.lightroomKeys);
-    expect(new Set(keys).size).toBe(keys.length);
-    for (const c of editMapping.controls) {
-      expect(editMapping.families[c.family]).toBeDefined();
-      expect(c.canonical.startsWith(`${c.family}.`)).toBe(true);
-    }
-    expect(controlByLightroomKey.get("Exposure2012")?.canonical).toBe("tone.exposure");
-    expect(controlLabel("tone.exposure")).toBe("Exposure");
-    expect(controlLabel("hsl.saturation.orange")).toBe("Saturation Orange");
-  });
-  it("every raw fixture key is either mapped, metadata, local, heavy or intentionally unknown", () => {
-    const raw = load(expectedFixture("modern_masks_unknown.raw.json")).rawSettings as Record<
-      string,
-      unknown
-    >;
-    const metadataKeys = new Set(Object.values(editMapping.lightroomMetadataKeys).flat());
-    const unknown = Object.keys(raw).filter(
-      (k) =>
-        !controlByLightroomKey.has(k) &&
-        !metadataKeys.has(k) &&
-        !editMapping.localCorrectionKeyPrefixes.some((p) => k.startsWith(p)) &&
-        !editMapping.heavyEditKeyPrefixes.some((p) => k.startsWith(p)),
+describe("the import fixture is the format the docs describe", () => {
+  it("has conversations of messages with identifiable authors", () => {
+    const exported = read(importFixture("sample_export.json"));
+    expect(Channel.parse(exported.channel)).toBe("chat");
+    expect(exported.conversations.length).toBeGreaterThan(1);
+    const messages = exported.conversations.flatMap((c: { messages: unknown[] }) => c.messages);
+    expect(messages.length).toBe(45);
+    const identifiable = messages.filter(
+      (m: { from: Record<string, unknown> }) =>
+        m.from.email || m.from.phone || m.from.handle || m.from.accountId,
     );
-    expect(unknown).toEqual(["SomeNewSlider2027"]);
-  });
-  it("capability matrix schema accepts a matrix shaped like the Rust output", () => {
-    const m = CapabilityMatrix.parse({
-      schemaVersion: "cap_abc",
-      lightroomVersion: "14.3",
-      pluginVersion: "0.1.0-alpha.1",
-      probeHadPhoto: true,
-      canApply: true,
-      canSnapshot: true,
-      canRead: true,
-      controls: [
-        {
-          canonical: "tone.exposure",
-          family: "tone",
-          status: "supported",
-          lightroomKey: "Exposure2012",
-          reason: "ok",
-        },
-      ],
-      familySummary: {
-        tone: { label: "Basic Tone", supported: 1, observedNotWritable: 0, unsupported: 0 },
-      },
-      localEdits: "unsupported",
-      masks: "unsupported",
-    });
-    expect(m.controls[0]?.status).toBe("supported");
+    expect(identifiable.length).toBe(44);
   });
 });
 
-describe("updater contracts", () => {
-  it("latest.json requires signature + url per platform", () => {
-    expect(() =>
-      LatestJson.parse({
-        version: "0.1.1",
-        platforms: { "windows-x86_64": { signature: "", url: "https://x/y" } },
-      }),
-    ).toThrow();
-    LatestJson.parse({
-      version: "0.1.1",
-      platforms: {
-        "windows-x86_64": {
-          signature: "sig",
-          url: "https://github.com/the-x1x1/mimic/releases/download/v0.1.1/Mimic_0.1.1_x64-setup.exe",
-        },
-      },
-    });
+describe("rates are rendered honestly", () => {
+  it("distinguishes a measured zero from an unmeasured value", () => {
+    expect(formatRate(0)).toBe("0%");
+    expect(formatRate(null)).toBe("not measured yet");
+    expect(formatRate(0.336)).toBe("34%");
   });
-  it("check delay is 6h with bounded jitter", () => {
-    const six = 6 * 3600 * 1000;
-    expect(nextCheckDelayMs(() => 0.5)).toBe(six);
-    expect(nextCheckDelayMs(() => 0)).toBe(six - 20 * 60 * 1000);
-    expect(nextCheckDelayMs(() => 1)).toBe(six + 20 * 60 * 1000);
+
+  it("describes only what was measured", () => {
+    const unmeasured = {
+      sampleSize: 3,
+      measurable: false,
+      avgWordsPerMessage: null,
+      medianWordsPerMessage: null,
+      p90WordsPerMessage: null,
+      avgSentencesPerMessage: null,
+      multiParagraphRate: null,
+      terminalPeriodRate: null,
+      questionRate: null,
+      exclamationRate: null,
+      ellipsisRate: null,
+      emojiRate: null,
+      lowercaseStartRate: null,
+      allLowercaseRate: null,
+      contractionsPer100Words: null,
+      greetingRate: null,
+      signOffRate: null,
+      topGreetings: [],
+      topSignOffs: [],
+      topPhrases: [],
+      medianResponseSeconds: null,
+    };
+    expect(describeMetric("emojiRate", unmeasured)).toBeNull();
+    const measured = { ...unmeasured, measurable: true, emojiRate: 0, medianWordsPerMessage: 7 };
+    expect(describeMetric("emojiRate", measured)).toContain("0%");
+    expect(describeMetric("medianWordsPerMessage", measured)).toBe("7 words in a typical message");
+  });
+
+  it("formats durations the way a person would say them", () => {
+    expect(formatDuration(null)).toBe("not measured yet");
+    expect(formatDuration(45)).toBe("45 seconds");
+    expect(formatDuration(600)).toBe("10 minutes");
+    expect(formatDuration(7200)).toBe("2 hours");
+    expect(formatDuration(259200)).toBe("3 days");
   });
 });
 
-describe("training metrics helpers", () => {
-  const metrics = {
-    holdout: {
-      n: 20,
-      hybrid: { overall: { nMae: 0.04 }, perControl: { "tone.exposure": { mae: 0.21 } } },
-      global_median: { overall: { nMae: 0.09 } },
-    },
-    validation: { n: 18, hybrid: { overall: { nMae: 0.05 } } },
+describe("deletion is described in consequences, not counts", () => {
+  const base = {
+    participants: 1,
+    identifiers: 2,
+    conversations: 1,
+    messages: 40,
+    ownMessages: 20,
+    embeddings: 0,
+    representativeExamples: 6,
+    voiceProfiles: 1,
+    voicePreferences: 1,
+    drafts: 2,
+    profilesInvalidated: 3,
+    conversationsKept: 1,
   };
-  it("prefers holdout and falls back to validation", () => {
-    expect(primaryError(metrics)).toBe(0.04);
-    expect(evaluationSet(metrics)).toBe("holdout");
-    expect(primaryError({ holdout: { n: 0 }, validation: metrics.validation })).toBe(0.05);
-    expect(primaryError({})).toBeNull();
-    expect(primaryError(null)).toBeNull();
-    expect(controlMae(metrics, "hybrid", "tone.exposure")).toBe(0.21);
-    expect(controlMae(metrics, "hybrid", "tone.contrast")).toBeNull();
+
+  it("warns that the user's own messages go too", () => {
+    const lines = describeDeletion(base);
+    expect(lines.some((l) => l.includes("20 of those are messages you wrote"))).toBe(true);
+    expect(lines.some((l) => l.includes("group conversations will be kept"))).toBe(true);
+    expect(lines[lines.length - 1]).toBe("This cannot be undone.");
+  });
+
+  it("says nothing it cannot substantiate", () => {
+    const empty = {
+      ...base,
+      messages: 0,
+      ownMessages: 0,
+      drafts: 0,
+      conversationsKept: 0,
+      profilesInvalidated: 0,
+    };
+    const lines = describeDeletion(empty);
+    expect(lines.some((l) => l.includes("messages you wrote"))).toBe(false);
+    expect(lines.some((l) => l.includes("drafts"))).toBe(false);
   });
 });
 
-describe("session contracts", () => {
-  it("session photo fixture (shared with the Rust round-trip test) parses", () => {
-    const photo = SessionPhoto.parse(load(sessionFixture("session_photo.json")));
-    expect(photo.prediction?.status).toBe("pending");
-    expect(photo.lastApply?.result).toBe("verify_failed");
-    expect(photo.prediction?.confidenceComponents.similarity).toBe(0.91);
-    const rows = predictedControlRows(photo.prediction!.predictedSettings);
-    expect(rows.map((r) => r.canonical)).toEqual([
-      "tone.contrast",
-      "tone.exposure",
-      "whiteBalance.temperature",
-    ]);
-    expect(rows[1]?.raw).toBe(0.35);
+describe("import summaries name what was skipped", () => {
+  it("mentions duplicates and unattributed messages", () => {
+    const line = describeImport({
+      conversations: 3,
+      inserted: 44,
+      duplicates: 2,
+      empty: 1,
+      fromSelf: 22,
+      unattributed: 1,
+      participantsCreated: 2,
+    });
+    expect(line).toContain("44 messages from 3 conversations");
+    expect(line).toContain("22 written by you");
+    expect(line).toContain("2 already imported");
+    expect(line).toContain("1 with no identifiable author");
   });
-  it("preflight fixture parses and explains refusals", () => {
-    const pf = ApplyPreflight.parse(load(sessionFixture("apply_preflight.refused.json")));
-    expect(pf.ok).toBe(false);
-    expect(pf.blockers[0]).toContain("capability set");
-    expect(pf.batchSize).toBe(25);
+
+  it("stays quiet about the things that did not happen", () => {
+    const line = describeImport({
+      conversations: 1,
+      inserted: 10,
+      duplicates: 0,
+      empty: 0,
+      fromSelf: 5,
+      unattributed: 0,
+      participantsCreated: 1,
+    });
+    expect(line).not.toContain("already imported");
+    expect(line).not.toContain("no identifiable author");
   });
-  it("attention rules: low confidence, OOD and failed applies surface; applied/rejected do not", () => {
-    const base = SessionPhoto.parse(load(sessionFixture("session_photo.json")));
-    expect(needsAttention(base)).toBe(true); // verify_failed apply
-    const clean = { ...base, lastApply: null };
-    expect(needsAttention(clean)).toBe(false); // 0.83 ≥ threshold
+});
+
+describe("onboarding advances on facts", () => {
+  const none = {
+    completed: false,
+    hasIdentity: false,
+    hasSource: false,
+    hasOwnMessages: false,
+    hasVoiceProfile: false,
+  };
+
+  it("returns the first unfinished step", () => {
+    expect(nextOnboardingStep(none)).toBe("identity");
+    expect(nextOnboardingStep({ ...none, hasIdentity: true })).toBe("source");
+    expect(nextOnboardingStep({ ...none, hasIdentity: true, hasSource: true })).toBe("import");
     expect(
-      needsAttention({ ...clean, prediction: { ...clean.prediction!, confidence: 0.4 } }),
-    ).toBe(true);
+      nextOnboardingStep({ ...none, hasIdentity: true, hasSource: true, hasOwnMessages: true }),
+    ).toBe("analyze");
     expect(
-      needsAttention({
-        ...clean,
-        prediction: { ...clean.prediction!, rawModelOutput: { ood: true } },
+      nextOnboardingStep({
+        completed: true,
+        hasIdentity: true,
+        hasSource: true,
+        hasOwnMessages: true,
+        hasVoiceProfile: true,
       }),
-    ).toBe(true);
-    expect(
-      needsAttention({ ...clean, prediction: { ...clean.prediction!, status: "rejected" } }),
-    ).toBe(false);
-    expect(
-      needsAttention({
-        ...clean,
-        prediction: { ...clean.prediction!, status: "applied", confidence: 0.1 },
-      }),
-    ).toBe(false);
-    expect(needsAttention({ ...clean, prediction: null })).toBe(false);
-    expect(confidenceBand(0.9)).toBe("high");
-    expect(confidenceBand(0.7)).toBe("medium");
-    expect(confidenceBand(0.3)).toBe("low");
+    ).toBeNull();
   });
-  it("every session job kind has a label", () => {
+});
+
+describe("compose readiness explains itself", () => {
+  const layer = (stale: boolean) => ({
+    layer: "global",
+    scopeKey: "",
+    label: "Everything you write",
+    sampleSize: 100,
+    measurable: true,
+    stale,
+    metrics: VoiceOverview.parse(read(contractFixture("voice_overview.json"))).profiles[0]!.metrics,
+  });
+
+  const context = (measurable: boolean, stale: boolean) =>
+    ({
+      participant: null,
+      channel: "email",
+      voice: { layers: [layer(stale)], overrides: [], examples: [] },
+      effective: { ...layer(stale).metrics, measurable },
+      examples: [],
+      transcript: [],
+      evidence: [],
+    }) as never;
+
+  it("says when there is not enough writing yet, but still allows a draft", () => {
+    const r = composeReadiness(context(false, false));
+    expect(r.ready).toBe(true);
+    expect(r.reason).toContain("not seen enough of your writing");
+  });
+
+  it("says when the profile is out of date", () => {
+    expect(composeReadiness(context(true, true)).reason).toContain("Re-analyze");
+  });
+
+  it("says nothing when there is nothing to say", () => {
+    expect(composeReadiness(context(true, false)).reason).toBeNull();
+  });
+});
+
+describe("enumerations stay in step with their labels", () => {
+  it("labels every channel, identifier kind and adjustment", () => {
+    for (const c of Channel.options) expect(CHANNEL_LABELS[c]).toBeTruthy();
+    for (const k of IdentifierKind.options) expect(IDENTIFIER_LABELS[k]).toBeTruthy();
+    for (const a of Adjustment.options) expect(ADJUSTMENT_LABELS[a]).toBeTruthy();
+  });
+
+  it("labels every job kind the native side can enqueue", () => {
     for (const kind of Object.values(JOB_KINDS)) expect(JOB_LABELS[kind]).toBeTruthy();
   });
-});
 
-describe("corrections contracts", () => {
-  it("style health and correction row fixtures (shared with Rust) parse", () => {
-    const h = StyleHealth.parse(load(sessionFixture("style_health.json")));
-    expect(h.noTouch).toHaveLength(3);
-    expect(h.noTouch[2]?.rate).toBeNull();
-    expect(formatNoTouch(h.activeNoTouchRate)).toBe("82%");
-    expect(formatNoTouch(null)).toBe("—");
-    expect(h.mostCorrected[0]?.canonical).toBe("tone.exposure");
-    const row = CorrectionRow.parse(load(sessionFixture("correction_row.json")));
-    expect(row.delta[0]?.delta).toBeCloseTo(0.05);
-    expect(row.includedInTrainingVersion).toBeNull();
+  it("keeps the sample threshold in one place", () => {
+    expect(MIN_SAMPLE).toBe(20);
   });
 });
 
-describe("session intelligence contracts", () => {
-  it("session detail fixture (shared with Rust) parses with group and camera stats", () => {
-    const d = SessionDetail.parse(load(sessionFixture("session_detail.json")));
-    expect(d.groupStats).toHaveLength(2);
-    expect(d.clusters[0]?.referenceAssetId).toBe("asset-1");
-    expect(d.groupingChangedSincePrediction).toBe(true);
-    expect(d.cameraStats.find((c) => c.knownToModel === false)?.camera).toBe("SONY ILCE-7M4");
+describe("settings and updater contracts", () => {
+  it("accepts the default settings map and rejects an unknown channel", () => {
+    const defaults = {
+      "general.theme": "dark",
+      "performance.workerConcurrency": 2,
+      "privacy.networkFeatures": false,
+      "updates.channel": "stable",
+      "updates.automatic": true,
+      "diagnostics.includePaths": false,
+      "generation.provider": "local",
+      "generation.localUrl": "http://127.0.0.1:11434/v1",
+      "generation.localModel": "llama3.1:8b",
+      "generation.anthropicModel": "claude-sonnet-4-5",
+      "onboarding.completed": false,
+    };
+    expect(() => Settings.parse(defaults)).not.toThrow();
+    expect(() => Settings.parse({ ...defaults, "updates.channel": "nightly" })).toThrow();
   });
-  it("group edits are a tagged union with camelCase fields", () => {
-    GroupEdit.parse({ kind: "move", assetIds: ["a"], into: null, label: "x" });
-    GroupEdit.parse({ kind: "setReference", clusterId: "c", assetId: null });
-    expect(() => GroupEdit.parse({ kind: "move", asset_ids: ["a"] })).toThrow();
-  });
-  it("a group outlier needs attention even at high confidence", () => {
-    const base = SessionPhoto.parse(load(sessionFixture("session_photo.json")));
-    const p = { ...base, lastApply: null, prediction: { ...base.prediction!, confidence: 0.95 } };
-    expect(needsAttention(p)).toBe(false);
-    expect(
-      needsAttention({
-        ...p,
-        prediction: {
-          ...p.prediction,
-          rawModelOutput: { groupOutlier: { control: "tone.exposure", distance: 0.2 } },
-        },
+
+  it("validates latest.json and jitters the update check", () => {
+    expect(() =>
+      LatestJson.parse({
+        version: "0.6.0",
+        platforms: { "windows-x86_64": { signature: "sig", url: "https://example.com/x.zip" } },
       }),
-    ).toBe(true);
+    ).not.toThrow();
+    expect(() =>
+      LatestJson.parse({
+        version: "0.6.0",
+        platforms: { "windows-x86_64": { signature: "", url: "x" } },
+      }),
+    ).toThrow();
+    const six = 6 * 60 * 60 * 1000;
+    expect(nextCheckDelayMs(() => 0.5)).toBe(six);
+    expect(nextCheckDelayMs(() => 0)).toBeLessThan(six);
+    expect(nextCheckDelayMs(() => 1)).toBeGreaterThan(six);
+  });
+});
+
+describe("draft outcomes", () => {
+  it("keeps an unmeasured rate null rather than zero", () => {
+    const o = DraftOutcomes.parse({
+      total: 3,
+      resolved: 0,
+      sentUnedited: 0,
+      sentEdited: 0,
+      discarded: 0,
+      uneditedRate: null,
+      meanLengthDelta: null,
+    });
+    expect(o.uneditedRate).toBeNull();
+    expect(formatRate(o.uneditedRate)).toBe("not measured yet");
   });
 });

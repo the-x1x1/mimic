@@ -1,6 +1,5 @@
 import io
 import json
-import shutil
 
 from mimic_engine import PROTOCOL_VERSION
 from mimic_engine.protocol.service import build_server
@@ -18,65 +17,125 @@ def call(server, out, method, params, rid="r"):
     return resp, events
 
 
-def test_full_ingest_methods(photo_tree, tmp_path, fixtures_dir):
+def service(tmp_path):
     out = io.StringIO()
     server = build_server()
     server._out = out
-    resp, _ = call(
+    call(
         server,
         out,
         "engine.configure",
         {
             "dbPath": str(tmp_path / "m.db"),
-            "previewsDir": str(tmp_path / "p"),
-            "embeddingsDir": str(tmp_path / "e"),
+            "embeddingsDir": str(tmp_path / "emb"),
             "encodersDir": str(tmp_path / "enc"),
-            "manifestsDir": str(fixtures_dir.parent / "models" / "manifests"),
         },
     )
-    assert resp["ok"] and resp["result"]["encoder"]["provider"] == "stats_v1"
+    return server, out
 
-    resp, events = call(server, out, "scan.folder", {"roots": [str(photo_tree)], "jobId": "job-scan"})
+
+def test_hello_and_health_report_which_encoder_is_in_use(tmp_path):
+    server, out = service(tmp_path)
+    resp, _ = call(server, out, "engine.hello", {"appVersion": "0.6.0"})
     assert resp["ok"]
-    scan = resp["result"]
-    assert scan["stats"]["photos"] == 6
-    assert any(e["event"] == "job.progress" and e["jobId"] == "job-scan" for e in events)
+    assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+    assert resp["result"]["appVersion"] == "0.6.0"
 
-    xmp_path = next(s["path"] for a in scan["assets"] for s in a["sidecars"] if a["fileName"] == "IMG_1024.CR3")
-    resp, _ = call(server, out, "xmp.parse", {"path": xmp_path})
-    assert resp["ok"] and resp["result"]["rawSettings"]["Exposure2012"] == "+0.40"
-
-    bad = next(s["path"] for a in scan["assets"] for s in a["sidecars"] if a["fileName"] == "IMG_1026.CR3")
-    resp, _ = call(server, out, "xmp.parse", {"path": bad})
-    assert not resp["ok"] and resp["error"]["code"] == "xmp_parse_error"
-
-    resp, _ = call(server, out, "image.metadata", {"path": str(photo_tree / "2024-05-11 Wedding" / "IMG_1025.JPG")})
-    assert resp["ok"] and resp["result"]["width"] == 720
-    resp, _ = call(server, out, "image.metadata", {"path": str(tmp_path / "nope.jpg")})
-    assert resp["error"]["code"] == "not_found"
-
-    items = [
-        {"assetId": f"a{i}", "path": a["sourcePath"], "fastHash": a["fastHash"]} for i, a in enumerate(scan["assets"])
-    ]
-    shutil.copy(fixtures_dir / "images" / "corrupt_not_an_image.jpg", photo_tree / "bad.jpg")
-    items.append({"assetId": "bad", "path": str(photo_tree / "bad.jpg")})
-    items.append({"assetId": "missing", "path": str(photo_tree / "missing.jpg")})
-    resp, events = call(
-        server, out, "image.analyze_batch", {"items": items, "featureVersion": "features_v1", "jobId": "job-an"}
-    )
-    assert resp["ok"]
-    results = resp["result"]["results"]
-    assert len(results) == len(items)
-    ok = [r for r in results if "error" not in r]
-    assert len(ok) == 6, [r for r in results if "error" in r]
-    assert all(r["embeddingArtifactId"] for r in ok)
-    errs = {r["assetId"]: r["error"]["code"] for r in results if "error" in r}
-    assert errs == {"bad": "decode_error", "missing": "not_found"}
-    assert events[-1]["current"] == len(items) == events[-1]["total"]
-
-    resp, _ = call(server, out, "scan.folder", {"roots": [str(tmp_path / "missing-root")]})
-    assert resp["error"]["code"] == "not_found"
-    resp, _ = call(server, out, "scan.folder", {"roots": "not-a-list"})
-    assert resp["error"]["code"] == "invalid_params"
     resp, _ = call(server, out, "engine.health", {})
-    assert resp["result"]["configured"] is True
+    encoder = resp["result"]["encoder"]
+    assert encoder["provider"] == "lexical_v1"
+    # The app shows this: claiming a semantic model where there is none is the
+    # exact failure this field exists to prevent.
+    assert encoder["semantic"] is False
+    assert "lexical fallback" in encoder["reason"]
+
+
+def test_embedding_is_deterministic_and_normalized(tmp_path, own_messages):
+    server, out = service(tmp_path)
+    texts = own_messages[:5]
+    first, _ = call(server, out, "text.embed", {"texts": texts})
+    second, _ = call(server, out, "text.embed", {"texts": texts})
+    assert first["result"]["vectors"] == second["result"]["vectors"]
+    assert first["result"]["dims"] == len(first["result"]["vectors"][0])
+    norm = sum(x * x for x in first["result"]["vectors"][0]) ** 0.5
+    assert abs(norm - 1.0) < 1e-3
+
+
+def test_empty_text_embeds_to_a_zero_vector_rather_than_failing(tmp_path):
+    server, out = service(tmp_path)
+    resp, _ = call(server, out, "text.embed", {"texts": ["", "   "]})
+    assert resp["ok"]
+    assert all(all(x == 0.0 for x in v) for v in resp["result"]["vectors"])
+
+
+def test_similarity_ranks_the_closest_candidate_first(tmp_path):
+    server, out = service(tmp_path)
+    resp, _ = call(
+        server,
+        out,
+        "text.similarity",
+        {
+            "query": "can you send the quarterly deck",
+            "candidates": ["pub friday?", "could you send the quarterly deck over", "the growth line looks optimistic"],
+            "k": 2,
+        },
+    )
+    matches = resp["result"]["matches"]
+    assert matches[0]["index"] == 1
+    assert matches[0]["score"] > matches[1]["score"]
+    assert len(matches) == 2
+
+
+def test_eval_compare_reports_components_and_refuses_a_headline_score(tmp_path):
+    server, out = service(tmp_path)
+    resp, events = call(
+        server,
+        out,
+        "eval.compare",
+        {
+            "pairs": [
+                {"generated": "yeah sounds good", "actual": "yeah sounds good"},
+                {"generated": "Yes, that would be acceptable to me.", "actual": "yeah fine"},
+            ]
+        },
+    )
+    cases = resp["result"]["cases"]
+    assert cases[0]["length"] == 1.0
+    assert cases[0]["vocabulary"] == 1.0
+    assert cases[1]["vocabulary"] < 0.5
+    summary = resp["result"]["summary"]
+    assert summary["measurable"] is True
+    assert summary["cases"] == 2
+    assert "score" not in summary, "a single headline number has to be defined before it is shown"
+    assert any(e.get("event") == "job.progress" for e in events) is False, "no jobId means no progress spam"
+
+
+def test_eval_compare_with_no_pairs_says_it_is_unmeasurable(tmp_path):
+    server, out = service(tmp_path)
+    resp, _ = call(server, out, "eval.compare", {"pairs": []})
+    assert resp["result"]["summary"] == {"cases": 0, "measurable": False}
+
+
+def test_bad_params_are_rejected_by_name(tmp_path):
+    server, out = service(tmp_path)
+    resp, _ = call(server, out, "text.embed", {"texts": "not a list"})
+    assert not resp["ok"]
+    assert resp["error"]["code"] == "invalid_params"
+    resp, _ = call(server, out, "eval.compare", {"pairs": [{"generated": "x"}]})
+    assert not resp["ok"]
+
+    resp, _ = call(server, out, "nope.method", {})
+    assert resp["error"]["code"] == "unknown_method"
+
+
+def test_split_never_puts_a_conversation_on_both_sides(tmp_path):
+    server, out = service(tmp_path)
+    keys = ["t1"] * 10 + ["t2"] * 10 + ["t3"] * 10 + ["t4"] * 10
+    resp, _ = call(server, out, "eval.split", {"groupKeys": keys, "seed": 7})
+    r = resp["result"]
+    train_groups = {keys[i] for i in r["train"]}
+    holdout_groups = {keys[i] for i in r["holdout"]}
+    assert train_groups and holdout_groups
+    assert not (train_groups & holdout_groups)
+    assert r["strategy"] == "conversation_grouped"
+    assert sorted(r["train"] + r["holdout"]) == list(range(len(keys)))

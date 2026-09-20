@@ -1,0 +1,73 @@
+{
+  "id": "8d43b629-de94-4402-9a59-76a6849b1fd3",
+  "participantId": "34e94fa2-eb78-4388-a30a-b4173c7b782c",
+  "conversationId": null,
+  "channel": "chat",
+  "situationId": null,
+  "incomingMessage": "can you send the deck again?",
+  "intent": "yes, tomorrow morning",
+  "generatedText": "yeah, sending it tomorrow morning",
+  "finalText": null,
+  "provider": "mock",
+  "model": "mock-1",
+  "context": {
+    "layers": [
+      {
+        "layer": "global",
+        "sampleSize": 22,
+        "measurable": true
+      },
+      {
+        "layer": "channel",
+        "sampleSize": 20,
+        "measurable": true
+      },
+      {
+        "layer": "relationship",
+        "sampleSize": 20,
+        "measurable": true
+      }
+    ],
+    "adjustment": null,
+    "examples": 5
+  },
+  "promptHash": "2a9545b1ba4f74bc4582278979b53b0356a259874c79325a2d9c668f1fce1a00",
+  "evidence": {
+    "statements": [
+      "20 of your messages to this person",
+      "20 of your chat messages",
+      "22 of your messages overall",
+      "5 past replies of yours, chosen by similarity"
+    ],
+    "examples": [
+      {
+        "messageId": "698f487e-7058-4b5e-a5fb-43e4603f955f",
+        "reason": "similar wording: you, send, deck",
+        "score": 0.911
+      },
+      {
+        "messageId": "240a6052-6313-4966-ba7d-556b9068a9cf",
+        "reason": "similar wording: you, can",
+        "score": 0.375
+      },
+      {
+        "messageId": "f708eca7-4e1b-4791-8d34-6aa336664d6b",
+        "reason": "similar wording: you",
+        "score": 0.17
+      },
+      {
+        "messageId": "f1544003-d74a-45d9-bf4f-12f5fe7a600f",
+        "reason": "same person and channel",
+        "score": -0.0
+      },
+      {
+        "messageId": "c445954f-c717-4a41-8bce-456f291a9341",
+        "reason": "same person and channel",
+        "score": -0.0
+      }
+    ]
+  },
+  "createdAt": "2026-09-20T21:45:50.388Z",
+  "resolvedAt": null,
+  "outcome": null
+}

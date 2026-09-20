@@ -1,159 +1,144 @@
-# PROJECT_STATUS — Mimic 0.5.0-alpha.1
+# Project status — 0.6.0-alpha.1
 
-Brutally factual. Statuses: **IMPLEMENTED** (test or reproducible check exists) · **PARTIAL** · **BLOCKED** · **PLANNED** · **UNSUPPORTED**. Evidence names the test that proves the row. Anything marked _NEEDS REAL-LIGHTROOM QA_ has not been run against a real Lightroom Classic (there is none in CI).
+The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
-## Repository
+Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 
-| Item                                                                                                    | Status                                                                                                                                                                                        | Evidence                                                   |
-| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Monorepo layout (apps/desktop, crates/mimic-core, engine, lightroom, packages, fixtures, scripts, docs) | IMPLEMENTED                                                                                                                                                                                   | tree; `CLAUDE.md` map                                      |
-| Lockfiles committed (pnpm-lock.yaml, Cargo.lock, engine/uv.lock)                                        | IMPLEMENTED                                                                                                                                                                                   | files in repo                                              |
-| Single version source + sync/check                                                                      | IMPLEMENTED                                                                                                                                                                                   | `scripts/sync-version.mjs --check` in `test.ps1` and CI    |
-| CI: frontend, Rust, Python, plugin, security                                                            | IMPLEMENTED                                                                                                                                                                                   | `.github/workflows/ci.yml`                                 |
-| Release workflow (Windows x64 NSIS, signed updater, latest.json, checksums, draft release)              | IMPLEMENTED; v0.3.0-alpha.1 and v0.4.0-alpha.1 tags reached "Package engine" and failed on the smoke-check bug fixed in 0.4.0-alpha.2; the Tauri build step has not yet completed on a runner | `.github/workflows/release.yml`; run log of v0.4.0-alpha.1 |
-| Nightly Windows debug build                                                                             | IMPLEMENTED (workflow)                                                                                                                                                                        | `.github/workflows/nightly-smoke.yml`                      |
+## Foundation
 
-## Desktop shell
+| Item                                                               | Status      | Evidence                                                                              |
+| ------------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------- |
+| SQLite, WAL, foreign keys, one connection behind a mutex           | IMPLEMENTED | `db::tests::foreign_keys_are_enforced`, `reopen_is_idempotent_and_keeps_data`         |
+| Forward-only migrations with a backup before upgrading an install  | IMPLEMENTED | `db::tests::upgrade_from_older_schema_creates_backup`                                 |
+| Schema v5; a v4 photography database upgrades cleanly              | IMPLEMENTED | `migrations::tests::photography_database_upgrades_to_the_communication_schema`        |
+| Schema invariants (direction vocabulary, import key, cascades)     | IMPLEMENTED | `migrations::tests::communication_schema_enforces_its_invariants`                     |
+| Persistent job queue: progress, cancellation, interrupted recovery | IMPLEMENTED | `jobs::tests::runs_completes_and_fails_jobs`, `cancel_stops_between_items`            |
+| Python engine sidecar: NDJSON, restart budget, size caps, timeouts | IMPLEMENTED | `tests/engine_protocol.rs` (4 tests against a real child process)                     |
+| Typed IPC with zod validation at the boundary                      | IMPLEMENTED | `apps/desktop/src/lib/ipc.ts`; shape mismatch throws with the offending path          |
+| Cross-language contract fixtures                                   | IMPLEMENTED | `tests/pipeline_e2e.rs` writes `fixtures/contracts/`; `contracts.test.ts` parses them |
+| Diagnostics bundle with no credentials and optional path redaction | IMPLEMENTED | `diagnostics::tests::bundle_has_no_credentials_and_redacts_paths`                     |
 
-| Item                                                                                                               | Status      | Evidence                                                                                |
-| ------------------------------------------------------------------------------------------------------------------ | ----------- | --------------------------------------------------------------------------------------- |
-| Tauri 2 app boots even if engine/bridge fail; errors surfaced in UI                                                | IMPLEMENTED | `apps/desktop/src-tauri/src/startup.rs`; `App.tsx` gate + `ErrorBoundary`               |
-| Onboarding (source choice, Lightroom setup, first Style + scan, data quality)                                      | IMPLEMENTED | `features/onboarding/OnboardingFlow.tsx`; “Connected” only after real handshake         |
-| Onboarding train step                                                                                              | IMPLEMENTED | `OnboardingFlow.tsx` step 5; enabled only when `training.available`                     |
-| Home, Styles list/detail, Settings (7 sections)                                                                    | IMPLEMENTED | components + `vitest` (DataQualityPanel, CapabilitySummary, VersionList, format, gate)  |
-| Sessions list, New Session dialog, session detail (grid, group filters, confidence badges, apply history, Restore) | IMPLEMENTED | `features/sessions/*`; `PredictionPanel.test.tsx`, `ConfirmApplyDialog.test.tsx`        |
-| Review (attention-only default, filmstrip/preview/panel, Looks right / Reject / Apply this photo, filters)         | IMPLEMENTED | `features/review/*`; `reviewQueue.test.ts`; contracts `needsAttention` tests            |
-| Confirm-apply dialog shows backend blockers verbatim; confirm disabled unless preflight ok                         | IMPLEMENTED | `ConfirmApplyDialog.test.tsx`; fixture `fixtures/sessions/apply_preflight.refused.json` |
-| Design tokens, dark theme, reduced motion, keyboard focus                                                          | IMPLEMENTED | `packages/ui/src/tokens.css`, `ui.css`                                                  |
-| Light theme                                                                                                        | PARTIAL     | tokens exist; visually unreviewed                                                       |
-| Toasts, job tray with cancel, item-based progress                                                                  | IMPLEMENTED | `JobTray.tsx`, `ProgressBar`                                                            |
-| Typed IPC with zod validation on every command                                                                     | IMPLEMENTED | `lib/ipc.ts`; contracts tests                                                           |
-| Demo mode (synthetic DEMO library, never a fake Lightroom connection)                                              | IMPLEMENTED | `commands/app.rs::enable_demo_mode`                                                     |
+## Identity and people
 
-## Database
+| Item                                                         | Status      | Evidence                                                                                                |
+| ------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------- |
+| User identity with multiple identifiers, normalized          | IMPLEMENTED | `repo_identity::tests::identity_is_created_renamed_and_deduplicated`                                    |
+| Phone/email/handle normalization                             | IMPLEMENTED | `models::tests::phone_numbers_normalize_to_one_form`, `emails_and_handles_fold_case_account_ids_do_not` |
+| Participant resolution; the same address is the same person  | IMPLEMENTED | `repo_people::tests::the_same_address_in_any_case_is_the_same_person`                                   |
+| A shared address is not silently merged into a second person | IMPLEMENTED | `repo_people::tests::a_shared_address_is_not_silently_merged_into_a_second_person`                      |
+| An author with no usable identifier is refused, not pooled   | IMPLEMENTED | `repo_people::tests::unusable_identifiers_are_refused_rather_than_pooled`                               |
+| User-declared relationships; never inferred                  | IMPLEMENTED | `repo_people::tests::relationship_and_name_can_be_corrected_by_hand`                                    |
 
-| Item                                                                                                                                                                                                                   | Status                | Evidence                                                                     |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------- |
-| Schema v1: all 21 tables + indexes + FKs + WAL                                                                                                                                                                         | IMPLEMENTED           | `db/migrations/0001_init.sql`; `db::tests::fresh_install_migrates_to_latest` |
-| Schema v2 (`0002_sessions.sql`): library purpose, restore columns, prediction capability/cluster columns; v1 → v2 upgrade keeps rows                                                                                   | IMPLEMENTED           | `migrations::tests::v1_database_with_data_upgrades_to_v2_keeping_rows`       |
-| Schema v3 (`0003_corrections.sql`): `correction_syncs`, one correction per prediction; v1 → v3 upgrade keeps rows                                                                                                      | IMPLEMENTED           | `migrations::tests::v1_database_with_data_upgrades_to_latest_keeping_rows`   |
-| Schema v4 (`0004_session_intelligence.sql`): group reference photo + edited_at; v1 → v4 upgrade keeps rows                                                                                                             | IMPLEMENTED           | `migrations::tests::v1_database_with_data_upgrades_to_latest_keeping_rows`   |
-| Backup before migrating an existing DB                                                                                                                                                                                 | IMPLEMENTED           | `db::tests::upgrade_from_older_schema_creates_backup`                        |
-| Repositories (libraries, assets, sidecars, snapshots, features, jobs, lightroom connections, styles, model versions, sessions, predictions, apply batches, applied edits, corrections, settings, events, update state) | IMPLEMENTED           | repo tests in `crates/mimic-core/src/db/*`                                   |
-| Immutable model versions, single active per style                                                                                                                                                                      | IMPLEMENTED (storage) | `repo_styles::tests::versions_are_immutable_and_single_active`               |
-| Apply batch never “completed” with failures; idempotent item results; restore recorded per item without rewriting the apply row; session delete keeps assets                                                           | IMPLEMENTED           | `repo_sessions::tests::*`                                                    |
+## Sources and import
 
-## Jobs
+| Item                                                          | Status      | Evidence                                                                                                    |
+| ------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `CommunicationSource` contract; distinct keys, known channels | IMPLEMENTED | `sources::tests::every_connector_has_a_distinct_key_and_a_known_channel`                                    |
+| `mbox` connector: threading, folded headers, separator safety | IMPLEMENTED | `sources::mbox::tests` (8 tests)                                                                            |
+| `mimic_json` connector: the documented generic format         | IMPLEMENTED | `sources::mimic_json::tests` (6 tests)                                                                      |
+| Quoted-reply and signature stripping; sign-offs preserved     | IMPLEMENTED | `sources::normalize::tests` (7 tests)                                                                       |
+| Validation before import, agreeing with what import will do   | IMPLEMENTED | `sources::validate_by_dry_run`; `mimic_json::tests::validation_reports_shape_and_the_problems_worth_naming` |
+| Streaming import, batched inserts, participant cache          | IMPLEMENTED | `import::tests::an_import_attributes_every_message_and_creates_the_people`                                  |
+| Re-importing is free                                          | IMPLEMENTED | `import::tests::importing_twice_changes_nothing`                                                            |
+| Import refuses to run without a declared identity             | IMPLEMENTED | `import::tests::importing_without_an_identity_is_refused_rather_than_guessed`                               |
+| Cancel keeps what was written; resuming finishes the job      | IMPLEMENTED | `import::tests::cancelling_keeps_what_was_written_and_leaves_the_source_resumable`                          |
+| Reply linking and response latency derived per conversation   | IMPLEMENTED | `repo_messages::tests::replies_and_latency_are_derived_after_the_batch`                                     |
+| Keyset pagination stable under duplicate timestamps           | IMPLEMENTED | `repo_messages::tests::self_messages_page_by_keyset_even_with_duplicate_timestamps`                         |
+| Incremental sync (a watermark rather than a full re-read)     | PLANNED     | Phase 4                                                                                                     |
 
-| Item                                                                                             | Status                                       | Evidence                                                         |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------- | ---------------------------------------------------------------- |
-| Persistent queue, progress, phase, heartbeat, cancel between items                               | IMPLEMENTED                                  | `jobs::tests::*`                                                 |
-| Restart recovery: running → interrupted; resumable kinds re-queued; apply never blindly repeated | IMPLEMENTED                                  | `repo_jobs::tests::interrupted_recovery_requeues_only_resumable` |
-| Bounded concurrency                                                                              | IMPLEMENTED (1 orchestrator; engine batches) | `JobRunner::run_loop`                                            |
+## Voice
 
-## Engine (Python sidecar)
+| Item                                                        | Status      | Evidence                                                                                                                                                              |
+| ----------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deterministic metrics (length, punctuation, case, emoji, …) | IMPLEMENTED | `voice::metrics::tests` (10 tests)                                                                                                                                    |
+| A sample under 20 reports its size and no rates             | IMPLEMENTED | `voice::metrics::tests::a_small_sample_reports_its_size_and_refuses_to_guess`                                                                                         |
+| `null` (unmeasured) and `0` (measured zero) stay distinct   | IMPLEMENTED | `metrics::tests::punctuation_habits_are_counted_from_the_last_real_character`; `contracts.test.ts` "rates are rendered honestly"                                      |
+| Global, channel and relationship layers                     | IMPLEMENTED | `voice::tests::analysis_writes_a_layer_per_scope_and_says_what_it_could_not_measure`                                                                                  |
+| Situational layer                                           | PARTIAL     | Tables, resolution and prompt slot exist; nothing classifies. Phase 2                                                                                                 |
+| Layer resolution, innermost measurable wins                 | IMPLEMENTED | `voice::tests::effective_metrics_prefer_the_innermost_measurable_layer`                                                                                               |
+| Manual preferences override the statistics                  | IMPLEMENTED | `repo_voice::tests::manual_preferences_are_upserted_and_scoped`; `generation::tests::manual_preferences_appear_after_the_measurements_and_are_labelled_as_overriding` |
+| Representative examples: deterministic, de-duplicated       | IMPLEMENTED | `voice::tests::example_selection_is_deterministic_and_avoids_duplicates`, `near_duplicate_messages_are_not_all_chosen`                                                |
+| Staleness propagates from a person to the aggregates        | IMPLEMENTED | `repo_voice::tests::staleness_spreads_from_a_person_to_the_aggregates`                                                                                                |
+| Analysis streams rather than materializing a scope          | PARTIAL     | Paged reads, in-memory accumulation. Phase 2                                                                                                                          |
 
-| Item                                                                                                  | Status                                  | Evidence                                                                                                             |
-| ----------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| NDJSON protocol: correlation, structured errors, events, size cap, shutdown                           | IMPLEMENTED                             | `engine/tests/test_protocol.py`; Rust `tests/engine_protocol.rs` (fake engine: timeout, crash, restart, oversized)   |
-| Auto start via `uv run` in dev, bundled exe in release                                                | IMPLEMENTED / PARTIAL                   | `engine::resolve_engine_command`; bundle produced by `scripts/package-engine.ps1` (not run in CI-less sandbox)       |
-| Folder scanner with pairing rules, duplicates, orphans, unsupported                                   | IMPLEMENTED                             | `test_scanner.py`                                                                                                    |
-| XMP parser (read-only, unknown keys kept, masks structured, malformed isolated)                       | IMPLEMENTED                             | `test_xmp.py` incl. goldens `fixtures/expected/*.raw.json`                                                           |
-| ACR sidecar detection (opaque)                                                                        | IMPLEMENTED                             | scanner + ingest; e2e                                                                                                |
-| EXIF metadata                                                                                         | IMPLEMENTED                             | `read_metadata`; e2e checks width/height on synthetic JPEG                                                           |
-| RAW preview via LibRaw + cache                                                                        | IMPLEMENTED (code) / PARTIAL (evidence) | `preview.py`; fixtures are JPEG/TIFF — no RAW sample in repo (licensing). Set `MIMIC_TEST_RAW` manually to exercise  |
-| Image statistics, scene heuristics, `stats_v1` embedding                                              | IMPLEMENTED                             | `test_features.py` (determinism, label intent, cache)                                                                |
-| ONNX encoder manager (manifest, SHA-256, DirectML/CPU)                                                | PARTIAL                                 | code + fallback tested; no manifest shipped, no model downloaded in tests                                            |
-| Training pipeline (dataset, grouped split, baselines, hybrid, metrics, confidence, artifacts)         | IMPLEMENTED                             | `engine/tests/test_training.py`; Rust `tests/training_e2e.rs`                                                        |
-| `model.predict` with optional session consistency (`groups`, `consistency`)                           | IMPLEMENTED                             | `test_session.py::test_service_session_group_and_consistent_predict` (exposure untouched, bounded shift, off switch) |
-| `session.group`: time blocks, seeded k-means, min cluster size, bursts, untimed frames, deterministic | IMPLEMENTED                             | `test_session.py`                                                                                                    |
+## Retrieval and generation
 
-## EditDNA
+| Item                                                            | Status      | Evidence                                                                                 |
+| --------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------- |
+| Metadata filter applied before ranking                          | IMPLEMENTED | `retrieval::tests::the_filter_runs_before_the_ranking`                                   |
+| Every filter dimension narrows                                  | IMPLEMENTED | `retrieval::tests::every_filter_dimension_narrows`                                       |
+| Lexical ranking with inverse document frequency                 | IMPLEMENTED | `retrieval::tests::similar_wording_outranks_recency`                                     |
+| Embedding-backed ranking                                        | PARTIAL     | `lexical_v1` in the engine, reporting `semantic: false`. Phase 2                         |
+| Generation context with human-readable evidence                 | IMPLEMENTED | `generation::tests::the_prompt_carries_the_intent_the_incoming_message_and_the_examples` |
+| Prompt assembly is a pure function                              | IMPLEMENTED | `generation::tests::the_prompt_is_a_pure_function_of_the_context`                        |
+| Measured habits become instructions, unmeasured ones are silent | IMPLEMENTED | `generation::tests::measured_habits_become_instructions_not_raw_numbers`                 |
+| Output budget derived from the user's own message length        | IMPLEMENTED | `generation::tests::the_output_budget_follows_how_long_this_person_actually_writes`      |
+| Adjustments (shorter, longer, casual, professional)             | IMPLEMENTED | `generation::tests::an_adjustment_changes_the_prompt_and_the_hash`                       |
+| Falling back to the global voice for an unknown recipient       | IMPLEMENTED | `generation::tests::writing_to_someone_new_falls_back_to_the_global_voice_and_says_so`   |
 
-| Item                                                                                            | Status      | Evidence                                                                        |
-| ----------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
-| `edit_mapping_v1.json` — 104 controls, 11 families, metadata keys, local/heavy prefixes         | IMPLEMENTED | `mapping::tests`, contracts vitest                                              |
-| Normalization: modern/legacy keys, curves, bools, enums, unknown preservation, local `observed` | IMPLEMENTED | `edit_dna::tests`; goldens `fixtures/expected/*.normalized.json`                |
-| Canonical → Lightroom write with capability gating; read-back verification with tolerances      | IMPLEMENTED | `roundtrip_to_lightroom_respects_capability`, `verify_readback_uses_tolerances` |
-| Full EditDNA document per pair                                                                  | IMPLEMENTED | `build_edit_dna`; exposed by `get_asset_detail`                                 |
+## Providers
 
-## Lightroom
+| Item                                                 | Status      | Evidence                                                                                                                            |
+| ---------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `ModelProvider` trait; registry; local-first default | IMPLEMENTED | `providers::tests::the_default_provider_is_a_local_one_when_there_is_one`                                                           |
+| Local OpenAI-compatible provider                     | IMPLEMENTED | `providers::http::tests::a_local_provider_only_claims_to_be_local_when_it_is`                                                       |
+| The locality claim is computed, not asserted         | IMPLEMENTED | same test; `providers_config::tests::settings_change_the_endpoint_and_the_locality_claim_follows`                                   |
+| Anthropic provider                                   | IMPLEMENTED | `providers::http::tests::anthropic_asks_for_a_key_before_it_asks_for_anything_else`. **Never exercised against the live API in CI** |
+| Errors carry no request body                         | IMPLEMENTED | `providers::http::tests::provider_errors_stay_one_line_and_carry_no_body`                                                           |
+| Credentials in the OS credential store               | PARTIAL     | Owner-only file; `secrets::tests::the_file_is_owner_only`. Phase 2                                                                  |
 
-| Item                                                                                                                 | Status                                       | Evidence                                                                                                                           |
-| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Loopback bridge: token auth, origin rejection, body cap, handshake, long-poll, results, events, capabilities refresh | IMPLEMENTED                                  | `tests/bridge_fake_plugin.rs` (5 tests), `tests/bridge_protocol.rs`                                                                |
-| Timeout / disconnect / reconnect handling                                                                            | IMPLEMENTED                                  | `timeout_disconnect_and_reconnect`                                                                                                 |
-| Discovery file with owner-only permissions                                                                           | IMPLEMENTED                                  | same test (unix mode 0600)                                                                                                         |
-| Plugin: handshake, poll loop, backoff, Plugin Manager panel, menu items                                              | IMPLEMENTED (code) — NEEDS REAL-LIGHTROOM QA | Lua syntax-checked; `lightroom/tests/json_test.lua`                                                                                |
-| Plugin: capability probe                                                                                             | IMPLEMENTED (code) — NEEDS REAL-LIGHTROOM QA | `Capabilities.lua`                                                                                                                 |
-| Plugin: get_selected_photos / get_develop_settings / metadata                                                        | IMPLEMENTED (code) — NEEDS REAL-LIGHTROOM QA | `Commands.lua`, `Catalog.lua`                                                                                                      |
-| Plugin: create_before_snapshot, apply_settings_as_plugin_preset with read-back, collect_correction_state             | IMPLEMENTED (code) — NEEDS REAL-LIGHTROOM QA | `Develop.lua`; fixtures `apply_settings_as_plugin_preset.*.json`                                                                   |
-| Capability matrix derivation                                                                                         | IMPLEMENTED                                  | `capability::tests`                                                                                                                |
-| Lightroom-connected ingest job                                                                                       | IMPLEMENTED (code) — NEEDS REAL-LIGHTROOM QA | `ingest::ingest_lightroom`; bridge path proven with fake plugin                                                                    |
-| Restore payload shape (`createSnapshot:false`, `readBack:true`, `restore:true`) and catalog listing fixture          | IMPLEMENTED                                  | `fixtures/bridge/apply_settings_as_plugin_preset.command.restore.json`, `get_selected_photos.result.json`; Rust + TS fixture tests |
-| Mask / local adjustment support                                                                                      | UNSUPPORTED (by design in 0.x)               | matrix reports `unsupported`                                                                                                       |
+## Learning loop
 
-## Training job (mimic-core)
+| Item                                                   | Status      | Evidence                                                                                |
+| ------------------------------------------------------ | ----------- | --------------------------------------------------------------------------------------- |
+| Draft → sent → diff recorded                           | IMPLEMENTED | `pipeline_e2e::the_learning_loop_records_what_the_user_actually_sent`                   |
+| Diff describes length, greeting, sign-off, emoji, case | IMPLEMENTED | `generation::feedback::tests` (8 tests)                                                 |
+| Stated preferences outweigh inferred edits             | IMPLEMENTED | `repo_drafts::tests::explicit_preferences_outweigh_inferred_edits_and_replace_in_place` |
+| Measured draft outcomes; unmeasured stays null         | IMPLEMENTED | `repo_drafts::tests::outcomes_are_unmeasured_until_a_draft_is_resolved`                 |
+| Feedback changes a profile                             | PLANNED     | Phase 3. Nothing consumes `draft_feedback` yet                                          |
 
-| Item                                                                                                                 | Status      | Evidence                      |
-| -------------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------- |
-| `train_style` job: version row in `training`, finalize once, training set + artifacts recorded, failed runs recorded | IMPLEMENTED | `tests/training_e2e.rs`       |
-| Activation policy (first version; later only if holdout not worse); manual activate = rollback; archive              | IMPLEMENTED | same; `training::activate`    |
-| Engine progress forwarded into job records                                                                           | IMPLEMENTED | same (`progress_total > 0`)   |
-| Training never resumed after interruption (must be re-run)                                                           | IMPLEMENTED | `resumable == false` asserted |
+## Privacy
 
-## Sessions (mimic-core `sessions`)
+| Item                                                              | Status      | Evidence                                                                                   |
+| ----------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------ |
+| Deletion preview matches the deletion exactly                     | IMPLEMENTED | `privacy::tests::a_preview_changes_nothing_and_matches_what_deletion_does`                 |
+| Deleting a person removes the user's half of the conversation     | IMPLEMENTED | `privacy::tests::deleting_a_person_removes_their_words_and_the_users_half_of_the_exchange` |
+| Everything derived from them goes too                             | IMPLEMENTED | `privacy::tests::deleting_a_person_removes_everything_derived_from_them`                   |
+| Aggregates that included them are invalidated                     | IMPLEMENTED | `privacy::tests::the_aggregates_that_included_them_are_invalidated_not_left_standing`      |
+| Group conversations survive minus that person                     | IMPLEMENTED | `privacy::tests::a_group_conversation_survives_minus_the_deleted_person`                   |
+| Deleting a source removes its import and the people it introduced | IMPLEMENTED | `privacy::tests::deleting_a_source_takes_its_import_and_the_people_it_introduced`          |
+| Delete-everything keeps settings and identity                     | IMPLEMENTED | `privacy::tests::deleting_everything_keeps_the_settings_and_the_identity`                  |
+| No message content in logs by default                             | IMPLEMENTED | By construction; provider errors truncated and body-free                                   |
 
-| Item                                                                                                                                                                                                                                         | Status                                                       | Evidence                                                                                                                                |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Create session from folder or Lightroom scope (hidden `purpose = session` library), `ingest_session` reusing the ingest pipeline, capture-ordered membership                                                                                 | IMPLEMENTED                                                  | `tests/sessions_e2e.rs` (real engine, 5 fixture images)                                                                                 |
-| `group_session` job → `scene_clusters` + per-asset cluster/burst ids; re-grouping replaces cleanly                                                                                                                                           | IMPLEMENTED                                                  | same                                                                                                                                    |
-| `predict_session` job: active version only, feature-schema check, cluster map → consistency, supersede on re-run, capability schema version recorded                                                                                         | IMPLEMENTED                                                  | same                                                                                                                                    |
-| Review status transitions (`pending`/`reviewed`/`rejected`; applied/superseded immutable)                                                                                                                                                    | IMPLEMENTED                                                  | `sessions::tests::review_status_transitions`; e2e rejected photo skipped                                                                |
-| `apply_preflight`: connected, canApply/canSnapshot, writable controls, same catalog, stale capability schema, apply already running; warnings for inactive versions                                                                          | IMPLEMENTED                                                  | `sessions::tests::preflight_*`; e2e stale-capability refusal                                                                            |
-| `apply_session`: photo resolution (local id or path via catalog listing), batches of 25 with snapshot + read-back, `verify_readback` per item, `prediction` edit snapshot, cancellation between batches, `outcome_unknown` on bridge failure | IMPLEMENTED (bridge + fake plugin) — NEEDS REAL-LIGHTROOM QA | `tests/sessions_e2e.rs`: 2 applied, 1 verify_failed, 1 skipped (not in catalog), rejected excluded, only writable keys sent             |
-| `restore_batch`: before-values of written keys only, verified by read-back, per-item restore result, predictions back to pending, rollback flag cleared                                                                                      | IMPLEMENTED (bridge + fake plugin) — NEEDS REAL-LIGHTROOM QA | same; `restore_settings_uses_only_written_keys_with_before_values`                                                                      |
-| Apply/restore never re-queued after an interruption                                                                                                                                                                                          | IMPLEMENTED                                                  | `SessionExecutor::resumable`                                                                                                            |
-| `sync_corrections` job: read-back via `collect_correction_state`, untouched vs corrected by read-back tolerance, per-control normalized deltas, `correction` edit snapshots, idempotent re-sync, `correction_syncs` rows                     | IMPLEMENTED (bridge + fake plugin) — NEEDS REAL-LIGHTROOM QA | `tests/sessions_e2e.rs` (1 corrected, 1 untouched, re-sync stable); `corrections::tests::diff_*`                                        |
-| No-Touch Rate per version derived from synced sessions only; restored edits never count                                                                                                                                                      | IMPLEMENTED                                                  | `repo_sessions::tests` (no_touch_stats), e2e `active_no_touch_rate == 0.5`                                                              |
-| Retraining with corrections: pending corrections become pairs (`correctionAssetIds`), marked `included_in_training_version`                                                                                                                  | IMPLEMENTED                                                  | `engine/tests/test_training.py::test_dataset_includes_only_corrected_session_assets`; e2e `correctionPairs == 1`                        |
-| Style health insights (No-Touch, pending corrections, most-corrected controls with bias)                                                                                                                                                     | IMPLEMENTED                                                  | `corrections::style_health`; e2e + fixture round-trip                                                                                   |
-| Corrections tab, version comparison, Home No-Touch metric, session Sync button + history                                                                                                                                                     | IMPLEMENTED                                                  | `CorrectionsPanel.test.tsx`, `VersionCompare.test.tsx`; fixtures `style_health.json`, `correction_row.json`                             |
-| Group editing: rename / reference (member-only) / merge (target keeps label+reference) / move-split (emptied sources deleted, orphaned references cleared); `edited_at` stamps                                                               | IMPLEMENTED                                                  | `repo_sessions::tests` (group editing), `sessions::edit_groups` in `tests/sessions_e2e.rs`                                              |
-| Reference photo steers consistency; reference row never blended; two-photo groups allowed with a reference                                                                                                                                   | IMPLEMENTED                                                  | `engine/tests/test_session.py::test_reference_photo_*`; service test `isReference`; e2e re-predict with reference                       |
-| Group-outlier detection (exposure / temperature / tint > 12 % from group median, groups ≥ 4) surfaced in reasons and Review attention                                                                                                        | IMPLEMENTED                                                  | `test_outlier_detection_flags_group_disagreement_only`; contracts `needsAttention` outlier test                                         |
-| Per-group and per-camera/lens statistics, stale-grouping and sync-due flags in session detail                                                                                                                                                | IMPLEMENTED                                                  | e2e `group_stats`/`camera_stats`/`grouping_changed_since_prediction` assertions; fixture `session_detail.json` round-trip in Rust + zod |
-| Scene groups UI (inline rename, reference from selection, two-step merge, move/split with multi-select), camera table, banners, outlier badge, reference star                                                                                | IMPLEMENTED                                                  | `GroupsPanel.test.tsx`                                                                                                                  |
-| Correction weighting in training, automatic sync when edits settle, burst editing                                                                                                                                                            | PLANNED (0.5.x)                                              | —                                                                                                                                       |
+## Evaluation
 
-## Ingest and data quality
+| Item                                                    | Status      | Evidence                                                                             |
+| ------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
+| Conversation-grouped split                              | IMPLEMENTED | `test_text.py::test_split_is_reproducible_and_honest_about_thin_data`                |
+| Comparison components (length, vocab, punct, embedding) | IMPLEMENTED | `test_text.py::test_comparison_components_are_each_meaningful`                       |
+| Summary refuses a headline score                        | IMPLEMENTED | `test_service.py::test_eval_compare_reports_components_and_refuses_a_headline_score` |
+| The loop that runs it over a real corpus                | PLANNED     | Phase 3. `evaluations` rows are never written                                        |
+| Baselines (generic assistant, most common phrasing)     | PLANNED     | Phase 3                                                                              |
+| An accuracy figure in the UI                            | UNSUPPORTED | Nothing has earned one. Deliberate                                                   |
 
-| Item                                                                                                                                                       | Status      | Evidence              |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------- |
-| Folder scan job end to end with the real engine (assets, sidecars, snapshots, features, previews, embeddings, report, idempotent rescan, source untouched) | IMPLEMENTED | `tests/ingest_e2e.rs` |
-| Data quality report + warnings (ACR, no edits, single camera, single day, local edits, failed sidecars)                                                    | IMPLEMENTED | `ingest::tests`, e2e  |
+## Interface
 
-## Updater and release
+| Item                                             | Status      | Evidence                                                    |
+| ------------------------------------------------ | ----------- | ----------------------------------------------------------- |
+| Compose / People / Voice / Sources / Settings    | IMPLEMENTED | `apps/desktop/src/features/`                                |
+| Evidence panel with measured habits and examples | IMPLEMENTED | `EvidencePanel.test.tsx` (5 tests)                          |
+| The provider's locality is shown in the top bar  | IMPLEMENTED | `StatusBadges.test.tsx`                                     |
+| Deletion dialog states consequences, not counts  | IMPLEMENTED | `contracts.test.ts` "deletion is described in consequences" |
+| Onboarding advances on facts, not checkboxes     | IMPLEMENTED | `contracts.test.ts` "onboarding advances on facts"          |
+| Conversation view; Compose opened from a thread  | PLANNED     | Phase 5                                                     |
 
-| Item                                                                                       | Status                  | Evidence                                                                         |
-| ------------------------------------------------------------------------------------------ | ----------------------- | -------------------------------------------------------------------------------- |
-| Tauri updater plugin configured with embedded pubkey, `latest.json` endpoint               | IMPLEMENTED             | `tauri.conf.json`                                                                |
-| Background checks (initial delay, 6 h ± 20 min), auto-download when enabled, install guard | IMPLEMENTED             | `useUpdater.ts`, `can_install_update_now`, contracts test `nextCheckDelayMs`     |
-| Update state persisted                                                                     | IMPLEMENTED             | `db::update_state`                                                               |
-| Development pubkey refused for non-alpha releases                                          | IMPLEMENTED             | `verify-release.ps1 -PreTag`, release workflow `verify` job                      |
-| Tested v0.1.0 → v0.1.1 update path                                                         | PLANNED                 | documented procedure in `docs/UPDATE_SYSTEM.md`; requires two published releases |
-| Windows installer produced                                                                 | PLANNED until first tag | release workflow                                                                 |
+## Packaging
 
-## Observability and diagnostics
-
-| Item                                                         | Status      | Evidence                                |
-| ------------------------------------------------------------ | ----------- | --------------------------------------- |
-| JSON logs with rotation (14 files)                           | IMPLEMENTED | `logging.rs`                            |
-| Diagnostic bundle: no tokens, paths redacted unless opted in | IMPLEMENTED | `diagnostics::tests`                    |
-| Event log table + Diagnostics UI                             | IMPLEMENTED | `recent_events`, Settings › Diagnostics |
-
-## What the sandbox that produced this release could not run
-
-- `tauri build` for Windows (no Windows toolchain); the Rust crate compiles and passes clippy on Linux with the Tauri Linux deps.
-- Any interaction with a real Lightroom Classic: the apply/restore path is proven only against a scripted plugin speaking the real bridge protocol. Real-catalog behaviour of `createDevelopSnapshot`, `addDevelopPresetForPlugin`, `applyDevelopPreset` and read-back equality is still `NEEDS REAL-LIGHTROOM QA`.
-- PyInstaller packaging of the engine (`scripts/package-engine.ps1` is written for the Windows runner).
+| Item                                            | Status      | Evidence                                                                                  |
+| ----------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- |
+| Version consistency across every manifest       | IMPLEMENTED | `node scripts/sync-version.mjs --check`, in CI                                            |
+| CI: frontend, Rust, Python, security            | IMPLEMENTED | `.github/workflows/ci.yml`                                                                |
+| Signed updater, `latest.json`, release workflow | PARTIAL     | Plumbing unchanged from 0.5.0 and never observed producing a Windows installer end to end |
+| Windows installer                               | PARTIAL     | `tauri build` has not been run in this environment                                        |
+| macOS                                           | PLANNED     | Nothing is Windows-specific; nothing has been tested                                      |
+| Nightly smoke workflow                          | PARTIAL     | Still exercises the photography path; needs rewriting                                     |

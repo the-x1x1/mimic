@@ -22,7 +22,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
     return (
       <div className="fatal">
         <h1>Something went wrong in this view</h1>
-        <p className="muted">Mimic is still running. Your data and jobs are unaffected.</p>
+        <p className="neutral">Mimic is still running. Your data and jobs are unaffected.</p>
         <pre>{this.state.error.message}</pre>
         <div className="row gap-2">
           <Button variant="primary" onClick={() => this.setState({ error: null })}>

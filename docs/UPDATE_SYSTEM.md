@@ -4,7 +4,7 @@ Mimic updates from GitHub Releases through the Tauri 2 updater plugin.
 
 ## Release structure
 
-`Mimic_<v>_x64-setup.exe` (NSIS, per-user install), `Mimic_<v>_x64-setup.exe.sig` (minisign signature produced by `tauri build` with `createUpdaterArtifacts: true`), `latest.json`, `SHA256SUMS.txt`, `Mimic.lrplugin-<v>.zip`, release notes from CHANGELOG.
+`Mimic_<v>_x64-setup.exe` (NSIS, per-user install), `Mimic_<v>_x64-setup.exe.sig` (minisign signature produced by `tauri build` with `createUpdaterArtifacts: true`), `latest.json`, `SHA256SUMS.txt`, release notes from CHANGELOG.
 
 `latest.json`:
 

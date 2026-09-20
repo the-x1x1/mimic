@@ -1,0 +1,150 @@
+{
+  "analysisVersion": "voice_v1",
+  "ownMessages": 22,
+  "channels": [
+    ["chat", 20],
+    ["sms", 2]
+  ],
+  "profiles": [
+    {
+      "layer": "channel",
+      "scopeKey": "chat",
+      "label": "What you write over chat",
+      "sampleSize": 20,
+      "measurable": true,
+      "metrics": {
+        "sampleSize": 20,
+        "measurable": true,
+        "avgWordsPerMessage": 6.5,
+        "medianWordsPerMessage": 7.0,
+        "p90WordsPerMessage": 10.0,
+        "avgSentencesPerMessage": 1.0,
+        "multiParagraphRate": 0.0,
+        "terminalPeriodRate": 0.0,
+        "questionRate": 0.0,
+        "exclamationRate": 0.0,
+        "ellipsisRate": 0.0,
+        "emojiRate": 0.0,
+        "lowercaseStartRate": 1.0,
+        "allLowercaseRate": 1.0,
+        "contractionsPer100Words": 3.08,
+        "greetingRate": 0.0,
+        "signOffRate": 0.0,
+        "topGreetings": [],
+        "topSignOffs": [],
+        "topPhrases": [
+          ["let me know", 8],
+          ["me know if", 6],
+          ["know if you", 3]
+        ],
+        "medianResponseSeconds": 239
+      },
+      "stale": false
+    },
+    {
+      "layer": "channel",
+      "scopeKey": "sms",
+      "label": "What you write over sms",
+      "sampleSize": 2,
+      "measurable": false,
+      "metrics": {
+        "sampleSize": 2,
+        "measurable": false,
+        "avgWordsPerMessage": null,
+        "medianWordsPerMessage": null,
+        "p90WordsPerMessage": null,
+        "avgSentencesPerMessage": null,
+        "multiParagraphRate": null,
+        "terminalPeriodRate": null,
+        "questionRate": null,
+        "exclamationRate": null,
+        "ellipsisRate": null,
+        "emojiRate": null,
+        "lowercaseStartRate": null,
+        "allLowercaseRate": null,
+        "contractionsPer100Words": null,
+        "greetingRate": null,
+        "signOffRate": null,
+        "topGreetings": [],
+        "topSignOffs": [],
+        "topPhrases": [],
+        "medianResponseSeconds": null
+      },
+      "stale": false
+    },
+    {
+      "layer": "global",
+      "scopeKey": "",
+      "label": "Everything you write",
+      "sampleSize": 22,
+      "measurable": true,
+      "metrics": {
+        "sampleSize": 22,
+        "measurable": true,
+        "avgWordsPerMessage": 6.09,
+        "medianWordsPerMessage": 7.0,
+        "p90WordsPerMessage": 10.0,
+        "avgSentencesPerMessage": 1.0,
+        "multiParagraphRate": 0.0,
+        "terminalPeriodRate": 0.0,
+        "questionRate": 0.0,
+        "exclamationRate": 0.0,
+        "ellipsisRate": 0.0,
+        "emojiRate": 0.0,
+        "lowercaseStartRate": 1.0,
+        "allLowercaseRate": 1.0,
+        "contractionsPer100Words": 2.99,
+        "greetingRate": 0.0,
+        "signOffRate": 0.0,
+        "topGreetings": [],
+        "topSignOffs": [],
+        "topPhrases": [
+          ["let me know", 8],
+          ["me know if", 6],
+          ["know if you", 3]
+        ],
+        "medianResponseSeconds": 180
+      },
+      "stale": false
+    },
+    {
+      "layer": "relationship",
+      "scopeKey": "15e467fd-7191-4a12-b7b2-a5cbff74bea1",
+      "label": "What you write to Ada Lovelace",
+      "sampleSize": 20,
+      "measurable": true,
+      "metrics": {
+        "sampleSize": 20,
+        "measurable": true,
+        "avgWordsPerMessage": 6.5,
+        "medianWordsPerMessage": 7.0,
+        "p90WordsPerMessage": 10.0,
+        "avgSentencesPerMessage": 1.0,
+        "multiParagraphRate": 0.0,
+        "terminalPeriodRate": 0.0,
+        "questionRate": 0.0,
+        "exclamationRate": 0.0,
+        "ellipsisRate": 0.0,
+        "emojiRate": 0.0,
+        "lowercaseStartRate": 1.0,
+        "allLowercaseRate": 1.0,
+        "contractionsPer100Words": 3.08,
+        "greetingRate": 0.0,
+        "signOffRate": 0.0,
+        "topGreetings": [],
+        "topSignOffs": [],
+        "topPhrases": [
+          ["let me know", 8],
+          ["me know if", 6],
+          ["know if you", 3]
+        ],
+        "medianResponseSeconds": 239
+      },
+      "stale": false
+    }
+  ],
+  "peopleWithProfiles": 1,
+  "stale": false,
+  "lastAnalyzedAt": "2026-09-20T21:45:50.321Z",
+  "messagesUntilMeasurable": 0
+}

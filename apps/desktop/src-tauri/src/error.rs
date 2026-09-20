@@ -38,17 +38,37 @@ impl From<mimic_core::jobs::JobError> for CommandError {
     }
 }
 
-impl From<mimic_core::bridge::BridgeError> for CommandError {
-    fn from(e: mimic_core::bridge::BridgeError) -> Self {
+impl From<mimic_core::sources::SourceError> for CommandError {
+    fn from(e: mimic_core::sources::SourceError) -> Self {
         let code = match &e {
-            mimic_core::bridge::BridgeError::NotConnected => "lightroom_not_connected",
-            mimic_core::bridge::BridgeError::Timeout(_) => "lightroom_timeout",
-            mimic_core::bridge::BridgeError::Plugin { code, .. } => {
-                return Self::new(&format!("lightroom_{code}"), e.to_string())
-            }
-            _ => "lightroom",
+            mimic_core::sources::SourceError::Io(_) => "source_io",
+            mimic_core::sources::SourceError::Malformed(_) => "source_malformed",
+            mimic_core::sources::SourceError::UnknownConnector(_) => "unknown_connector",
+            mimic_core::sources::SourceError::Aborted(_) => "canceled",
         };
         Self::new(code, e.to_string())
+    }
+}
+
+impl From<mimic_core::providers::ProviderError> for CommandError {
+    fn from(e: mimic_core::providers::ProviderError) -> Self {
+        let code = match &e {
+            mimic_core::providers::ProviderError::Config(_) => "provider_config",
+            mimic_core::providers::ProviderError::Unreachable(_) => "provider_unreachable",
+            mimic_core::providers::ProviderError::Refused(_) => "provider_refused",
+            mimic_core::providers::ProviderError::Malformed(_) => "provider_malformed",
+            mimic_core::providers::ProviderError::Unknown(_) => "provider_unknown",
+        };
+        Self::new(code, e.to_string())
+    }
+}
+
+impl From<mimic_core::generation::GenerationError> for CommandError {
+    fn from(e: mimic_core::generation::GenerationError) -> Self {
+        match e {
+            mimic_core::generation::GenerationError::Db(d) => d.into(),
+            mimic_core::generation::GenerationError::Provider(p) => p.into(),
+        }
     }
 }
 

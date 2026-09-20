@@ -1,22 +1,25 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Home, Layers, Images, ClipboardCheck, Settings as SettingsIcon } from "lucide-react";
+import { PenLine, Users, AudioLines, Inbox, Settings as SettingsIcon } from "lucide-react";
 import { useNativeEventBridge, useSystemStatus } from "@/hooks/useSystem";
-import { ConnectionBadge, EngineBadge, UpdateBadge } from "./StatusBadges";
+import { useProviderState } from "@/hooks/useCompose";
+import { EngineBadge, ProviderBadge, UpdateBadge } from "./StatusBadges";
 import { JobTray } from "./JobTray";
 import { Toaster } from "./Toaster";
 
 const NAV = [
-  { to: "/", label: "Home", icon: Home, end: true },
-  { to: "/styles", label: "Styles", icon: Layers },
-  { to: "/sessions", label: "Sessions", icon: Images },
-  { to: "/review", label: "Review", icon: ClipboardCheck },
+  { to: "/", label: "Compose", icon: PenLine, end: true },
+  { to: "/people", label: "People", icon: Users },
+  { to: "/voice", label: "Voice", icon: AudioLines },
+  { to: "/sources", label: "Sources", icon: Inbox },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export function AppShell() {
   useNativeEventBridge();
   const system = useSystemStatus();
+  const providers = useProviderState();
   const navigate = useNavigate();
+  const active = providers.data?.providers.find((p) => p.id === providers.data?.active);
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="Primary">
@@ -44,14 +47,11 @@ export function AppShell() {
       <div className="main">
         <header className="topbar">
           <div className="topbar__status">
-            <ConnectionBadge status={system.data?.lightroom} />
+            <ProviderBadge provider={active} />
             <EngineBadge status={system.data?.engine} />
           </div>
           <div className="topbar__right">
-            <UpdateBadge
-              state={system.data?.update}
-              onClick={() => navigate("/settings?section=updates")}
-            />
+            <UpdateBadge state={system.data?.update} onClick={() => navigate("/settings")} />
           </div>
         </header>
         <main className="content">

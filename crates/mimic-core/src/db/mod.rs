@@ -6,13 +6,14 @@
 
 pub mod migrations;
 pub mod models;
-mod repo_assets;
+mod repo_analysis;
+mod repo_drafts;
+mod repo_identity;
 mod repo_jobs;
-mod repo_libraries;
-mod repo_lightroom;
-mod repo_sessions;
-mod repo_snapshots;
-mod repo_styles;
+mod repo_messages;
+pub mod repo_people;
+mod repo_sources;
+mod repo_voice;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -23,9 +24,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::ids::now_rfc3339;
 
 pub use models::*;
-pub use repo_assets::{normalize_path, UpsertOutcome};
-pub use repo_sessions::NewAppliedEdit;
-pub use repo_styles::NewModelVersion;
+pub use repo_drafts::{DraftOutcomes, NewDraft};
+pub use repo_messages::{word_count, ImportCounts, NewMessage};
+pub use repo_people::IdentifierInput;
+pub use repo_sources::channel_is_known;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -309,27 +311,28 @@ mod tests {
         let names: Vec<&str> = counts.iter().map(|(n, _)| n.as_str()).collect();
         for t in [
             "app_settings",
-            "libraries",
-            "assets",
-            "sidecars",
-            "edit_snapshots",
-            "visual_features",
-            "sessions",
-            "session_assets",
-            "scene_clusters",
-            "style_profiles",
-            "training_sets",
-            "model_versions",
-            "model_artifacts",
-            "predictions",
-            "apply_batches",
-            "applied_edits",
-            "corrections",
+            "user_identity",
+            "user_identifiers",
+            "sources",
+            "participants",
+            "participant_identifiers",
+            "conversations",
+            "conversation_participants",
+            "messages",
+            "message_embeddings",
+            "situations",
+            "message_situations",
+            "voice_profiles",
+            "voice_preferences",
+            "representative_examples",
+            "drafts",
+            "draft_feedback",
+            "analysis_runs",
+            "evaluations",
+            "evaluation_cases",
             "jobs",
             "events",
-            "lightroom_connections",
             "update_state",
-            "correction_syncs",
         ] {
             assert!(names.contains(&t), "missing table {t}");
         }
@@ -374,7 +377,8 @@ mod tests {
         let err = db
             .conn()
             .execute(
-                "INSERT INTO sidecars(id, asset_id, type, path, detected_at) VALUES ('s','missing','xmp','/x','t')",
+                "INSERT INTO conversations(id, source_id, external_id, channel, created_at)
+                 VALUES ('c','missing','x','email','t')",
                 [],
             )
             .unwrap_err();

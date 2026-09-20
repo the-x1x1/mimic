@@ -1,156 +1,34 @@
 //! Row types. Field names mirror columns; JSON columns are `serde_json::Value`
 //! so the frontend receives structured data, not double-encoded strings.
+//!
+//! Every type here is `camelCase` on the wire and has a matching zod schema in
+//! `packages/contracts`. The contract fixtures under `fixtures/` are parsed by
+//! both sides, so a change on one side that is not made on the other fails a
+//! test rather than rendering `undefined`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Library {
-    pub id: String,
-    pub name: String,
-    pub source_type: String,
-    pub root_path: Option<String>,
-    pub lightroom_catalog_fingerprint: Option<String>,
-    pub created_at: String,
-    pub last_scanned_at: Option<String>,
-    pub status: String,
-    /// `training` (shown in the Libraries UI) or `session` (backs a session).
-    pub purpose: String,
+/// Parse a nullable JSON text column; malformed JSON becomes `None` rather
+/// than failing a whole list query.
+pub(crate) fn json_col(raw: Option<String>) -> Option<Value> {
+    raw.and_then(|s| serde_json::from_str(&s).ok())
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NewAsset {
-    pub library_id: Option<String>,
-    pub source_path: String,
-    pub file_name: String,
-    pub extension: String,
-    pub mime_type: Option<String>,
-    pub size_bytes: i64,
-    pub modified_time: Option<String>,
-    pub fast_hash: String,
-    pub camera_make: Option<String>,
-    pub camera_model: Option<String>,
-    pub lens: Option<String>,
-    pub focal_length: Option<f64>,
-    pub iso: Option<i64>,
-    pub aperture: Option<f64>,
-    pub shutter_speed: Option<f64>,
-    pub captured_at: Option<String>,
-    pub width: Option<i64>,
-    pub height: Option<i64>,
-    pub orientation: Option<i64>,
-    pub lightroom_local_id: Option<i64>,
+/// Parse a non-null JSON text column, falling back to `null`.
+pub(crate) fn json_col_or_default(raw: String) -> Value {
+    serde_json::from_str(&raw).unwrap_or(Value::Null)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Asset {
-    pub id: String,
-    pub library_id: Option<String>,
-    pub source_path: String,
-    pub normalized_path: String,
-    pub file_name: String,
-    pub extension: String,
-    pub mime_type: Option<String>,
-    pub size_bytes: i64,
-    pub modified_time: Option<String>,
-    pub fast_hash: String,
-    pub full_hash: Option<String>,
-    pub camera_make: Option<String>,
-    pub camera_model: Option<String>,
-    pub lens: Option<String>,
-    pub focal_length: Option<f64>,
-    pub iso: Option<i64>,
-    pub aperture: Option<f64>,
-    pub shutter_speed: Option<f64>,
-    pub captured_at: Option<String>,
-    pub width: Option<i64>,
-    pub height: Option<i64>,
-    pub orientation: Option<i64>,
-    pub lightroom_local_id: Option<i64>,
-    pub created_at: String,
-    pub updated_at: String,
+/// Parse a JSON object column, falling back to `{}`.
+pub(crate) fn json_obj(raw: String) -> Value {
+    match serde_json::from_str(&raw) {
+        Ok(v @ Value::Object(_)) => v,
+        _ => Value::Object(serde_json::Map::new()),
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Sidecar {
-    pub id: String,
-    pub asset_id: String,
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub path: String,
-    pub modified_time: Option<String>,
-    pub hash: Option<String>,
-    pub parse_status: String,
-    pub parser_version: Option<String>,
-    pub raw_metadata: Option<Value>,
-    pub warnings: Option<Value>,
-    pub detected_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NewSidecar {
-    pub asset_id: String,
-    pub kind: String,
-    pub path: String,
-    pub modified_time: Option<String>,
-    pub hash: Option<String>,
-    pub parse_status: String,
-    pub parser_version: Option<String>,
-    pub raw_metadata: Option<Value>,
-    pub warnings: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditSnapshot {
-    pub id: String,
-    pub asset_id: String,
-    pub source: String,
-    pub process_version: Option<String>,
-    pub normalized_settings: Value,
-    pub raw_settings: Value,
-    pub unknown_settings: Value,
-    pub mapping_version: String,
-    pub capability_schema_version: Option<String>,
-    pub observed_at: String,
-    pub provenance: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NewEditSnapshot {
-    pub asset_id: String,
-    pub source: String,
-    pub process_version: Option<String>,
-    pub normalized_settings: Value,
-    pub raw_settings: Value,
-    pub unknown_settings: Value,
-    pub mapping_version: String,
-    pub capability_schema_version: Option<String>,
-    pub provenance: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VisualFeatures {
-    pub asset_id: String,
-    pub feature_version: String,
-    pub histogram: Value,
-    pub luminance: Value,
-    pub color: Value,
-    pub sharpness: Option<f64>,
-    pub noise_estimate: Option<f64>,
-    pub clipping: Value,
-    pub scene_labels: Value,
-    pub embedding_artifact_id: Option<String>,
-    pub preview_path: Option<String>,
-    pub computed_at: String,
-}
+// ----------------------------------------------------------------- generic
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -213,20 +91,6 @@ impl<'a> NewEvent<'a> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LightroomConnection {
-    pub id: String,
-    pub catalog_fingerprint: String,
-    pub lightroom_version: Option<String>,
-    pub sdk_version: Option<String>,
-    pub plugin_version: Option<String>,
-    pub capabilities: Value,
-    pub first_seen_at: String,
-    pub last_seen_at: String,
-    pub status: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct UpdateState {
     pub current_version: String,
     pub latest_seen_version: Option<String>,
@@ -237,219 +101,385 @@ pub struct UpdateState {
     pub update_error: Option<String>,
 }
 
+// ---------------------------------------------------------------- identity
+
+/// How someone is addressed. `normalized_value` is what matching uses:
+/// lowercased for emails and handles, digits-only for phone numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentifierKind {
+    Email,
+    Phone,
+    Handle,
+    DisplayName,
+    AccountId,
+}
+
+impl IdentifierKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IdentifierKind::Email => "email",
+            IdentifierKind::Phone => "phone",
+            IdentifierKind::Handle => "handle",
+            IdentifierKind::DisplayName => "display_name",
+            IdentifierKind::AccountId => "account_id",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "email" => IdentifierKind::Email,
+            "phone" => IdentifierKind::Phone,
+            "handle" => IdentifierKind::Handle,
+            "display_name" => IdentifierKind::DisplayName,
+            "account_id" => IdentifierKind::AccountId,
+            _ => return None,
+        })
+    }
+
+    /// The comparison form. Email and handle fold case; a phone number keeps
+    /// only its digits so `+1 (555) 010-9999` and `5550109999` are one person.
+    pub fn normalize(self, value: &str) -> String {
+        match self {
+            IdentifierKind::Email | IdentifierKind::Handle => value.trim().to_lowercase(),
+            IdentifierKind::Phone => {
+                let digits: String = value.chars().filter(char::is_ascii_digit).collect();
+                // Strip a leading country code only when it leaves a plausible number.
+                if digits.len() == 11 && digits.starts_with('1') {
+                    digits[1..].to_string()
+                } else {
+                    digits
+                }
+            }
+            IdentifierKind::DisplayName => value.trim().to_lowercase(),
+            IdentifierKind::AccountId => value.trim().to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StyleProfile {
+pub struct Identifier {
     pub id: String,
-    pub name: String,
-    pub description: Option<String>,
+    pub kind: String,
+    pub value: String,
+    pub normalized_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserIdentity {
+    pub id: String,
+    pub display_name: String,
+    pub identifiers: Vec<Identifier>,
     pub created_at: String,
     pub updated_at: String,
-    pub active_model_version_id: Option<String>,
-    pub status: String,
-    pub library_ids: Vec<String>,
 }
+
+// ------------------------------------------------------------------ source
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TrainingSet {
+pub struct Source {
     pub id: String,
-    pub style_profile_id: String,
-    pub source_query: Value,
-    pub asset_count: i64,
-    pub valid_pair_count: i64,
-    pub train_count: i64,
-    pub validation_count: i64,
-    pub holdout_count: i64,
-    pub split_strategy: String,
-    pub fingerprint: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelVersion {
-    pub id: String,
-    pub style_profile_id: String,
-    pub semantic_version: String,
-    pub model_type: String,
-    pub feature_schema_version: String,
-    pub edit_schema_version: String,
-    pub training_set_id: Option<String>,
-    pub training_config: Value,
-    pub metrics: Value,
-    pub artifact_manifest: Value,
-    pub created_at: String,
-    pub status: String,
-    pub is_active: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Session {
-    pub id: String,
+    pub connector: String,
     pub name: String,
-    pub source_path: Option<String>,
-    pub source_library_id: Option<String>,
-    pub captured_start: Option<String>,
-    pub captured_end: Option<String>,
+    pub channel: String,
+    pub location: Option<String>,
+    pub config: Value,
     pub status: String,
-    pub active_style_profile_id: Option<String>,
     pub created_at: String,
-    pub asset_count: i64,
+    pub last_imported_at: Option<String>,
+    pub message_count: i64,
+    pub last_error: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionAsset {
-    pub session_id: String,
-    pub asset_id: String,
+pub struct NewSource {
+    pub connector: String,
+    pub name: String,
+    pub channel: String,
+    pub location: Option<String>,
+    #[serde(default)]
+    pub config: Value,
+}
+
+// ------------------------------------------------------------- participant
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Participant {
+    pub id: String,
+    pub display_name: String,
+    pub is_self: bool,
+    /// User-declared, e.g. "colleague", "close friend". Never inferred.
+    pub relationship: Option<String>,
+    pub notes: Option<String>,
+    pub identifiers: Vec<Identifier>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// List-view counts, computed with one grouped query rather than per row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantSummary {
+    pub participant: Participant,
+    pub message_count: i64,
+    pub sent_by_user: i64,
+    pub conversation_count: i64,
+    pub channels: Vec<String>,
+    pub first_message_at: Option<String>,
+    pub last_message_at: Option<String>,
+    pub has_relationship_profile: bool,
+}
+
+// ------------------------------------------------------------ conversation
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversation {
+    pub id: String,
+    pub source_id: String,
+    pub external_id: String,
+    pub channel: String,
+    pub subject: Option<String>,
+    pub is_group: bool,
+    pub started_at: Option<String>,
+    pub last_message_at: Option<String>,
+    pub message_count: i64,
+    pub created_at: String,
+}
+
+// ---------------------------------------------------------------- messages
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    /// Written by the user. The only messages a voice profile is built from.
+    Self_,
+    /// Written by someone else.
+    Other,
+    /// The author could not be matched to the user or to a participant.
+    /// These are kept — they are conversational context — but never treated
+    /// as evidence of how the user writes.
+    Unknown,
+}
+
+impl Direction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Direction::Self_ => "self",
+            Direction::Other => "other",
+            Direction::Unknown => "unknown",
+        }
+    }
+    pub fn parse(s: &str) -> Direction {
+        match s {
+            "self" => Direction::Self_,
+            "other" => Direction::Other,
+            _ => Direction::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Message {
+    pub id: String,
+    pub conversation_id: String,
+    pub source_id: String,
+    pub participant_id: Option<String>,
+    pub external_id: String,
+    pub direction: String,
+    pub channel: String,
+    pub sent_at: Option<String>,
     pub sequence_index: i64,
-    pub cluster_id: Option<String>,
-    pub burst_id: Option<String>,
+    pub body: String,
+    pub word_count: i64,
+    pub char_count: i64,
+    pub reply_to_message_id: Option<String>,
+    pub response_latency_seconds: Option<i64>,
+    pub metadata: Value,
+}
+
+// ------------------------------------------------------------------- voice
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceLayer {
+    Global,
+    Channel,
+    Relationship,
+    Situational,
+}
+
+impl VoiceLayer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VoiceLayer::Global => "global",
+            VoiceLayer::Channel => "channel",
+            VoiceLayer::Relationship => "relationship",
+            VoiceLayer::Situational => "situational",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "global" => VoiceLayer::Global,
+            "channel" => VoiceLayer::Channel,
+            "relationship" => VoiceLayer::Relationship,
+            "situational" => VoiceLayer::Situational,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SceneCluster {
+pub struct VoiceProfileRow {
     pub id: String,
-    pub session_id: String,
-    pub label: String,
-    pub centroid_artifact_id: Option<String>,
-    pub feature_summary: Value,
+    pub layer: String,
+    pub scope_key: String,
+    pub participant_id: Option<String>,
+    pub metrics: Value,
+    pub qualitative: Value,
+    pub sample_size: i64,
+    pub analysis_version: String,
+    pub computed_at: String,
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoicePreference {
+    pub id: String,
+    pub layer: String,
+    pub scope_key: String,
+    pub key: String,
+    pub value: Value,
+    pub note: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepresentativeExample {
+    pub id: String,
+    pub message_id: String,
+    pub layer: String,
+    pub scope_key: String,
+    pub participant_id: Option<String>,
+    pub reason: String,
+    pub score: f64,
+    pub body: String,
+    pub sent_at: Option<String>,
+}
+
+// ------------------------------------------------------------------ drafts
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Draft {
+    pub id: String,
+    pub participant_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub channel: String,
+    pub situation_id: Option<String>,
+    pub incoming_message: Option<String>,
+    pub intent: Option<String>,
+    pub generated_text: String,
+    pub final_text: Option<String>,
+    pub provider: String,
+    pub model: String,
+    pub context: Value,
+    pub prompt_hash: String,
+    pub evidence: Value,
     pub created_at: String,
-    pub asset_count: i64,
-    /// Photographer-chosen reference photo for the consistency policy.
-    pub reference_asset_id: Option<String>,
-    /// Last manual rename/merge/split/move; `None` when untouched since grouping.
-    pub edited_at: Option<String>,
+    pub resolved_at: Option<String>,
+    pub outcome: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Prediction {
+pub struct DraftFeedback {
     pub id: String,
-    pub session_id: String,
-    pub asset_id: String,
-    pub model_version_id: String,
-    pub predicted_settings: Value,
-    pub raw_model_output: Value,
-    pub confidence: f64,
-    pub confidence_components: Value,
-    pub nearest_examples: Value,
+    pub draft_id: String,
+    pub kind: String,
+    pub weight: f64,
+    pub diff: Value,
+    pub note: Option<String>,
     pub created_at: String,
-    pub status: String,
-    pub capability_schema_version: Option<String>,
-    pub cluster_id: Option<String>,
+    pub applied_to_analysis_version: Option<String>,
 }
+
+// ---------------------------------------------------------------- analysis
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewPrediction {
-    pub session_id: String,
-    pub asset_id: String,
-    pub model_version_id: String,
-    pub predicted_settings: Value,
-    pub raw_model_output: Value,
-    pub confidence: f64,
-    pub confidence_components: Value,
-    pub nearest_examples: Value,
-    #[serde(default)]
-    pub capability_schema_version: Option<String>,
-    #[serde(default)]
-    pub cluster_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApplyBatch {
+pub struct AnalysisRun {
     pub id: String,
-    pub session_id: String,
-    pub lightroom_catalog_fingerprint: Option<String>,
+    pub kind: String,
+    pub analysis_version: String,
+    pub scope: Value,
     pub started_at: String,
     pub completed_at: Option<String>,
     pub status: String,
-    pub applied_count: i64,
-    pub failed_count: i64,
-    pub rollback_available: bool,
+    pub messages_considered: i64,
+    pub profiles_written: i64,
     pub error: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppliedEdit {
-    pub id: String,
-    pub apply_batch_id: String,
-    pub prediction_id: String,
-    pub asset_id: String,
-    pub before_settings: Option<Value>,
-    pub applied_settings: Value,
-    pub lightroom_snapshot_name: Option<String>,
-    pub result: String,
-    pub error: Option<Value>,
-    pub applied_at: String,
-    pub restored_at: Option<String>,
-    pub restore_result: Option<String>,
-    pub restore_error: Option<Value>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Correction {
-    pub id: String,
-    pub asset_id: String,
-    pub prediction_id: String,
-    pub model_version_id: String,
-    pub predicted_settings: Value,
-    pub corrected_settings: Value,
-    pub delta: Value,
-    pub correction_magnitude: f64,
-    pub observed_at: String,
-    pub included_in_training_version: Option<String>,
-}
+    #[test]
+    fn phone_numbers_normalize_to_one_form() {
+        let k = IdentifierKind::Phone;
+        assert_eq!(k.normalize("+1 (555) 010-9999"), "5550109999");
+        assert_eq!(k.normalize("555-010-9999"), "5550109999");
+        assert_eq!(k.normalize("15550109999"), "5550109999");
+        // A short number keeps its leading 1 rather than being mangled.
+        assert_eq!(k.normalize("1800"), "1800");
+        // An international number that is not 11 digits is left intact.
+        assert_eq!(k.normalize("+44 20 7946 0018"), "442079460018");
+    }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CorrectionSync {
-    pub id: String,
-    pub session_id: String,
-    pub lightroom_catalog_fingerprint: Option<String>,
-    pub synced_at: String,
-    pub checked_count: i64,
-    pub untouched_count: i64,
-    pub corrected_count: i64,
-    pub unresolved_count: i64,
-}
+    #[test]
+    fn emails_and_handles_fold_case_account_ids_do_not() {
+        assert_eq!(IdentifierKind::Email.normalize("  Ada@Example.COM "), "ada@example.com");
+        assert_eq!(IdentifierKind::Handle.normalize("@AdaL"), "@adal");
+        assert_eq!(IdentifierKind::AccountId.normalize(" U01AB "), "U01AB");
+    }
 
-/// A correction joined with what the UI needs to show it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CorrectionRow {
-    #[serde(flatten)]
-    pub correction: Correction,
-    pub session_id: String,
-    pub file_name: String,
-    pub semantic_version: String,
-}
+    #[test]
+    fn identifier_kind_round_trips() {
+        for k in [
+            IdentifierKind::Email,
+            IdentifierKind::Phone,
+            IdentifierKind::Handle,
+            IdentifierKind::DisplayName,
+            IdentifierKind::AccountId,
+        ] {
+            assert_eq!(IdentifierKind::parse(k.as_str()), Some(k));
+        }
+        assert!(IdentifierKind::parse("nope").is_none());
+    }
 
-/// No-Touch Rate for one model version: applied photos the photographer left
-/// untouched after a corrections sync, over all applied photos in synced sessions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NoTouchStats {
-    pub model_version_id: String,
-    pub semantic_version: String,
-    pub applied_checked: i64,
-    pub corrected: i64,
-    pub untouched: i64,
-    /// `None` until at least one applied photo has been checked by a sync.
-    pub rate: Option<f64>,
-}
+    #[test]
+    fn unknown_direction_is_the_safe_default() {
+        assert_eq!(Direction::parse("self"), Direction::Self_);
+        assert_eq!(Direction::parse("other"), Direction::Other);
+        assert_eq!(Direction::parse("garbage"), Direction::Unknown);
+        assert_eq!(Direction::Self_.as_str(), "self");
+    }
 
-pub(crate) fn json_col(s: Option<String>) -> Option<Value> {
-    s.and_then(|s| serde_json::from_str(&s).ok())
-}
-
-pub(crate) fn json_col_or_default(s: String) -> Value {
-    serde_json::from_str(&s).unwrap_or(Value::Null)
+    #[test]
+    fn voice_layers_round_trip() {
+        for l in [VoiceLayer::Global, VoiceLayer::Channel, VoiceLayer::Relationship, VoiceLayer::Situational] {
+            assert_eq!(VoiceLayer::parse(l.as_str()), Some(l));
+        }
+        assert_eq!(VoiceLayer::parse("nope"), None);
+    }
 }

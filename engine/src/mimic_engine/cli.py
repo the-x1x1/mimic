@@ -10,19 +10,17 @@ from mimic_engine import PROTOCOL_VERSION, __version__
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="mimic-engine", description="Mimic image/ML engine sidecar")
+    parser = argparse.ArgumentParser(prog="mimic-engine", description="Mimic text/ML engine sidecar")
     parser.add_argument(
         "--version", action="version", version=f"mimic-engine {__version__} (protocol {PROTOCOL_VERSION})"
     )
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("serve", help="serve the NDJSON protocol over stdio (used by the desktop app)")
-    scan = sub.add_parser("scan", help="scan folders and print a JSON report")
-    scan.add_argument("roots", nargs="+")
-    scan.add_argument("--no-metadata", action="store_true")
-    px = sub.add_parser("parse-xmp", help="parse an XMP sidecar and print raw crs settings")
-    px.add_argument("path")
-    an = sub.add_parser("analyze", help="analyze one image and print features")
-    an.add_argument("path")
+    emb = sub.add_parser("embed", help="embed a string and print the vector")
+    emb.add_argument("text")
+    cmp_ = sub.add_parser("compare", help="compare a generated reply with a real one")
+    cmp_.add_argument("generated")
+    cmp_.add_argument("actual")
     sub.add_parser("methods", help="list protocol methods")
     args = parser.parse_args(argv)
 
@@ -30,24 +28,18 @@ def main(argv: list[str] | None = None) -> int:
         from mimic_engine.protocol.service import main_serve
 
         return main_serve()
-    if args.cmd == "scan":
-        from mimic_engine.ingest.scanner import scan_folders
+    if args.cmd == "embed":
+        from mimic_engine.embeddings.encoder import EncoderManager
 
-        report = scan_folders(args.roots, include_metadata=not args.no_metadata)
-        json.dump(report, sys.stdout, indent=2, default=str)
+        enc = EncoderManager()
+        json.dump({"status": enc.status(), "vector": [round(float(x), 6) for x in enc.embed(args.text)]}, sys.stdout)
         print()
         return 0
-    if args.cmd == "parse-xmp":
-        from mimic_engine.xmp.parser import parse_xmp_file
+    if args.cmd == "compare":
+        from mimic_engine.embeddings.encoder import EncoderManager
+        from mimic_engine.evaluation.metrics import compare
 
-        json.dump(parse_xmp_file(args.path), sys.stdout, indent=2)
-        print()
-        return 0
-    if args.cmd == "analyze":
-        from mimic_engine.features.analyze import analyze_image
-        from mimic_engine.utils.jsonutil import to_jsonable
-
-        json.dump(to_jsonable(analyze_image(args.path)), sys.stdout, indent=2)
+        json.dump(compare(args.generated, args.actual, EncoderManager()), sys.stdout, indent=2)
         print()
         return 0
     if args.cmd == "methods":

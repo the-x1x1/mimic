@@ -2,22 +2,23 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use mimic_core::bridge::BridgeHandle;
 use mimic_core::db::Db;
 use mimic_core::engine::EngineClient;
 use mimic_core::jobs::JobRunner;
 use mimic_core::paths::AppPaths;
+use mimic_core::providers::{ModelProvider, ProviderRegistry};
 
 pub struct AppState {
     pub paths: AppPaths,
     pub db: Db,
-    pub bridge: BridgeHandle,
     pub engine: EngineClient,
     pub jobs: JobRunner,
+    pub providers: RwLock<ProviderRegistry>,
+    pub secrets: Arc<crate::secrets::FileSecretStore>,
     pub started_at: String,
-    /// Repository root when running from `pnpm tauri dev` (used to find the engine + plugin sources).
+    /// Repository root when running from `pnpm tauri dev` (used to find the engine).
     pub repo_root: Option<PathBuf>,
     /// Where the bundled resources live in a packaged build.
     pub resource_dir: Option<PathBuf>,
@@ -29,22 +30,6 @@ pub struct AppState {
 pub type SharedState = Arc<AppState>;
 
 impl AppState {
-    pub fn plugin_source_dir(&self) -> Option<PathBuf> {
-        if let Some(res) = &self.resource_dir {
-            let p = res.join("plugin").join("Mimic.lrplugin");
-            if p.join("Info.lua").is_file() {
-                return Some(p);
-            }
-        }
-        if let Some(root) = &self.repo_root {
-            let p = root.join("lightroom").join("Mimic.lrplugin");
-            if p.join("Info.lua").is_file() {
-                return Some(p);
-            }
-        }
-        None
-    }
-
     pub fn manifests_dir(&self) -> Option<PathBuf> {
         if let Some(res) = &self.resource_dir {
             let p = res.join("models").join("manifests");
@@ -62,6 +47,28 @@ impl AppState {
 
     pub fn demo(&self) -> bool {
         self.demo_mode.load(Ordering::Relaxed)
+    }
+
+    /// The provider the user selected, or the safest default.
+    pub fn active_provider(&self) -> Result<Arc<dyn ModelProvider>, crate::error::CommandError> {
+        let registry = self.providers.read().unwrap_or_else(|p| p.into_inner());
+        let chosen = self.db.get_setting::<String>("generation.provider").ok().flatten();
+        let id = match chosen {
+            Some(id) => id,
+            None => registry
+                .default_id()
+                .ok_or_else(|| crate::error::CommandError::new("no_provider", "No model provider is configured."))?,
+        };
+        Ok(registry.get(&id)?)
+    }
+
+    /// Rebuild the registry from the current settings and secrets. Called at
+    /// boot and whenever a provider setting changes.
+    pub fn rebuild_providers(&self) {
+        let providers = crate::providers_config::build(&self.db, self.secrets.as_ref());
+        if let Ok(mut guard) = self.providers.write() {
+            *guard = ProviderRegistry::new(providers);
+        }
     }
 }
 

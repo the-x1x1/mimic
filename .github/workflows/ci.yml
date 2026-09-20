@@ -69,16 +69,6 @@ jobs:
       - run: cd engine && uv run ruff format --check .
       - run: cd engine && uv run pytest
 
-  plugin:
-    name: Lightroom plugin (lua syntax · json test)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y lua5.1
-      - run: for f in lightroom/Mimic.lrplugin/*.lua; do luac5.1 -p "$f"; done
-      - run: cd lightroom && lua5.1 tests/json_test.lua
-      - run: pwsh -NoProfile -File scripts/install-lightroom-plugin.ps1 -Verify
-
   security:
     name: Security (audit · secrets)
     runs-on: ubuntu-24.04
