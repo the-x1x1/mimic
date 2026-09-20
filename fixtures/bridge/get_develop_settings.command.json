@@ -1,7 +1,0 @@
-{
-  "commandId": "c-1001",
-  "commandType": "get_develop_settings",
-  "payload": {
-    "photoIds": [4021]
-  }
-}

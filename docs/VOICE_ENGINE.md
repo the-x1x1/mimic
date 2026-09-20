@@ -1,0 +1,103 @@
+# The voice engine
+
+How Mimic works out how someone writes, how those findings reach a prompt, and how any claim about accuracy would have to be earned.
+
+## Layers, not an average
+
+A person does not have one writing style. They have a default and a set of adjustments they make without thinking: longer to a client than to a brother, a full stop at the end of an email and none at the end of a text, an apology that sounds nothing like a refusal.
+
+Modelling that as one averaged profile produces a voice nobody has — the mean of "Dear Dr Okafor" and "lol ok". So Mimic computes four layers independently and resolves them outermost to innermost at generation time:
+
+| Layer            | Scope                        | Status                                             |
+| ---------------- | ---------------------------- | -------------------------------------------------- |
+| **GLOBAL**       | everything the user wrote    | implemented                                        |
+| **CHANNEL**      | per channel (email, sms, …)  | implemented                                        |
+| **RELATIONSHIP** | per person                   | implemented                                        |
+| **SITUATIONAL**  | per situation (declining, …) | schema and resolution only; nothing classifies yet |
+
+Resolution: global, then channel, then relationship, then situation, then the user's manual preferences, which beat everything. `voice::effective_metrics` folds them so the innermost layer that measured a given metric wins it, and an inner layer that measured nothing does not erase what an outer one knows.
+
+Plus, at every layer, **retrieved examples**: the user's own past messages, chosen by similarity and filtered by metadata, quoted into the prompt. A measured statistic tells the model what to aim for; an example shows it.
+
+## What is measured, and how
+
+Every metric below is arithmetic over text. No model is involved and none is needed — "how long are this person's messages" is a counting problem, and counting is both cheaper and more honest than asking a language model to estimate it. All of it lives in `crates/mimic-core/src/voice/metrics.rs`, computed in exactly one place.
+
+**Length** — `avgWordsPerMessage`, `medianWordsPerMessage`, `p90WordsPerMessage`, `avgSentencesPerMessage`, `multiParagraphRate`. A word is a whitespace-separated run containing at least one alphanumeric character, so stray punctuation does not inflate the count. The median and the p90 matter more than the mean: one long message moves the mean and tells you nothing.
+
+**Punctuation** — `terminalPeriodRate`, `questionRate`, `exclamationRate`, `ellipsisRate`. Taken from the last meaningful character, skipping trailing emoji and quotes, so "on my way. 🚀" still counts as ending with a full stop.
+
+**Capitalization** — `lowercaseStartRate` (first alphabetic character is lowercase) and `allLowercaseRate` (no uppercase anywhere). Two different habits: "yes but ONLY on Tuesday" starts lowercase and is not all-lowercase.
+
+**Emoji** — `emojiRate`: the share of messages containing at least one. Range-based detection rather than a dependency; the exact boundary matters far less than being stable.
+
+**Contractions** — `contractionsPer100Words`. An apostrophe between two letters, typewriter or typographic. A possessive `dogs'` is not one.
+
+**Greetings and sign-offs** — `greetingRate`, `signOffRate`, `topGreetings`, `topSignOffs`. A greeting is recognized only in the opening clause of the first line; a sign-off only in a final line of five words or fewer. "I said hi to her yesterday" is not a greeting, and a long closing sentence containing "thanks" is not a sign-off.
+
+**Phrases** — `topPhrases`: word 3-grams, lowercased, stopword-only grams dropped, seen at least three times. A phrase seen once is a sentence; seen three times it is a habit.
+
+**Response timing** — `medianResponseSeconds`, over messages where both timestamps exist and the reply crosses a direction boundary.
+
+### Two rules that govern all of it
+
+**Twenty messages, or nothing.** Below `MIN_SAMPLE = 20` of the user's own messages in a scope, the profile is written with its sample size and every rate `null`. Rates over a handful of messages are noise wearing a decimal point.
+
+**`null` is not zero.** `emojiRate: 0.0` means this person does not use emoji — a fact, and an instruction to the prompt. `null` means we have not seen enough to say. The distinction survives from the Rust struct through the zod schema to the rendered sentence, and there is a test at each layer that it does.
+
+## Representative examples
+
+Six per scope, chosen deterministically. A message scores well when its length is close to the scope's median and when it carries the features that scope is characterized by — a greeting if they greet, a sign-off if they sign off, a phrase they repeat. Ties break on message id, so two runs over the same corpus choose the same examples.
+
+Near-duplicates are suppressed by a normalized fingerprint: six copies of "sounds good" teach a model less than one.
+
+## Retrieval
+
+Filter first, rank second. A semantically similar message written to a different person on a different channel is the wrong example — it will teach the prompt the wrong register. So participant, channel, relationship, situation, conversation, source and date range are applied as a `WHERE` clause, and ranking only reorders what survived.
+
+Ranking in this release is lexical: how much of the incoming message's vocabulary appears in the message being answered, weighted by inverse document frequency so rare words count for more than common ones. This is a real signal and a shallow one, and it says so. `engine/src/mimic_engine/embeddings/encoder.py` exposes `lexical_v1` embeddings and reports `semantic: false`; a sentence encoder replaces the scorer behind the same `retrieve` signature in Phase 2, and nothing above that module changes.
+
+## From measurements to a prompt
+
+`generation::describe` turns numbers into instructions, and only for metrics that were measured:
+
+- `terminalPeriodRate >= 0.8` → "They end messages with a full stop."
+- `terminalPeriodRate <= 0.2` → "They usually do not put a full stop at the end."
+- in between → "They end about 34% of messages with a full stop."
+- `emojiRate <= 0.02` → "They do not use emoji. Do not add any."
+- `greetingRate <= 0.1` → "They open straight into the message, with no greeting."
+
+Then the user's manual preferences, labelled as overriding the measurements. Then up to five retrieved exchanges, marked as things to match in register and not to reuse in content. Then the recipient, their relationship and the channel. Then any adjustment the user asked for.
+
+The output token budget is derived from `p90WordsPerMessage`, so a model cannot answer a two-word texter with four paragraphs.
+
+`assemble` is a pure function of the context. The same context produces the same prompt, which is what makes `prompt_hash` meaningful and the prompt testable.
+
+## Measuring whether any of this works
+
+**There is no Mimic Score, and there will not be one until it is defined here.**
+
+The honest way to measure a voice model is the way the previous product measured an edit model, with conversations in place of shoots:
+
+1. Split the user's own replies by conversation, so no thread straddles the boundary (`eval.split`, `conversation_grouped`). A reply from a conversation the system has already seen is a memory test, not an evaluation.
+2. Hide the held-out replies. For each, rebuild the same generation context and generate.
+3. Compare generated with actual along named axes (`eval.compare`):
+   - **length** — ratio of the shorter word count to the longer;
+   - **vocabulary** — Jaccard overlap of word sets;
+   - **punctuation** — agreement across five binary habits;
+   - **embedding** — cosine similarity under the current provider, reported with the provider's name so a lexical score is never mistaken for a semantic one.
+4. Report each component and its 10th percentile. **No single headline number**, because the four components are not commensurable and averaging them would invent a quantity nobody defined.
+
+Two baselines any voice model must beat, neither yet implemented: a generic assistant reply to the same prompt, and the user's single most common phrasing. A score with no baseline is a number, not evidence.
+
+Status: the harness exists and is tested (`engine/tests/test_text.py`, `test_service.py`). The loop that drives it over a real corpus and writes `evaluations` rows does not. **Nothing in the UI currently shows an accuracy figure, because nothing has earned one.** The Voice screen shows counts, measured habits and the examples behind them; the only rate it shows is the share of drafts the user sent unedited, which is counted from `drafts` rows.
+
+## The learning loop
+
+Draft → what was actually sent → diff → weighted feedback.
+
+`generation::feedback::diff_draft` describes the difference: length direction (with a ±10% dead band, because a one-word edit is not a length preference), greeting and sign-off added or removed, emoji, terminal punctuation, and whether the draft was rewritten outright (under 30% of its words survived into a reply of three words or more).
+
+Weights encode one rule: **what the user said explicitly outranks what Mimic inferred from watching them.** A typed correction is 3.0; an inferred edit is 1.0.
+
+What the loop deliberately does not do yet is change a profile. That is Phase 3, and the discipline it will inherit is the one the corrections system earned in the previous product: a pattern counts only when at least three observations agree on a direction and account for the majority of the magnitude. One person deleting one greeting does not mean they never greet.

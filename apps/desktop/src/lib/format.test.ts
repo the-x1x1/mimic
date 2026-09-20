@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatRelative, formatShutter, truncateMiddle } from "./format";
+import { countOf, formatBytes, formatRelative, truncateMiddle } from "./format";
 
 describe("format helpers", () => {
   it("bytes", () => {
@@ -14,9 +14,10 @@ describe("format helpers", () => {
     expect(formatRelative("2026-09-16T11:30:00Z", now)).toBe("30 min ago");
     expect(formatRelative("2026-09-15T12:00:00Z", now)).toBe("1 d ago");
   });
-  it("shutter and truncation", () => {
-    expect(formatShutter(1 / 200)).toBe("1/200");
-    expect(formatShutter(2.5)).toBe("2.5s");
+  it("counts and truncation", () => {
+    expect(countOf(1, "message")).toBe("1 message");
+    expect(countOf(0, "message")).toBe("0 messages");
+    expect(countOf(2400, "person", "people")).toBe("2,400 people");
     expect(truncateMiddle("abcdefghijklmnop", 9)).toBe("abcd…mnop");
   });
 });

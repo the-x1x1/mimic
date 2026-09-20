@@ -43,27 +43,11 @@ export const JobEvent = z.object({
 export type JobEvent = z.infer<typeof JobEvent>;
 
 export const JOB_KINDS = {
-  scanLibrary: "scan_library",
-  ingestLightroom: "ingest_lightroom",
-  analyzeLibrary: "analyze_library",
-  trainStyle: "train_style",
-  ingestSession: "ingest_session",
-  groupSession: "group_session",
-  predictSession: "predict_session",
-  applySession: "apply_session",
-  restoreBatch: "restore_batch",
-  syncCorrections: "sync_corrections",
+  importSource: "import_source",
+  analyzeVoice: "analyze_voice",
 } as const;
 
 export const JOB_LABELS: Record<string, string> = {
-  scan_library: "Scanning folder library",
-  ingest_lightroom: "Capturing from Lightroom",
-  analyze_library: "Analyzing photos",
-  train_style: "Training Style Brain",
-  ingest_session: "Ingesting session",
-  group_session: "Grouping scenes",
-  predict_session: "Predicting edits",
-  apply_session: "Applying to Lightroom",
-  restore_batch: "Restoring from before-state",
-  sync_corrections: "Syncing corrections from Lightroom",
+  import_source: "Importing messages",
+  analyze_voice: "Analyzing how you write",
 };

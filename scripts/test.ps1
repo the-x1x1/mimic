@@ -27,10 +27,4 @@ Run "cargo test" cargo @("test", "--workspace")
 Run "ruff check" uv @("run", "ruff", "check", ".") "engine"
 Run "ruff format" uv @("run", "ruff", "format", "--check", ".") "engine"
 Run "pytest" uv @("run", "pytest") "engine"
-Write-Host "`n== lua plugin syntax + json test" -ForegroundColor Cyan
-& (Join-Path $PSScriptRoot "test-plugin.ps1")
-if (-not $Quick) {
-  Write-Host "`n== plugin package integrity" -ForegroundColor Cyan
-  & (Join-Path $PSScriptRoot "install-lightroom-plugin.ps1") -Verify
-}
 Write-Host "`nAll green." -ForegroundColor Green

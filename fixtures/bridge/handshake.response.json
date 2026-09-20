@@ -1,9 +1,0 @@
-{
-  "ok": true,
-  "protocolVersion": 1,
-  "appVersion": "0.1.0-alpha.1",
-  "sessionId": "b6b1a8f0-6c1e-4f2e-9c7a-1d5a0e3f2b11",
-  "pollIntervalMs": 1000,
-  "maxBatchSize": 25,
-  "accepted": true
-}

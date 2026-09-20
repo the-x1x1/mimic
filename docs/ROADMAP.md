@@ -1,27 +1,69 @@
-# ROADMAP — future work only
+# Roadmap
 
-Completed work lives in CHANGELOG.md and PROJECT_STATUS.md, never here.
+Phases, not dates. A phase is complete when its rows in `docs/PROJECT_STATUS.md` say `IMPLEMENTED` and name the test that proves it.
 
-## 0.5.x — Lightroom QA and polish
+## Phase 0 — Migration · COMPLETE (0.6.0-alpha.1)
 
-- Real-Lightroom QA of the plugin apply/restore/sync path and the capability matrix on current Lightroom Classic (fake-plugin coverage exists; real-catalog behaviour does not).
-- Review filter for “corrected” photos.
-- Weighting of correction pairs in training (today corrections join the dataset as ordinary pairs).
-- Burst editing (bursts are detected and shown; they cannot be split or merged separately from groups).
-- Preview-cache size enforcement (setting exists since 0.1).
-- Per-apply-batch item table in the UI (today: counts + Restore; per-photo outcome lives in the photo panel).
+Retire the photography product; keep the infrastructure that was worth five releases of hardening. Audit first (`docs/MIGRATION_AUDIT.md`), archive selectively, delete the rest, then build.
 
-## 0.6.0 — Adaptive local editing research (capability-gated)
+## Phase 1 — Mimic Core · PARTIAL (0.6.0-alpha.1)
 
-- Investigate mask/local data exposure on current Lightroom; formal adapter; beta only on tested versions; never reconstruct masks from opaque ACR data.
+The end-to-end path: import messages, learn how the user writes, draft a reply.
 
-## 0.7.0 — Style portability + commercial polish
+Done: schema v5; the source-connector contract with two real connectors; the streaming import with identity resolution, dedupe, cancellation and resume; the layered voice engine with deterministic metrics and representative examples; metadata-filtered retrieval; the generation context builder and prompt assembler; the model-provider abstraction with local and hosted providers; real cascading deletion; the five-screen UI; the draft/feedback record.
 
-- Export/import Style packages (models + schema metadata, no photos), signed manifests, backup/restore, macOS.
+Not done, and the reason each is not just an oversight:
 
-## Ongoing
+- **Situational classification.** The tables exist; nothing writes to them. This is the first place a language model is genuinely needed rather than convenient, and it needs a defined situation vocabulary before it is worth building.
+- **Analysis streams rather than materializing.** A scope's messages are currently loaded into memory before metrics are computed. Fine at a hundred thousand; not at a million.
+- **Embeddings are lexical.** `lexical_v1` is honest about what it is and reports `semantic: false`. It is a real improvement over exact match and it is not semantic similarity.
 
-- Replace the development updater key before the first non-alpha release; commercial code signing when certificates exist.
-- ONNX image encoder manifest (pinned, SHA-256) with first-run verified download and DirectML acceleration.
-- DNG embedded-XMP reading for sidecar-less DNGs.
-- Light theme review.
+## Phase 2 — Voice intelligence
+
+Make the model of the person better, not the prompt longer.
+
+- A pinned sentence encoder behind the existing manifest mechanism; `message_embeddings` populated in a background job; retrieval's scorer swapped behind the same signature.
+- Situation classification — declining, scheduling, apologising, thanking, explaining, disagreeing — with the situational layer resolved into generation.
+- Qualitative interpretation: the one genuinely semantic thing a model should do here, turning measured statistics into a description of register that a prompt can use.
+- Streaming analysis; incremental recomputation of only the scopes a new import touched.
+- Credentials moved to DPAPI on Windows and Keychain/Secret Service elsewhere.
+
+## Phase 3 — The learning loop closes
+
+- The feedback already recorded starts changing profiles, at the threshold the previous product earned: a pattern counts only when at least three observations agree on a direction and account for the majority of the magnitude.
+- Manual preferences get a first-class editor on the Voice screen rather than living only in the API.
+- The held-out evaluation runs over a real corpus and writes `evaluations` rows, with both baselines implemented: a generic assistant reply, and the user's most common phrasing. Until then no accuracy figure appears anywhere in the UI.
+
+## Phase 4 — Connectors
+
+- IMAP, so mail arrives without an export.
+- Platform exports: iMessage, WhatsApp, Signal, Slack, Discord.
+- Incremental sync with a watermark, rather than a full re-read.
+
+## Phase 5 — Reply assistant
+
+- A conversation view, so Compose can be opened from a thread rather than by pasting.
+- Multiple drafts side by side.
+- Per-situation templates derived from the user's own patterns.
+
+## Phase 6 — Assisted automation (ASSISTED mode)
+
+Mimic watches a connected inbox, notices what it could answer, and prepares drafts in advance. The user still sends every one.
+
+## Phase 7 — Trusted mode
+
+Designed, deliberately not scheduled. See `docs/PRODUCT.md`. The blocker is not implementation.
+
+## Phase 8 — Advanced personalization
+
+- Drift over time: how the user's voice has changed, and which period to write like.
+- Multiple personas for one person, where the channel and relationship layers are not enough.
+- Group-conversation dynamics.
+
+## Carried over from Phase 0
+
+Small things the migration left behind, listed so they are not lost:
+
+- `apps/desktop/src-tauri/icons/` still holds the photography icon set.
+- The nightly smoke workflow was rewritten but has never been observed running.
+- macOS is still unbuilt; nothing in the new code is Windows-specific, but nothing has been tested there either.

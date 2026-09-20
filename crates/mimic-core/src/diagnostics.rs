@@ -1,5 +1,5 @@
-//! Diagnostics bundle (spec §28). Contains no tokens and, unless the user
-//! opts in, no full user paths.
+//! Diagnostics bundle. Contains no credentials, no message bodies and,
+//! unless the user opts in, no full user paths.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -16,7 +16,7 @@ pub struct DiagnosticsBundle {
     pub db_schema_version: i64,
     pub table_counts: Vec<(String, i64)>,
     pub engine: Value,
-    pub bridge: Value,
+    pub providers: Value,
     pub update_state: Value,
     pub recent_errors: Vec<Value>,
     pub job_summaries: Vec<Value>,
@@ -26,7 +26,7 @@ pub struct DiagnosticsBundle {
 pub fn build_bundle(
     db: &Db,
     engine: Value,
-    bridge: Value,
+    providers: Value,
     include_paths: bool,
 ) -> Result<DiagnosticsBundle, crate::db::DbError> {
     let recent_errors = db
@@ -60,8 +60,10 @@ pub fn build_bundle(
             })
         })
         .collect();
-    let mut bridge = bridge;
-    strip_key(&mut bridge, "token");
+    let mut providers = providers;
+    for secret in ["token", "apiKey", "api_key", "password", "secret"] {
+        strip_key(&mut providers, secret);
+    }
     Ok(DiagnosticsBundle {
         generated_at: crate::ids::now_rfc3339(),
         app_version: crate::APP_VERSION.to_string(),
@@ -70,7 +72,7 @@ pub fn build_bundle(
         db_schema_version: db.schema_version()?,
         table_counts: db.table_counts()?,
         engine,
-        bridge,
+        providers,
         update_state: serde_json::to_value(db.update_state()?)?,
         recent_errors,
         job_summaries,
@@ -115,23 +117,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundle_has_no_token_and_redacts_paths() {
+    fn bundle_has_no_credentials_and_redacts_paths() {
         let db = Db::open_in_memory().unwrap();
-        db.log_event(&crate::db::NewEvent::error("engine", "boom", json!({"path": "D:\\Photos\\Wedding\\IMG_1.CR3"})))
-            .unwrap();
+        db.log_event(&crate::db::NewEvent::error(
+            "engine",
+            "boom",
+            json!({"path": "D:\\Exports\\Mailbox\\inbox.mbox"}),
+        ))
+        .unwrap();
         let bundle = build_bundle(
             &db,
             json!({"state": "ready"}),
-            json!({"token": "secret", "connection": {"token": "x", "catalogFingerprint": "c"}}),
+            json!({"active": "local", "credentials": {"apiKey": "secret", "nested": {"token": "x"}}}),
             false,
         )
         .unwrap();
         let text = serde_json::to_string(&bundle).unwrap();
         assert!(!text.contains("secret"));
-        assert!(!text.contains("D:\\\\Photos"));
-        assert!(text.contains("<path>/IMG_1.CR3"));
+        assert!(!text.contains("D:\\\\Exports"));
+        assert!(text.contains("<path>/inbox.mbox"));
         assert_eq!(bundle.app_version, crate::APP_VERSION);
         let with_paths = build_bundle(&db, json!({}), json!({}), true).unwrap();
-        assert!(serde_json::to_string(&with_paths).unwrap().contains("Wedding"));
+        assert!(serde_json::to_string(&with_paths).unwrap().contains("Mailbox"));
     }
 }

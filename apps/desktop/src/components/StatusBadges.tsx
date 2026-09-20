@@ -1,39 +1,32 @@
 import { Badge } from "@mimic/ui";
-import { Cable, Cpu, Download } from "lucide-react";
-import type { BridgeStatus, EngineStatus, UpdateState } from "@mimic/contracts";
+import type { EngineStatus, ProviderInfo, UpdateState } from "@mimic/contracts";
 
-export function ConnectionBadge({ status }: { status: BridgeStatus | undefined }) {
-  if (!status) return <Badge>Lightroom · …</Badge>;
-  if (status.connected && status.connection) {
-    return (
-      <Badge
-        tone="success"
-        title={`Lightroom ${status.connection.lightroomVersion} · ${status.connection.catalogName ?? "catalog"}`}
-      >
-        <Cable size={12} /> Lightroom connected
-      </Badge>
-    );
-  }
+export function EngineBadge({ status }: { status: EngineStatus | undefined }) {
+  if (!status) return null;
+  const tone =
+    status.state === "ready" ? "success" : status.state === "failed" ? "danger" : "neutral";
+  const label =
+    status.state === "ready"
+      ? "Engine ready"
+      : status.state === "failed"
+        ? "Engine unavailable"
+        : "Engine starting";
   return (
-    <Badge tone="neutral" title="Open Lightroom Classic with the Mimic plugin enabled">
-      <Cable size={12} /> Lightroom offline
+    <Badge tone={tone} title={status.lastError ?? undefined}>
+      {label}
     </Badge>
   );
 }
 
-export function EngineBadge({ status }: { status: EngineStatus | undefined }) {
-  if (!status) return <Badge>Engine · …</Badge>;
-  const tone =
-    status.state === "ready" ? "success" : status.state === "starting" ? "info" : "danger";
-  const label =
-    status.state === "ready"
-      ? `Engine ready${status.accelerator && status.accelerator !== "cpu" ? ` · ${status.accelerator}` : ""}`
-      : status.state === "starting"
-        ? "Engine starting"
-        : "Engine unavailable";
+/**
+ * Where drafts are written. This is a privacy fact, so it is in the top bar
+ * rather than buried in Settings.
+ */
+export function ProviderBadge({ provider }: { provider: ProviderInfo | undefined }) {
+  if (!provider) return <Badge tone="warning">No model configured</Badge>;
   return (
-    <Badge tone={tone} title={status.lastError ?? status.engineVersion ?? ""}>
-      <Cpu size={12} /> {label}
+    <Badge tone={provider.local ? "success" : "warning"} title={provider.description}>
+      {provider.local ? "Local model" : `Sends to ${provider.displayName}`}
     </Badge>
   );
 }
@@ -43,19 +36,12 @@ export function UpdateBadge({
   onClick,
 }: {
   state: UpdateState | undefined;
-  onClick?: () => void;
+  onClick: () => void;
 }) {
-  if (
-    !state?.stagedVersion &&
-    !(state?.latestSeenVersion && state.lastUpdateResult === "available")
-  )
-    return null;
-  const v = state.stagedVersion ?? state.latestSeenVersion;
+  if (!state?.latestSeenVersion || state.latestSeenVersion === state.currentVersion) return null;
   return (
-    <button className="badge-button" onClick={onClick} title="Open update settings">
-      <Badge tone="accent">
-        <Download size={12} /> {state.stagedVersion ? `Update ${v} ready` : `Update ${v} available`}
-      </Badge>
+    <button type="button" className="badge-button" onClick={onClick}>
+      <Badge tone="info">Update {state.latestSeenVersion} available</Badge>
     </button>
   );
 }

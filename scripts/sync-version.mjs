@@ -9,7 +9,7 @@
  * Kept in sync: apps/desktop/package.json, packages/*\/package.json,
  * apps/desktop/src-tauri/tauri.conf.json, Cargo.toml [workspace.package],
  * engine/pyproject.toml + engine/src/mimic_engine/__init__.py (PEP 440 form),
- * lightroom/Mimic.lrplugin/Info.lua + Version.lua, CHANGELOG heading check.
+ * CHANGELOG heading check.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -97,21 +97,10 @@ editFile("engine/src/mimic_engine/__init__.py", (t) => {
   const re = /(__version__ = ")([^"]+)(")/;
   return re.test(t) ? t.replace(re, `$1${pep440(version)}$3`) : null;
 });
-editFile("lightroom/Mimic.lrplugin/Version.lua", (t) => {
-  const re = /(version = ")([^"]+)(")/;
-  return re.test(t) ? t.replace(re, `$1${version}$3`) : null;
-});
-editFile("lightroom/Mimic.lrplugin/Info.lua", (t) => {
-  const re = /VERSION = \{[^}]*\}/;
-  if (!re.test(t)) return null;
-  const build = pre ? Number((/(\d+)$/.exec(pre) ?? [0, 0])[1]) : 0;
-  return t.replace(
-    re,
-    `VERSION = { major = ${major}, minor = ${minor}, revision = ${patch}, build = ${build}, display = "${version}" }`,
-  );
-});
 editFile("crates/mimic-core/src/version.rs", (t) => {
-  // MIN_PLUGIN_VERSION is a policy value, not synced; only assert the file exists.
+  // APP_VERSION comes from Cargo; ANALYSIS_VERSION is a policy value that
+  // changes only when the voice metrics change. Neither is synced here — this
+  // entry exists so a missing file is caught.
   return t;
 });
 

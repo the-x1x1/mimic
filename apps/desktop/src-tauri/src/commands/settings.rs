@@ -10,15 +10,14 @@ pub fn defaults() -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("general.theme".into(), json!("dark"));
     m.insert("performance.workerConcurrency".into(), json!(2));
-    m.insert("performance.accelerator".into(), json!("auto"));
-    m.insert("performance.previewCacheMaxMb".into(), json!(2048));
-    m.insert("performance.inferenceBatchSize".into(), json!(32));
     m.insert("privacy.networkFeatures".into(), json!(false));
     m.insert("updates.channel".into(), json!("stable"));
     m.insert("updates.automatic".into(), json!(true));
     m.insert("diagnostics.includePaths".into(), json!(false));
-    m.insert("review.highThreshold".into(), json!(0.8));
-    m.insert("review.mediumThreshold".into(), json!(0.6));
+    m.insert("generation.provider".into(), json!("local"));
+    m.insert("generation.localUrl".into(), json!(crate::providers_config::DEFAULT_LOCAL_URL));
+    m.insert("generation.localModel".into(), json!(crate::providers_config::DEFAULT_LOCAL_MODEL));
+    m.insert("generation.anthropicModel".into(), json!(crate::providers_config::DEFAULT_ANTHROPIC_MODEL));
     m.insert("onboarding.completed".into(), json!(false));
     m
 }
@@ -59,6 +58,9 @@ pub async fn set_setting(
         let mut st = state.db.update_state()?;
         st.channel = value.as_str().unwrap_or("stable").to_string();
         state.db.save_update_state(&st)?;
+    }
+    if key.starts_with("generation.") {
+        state.rebuild_providers();
     }
     get_settings(state).await
 }

@@ -1,6 +1,6 @@
 [package]
 name = "mimic-core"
-description = "Mimic native core: database, contracts, Lightroom bridge, engine sidecar protocol, jobs."
+description = "Mimic native core: database, communication sources, import, voice engine, retrieval, generation, model providers, jobs."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -22,13 +22,10 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 rusqlite.workspace = true
-axum.workspace = true
-tower.workspace = true
-tower-http.workspace = true
 rand.workspace = true
 sha2.workspace = true
 hex.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-reqwest.workspace = true

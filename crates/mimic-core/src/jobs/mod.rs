@@ -27,8 +27,8 @@ pub enum JobError {
     Db(#[from] crate::db::DbError),
     #[error("engine: {0}")]
     Engine(#[from] crate::engine::EngineError),
-    #[error("bridge: {0}")]
-    Bridge(#[from] crate::bridge::BridgeError),
+    #[error("source: {0}")]
+    Source(#[from] crate::sources::SourceError),
 }
 
 impl JobError {
@@ -38,7 +38,7 @@ impl JobError {
             JobError::Canceled => "canceled",
             JobError::Db(_) => "database",
             JobError::Engine(_) => "engine",
-            JobError::Bridge(_) => "lightroom",
+            JobError::Source(_) => "source",
         };
         json!({"code": code, "message": self.to_string()})
     }

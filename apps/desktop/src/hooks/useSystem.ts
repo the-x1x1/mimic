@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { JOB_LABELS } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { events } from "@/lib/events";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
-import { JOB_LABELS } from "@mimic/contracts";
 
 export function useAppInfo() {
   return useQuery({ queryKey: qk.appInfo, queryFn: ipc.appInfo, staleTime: Infinity });
@@ -31,12 +31,9 @@ export function useNativeEventBridge() {
       events.onJob((ev) => {
         qc.invalidateQueries({ queryKey: qk.jobs });
         if (ev.status === "completed" || ev.status === "failed" || ev.status === "canceled") {
-          qc.invalidateQueries({ queryKey: qk.libraries });
-          qc.invalidateQueries({ queryKey: qk.styles });
-          qc.invalidateQueries({ queryKey: qk.system });
-          qc.invalidateQueries({ queryKey: ["report"] });
-          qc.invalidateQueries({ queryKey: ["libraryAssets"] });
-          qc.invalidateQueries({ queryKey: ["style"] });
+          for (const key of [qk.sources, qk.people, qk.voice, qk.system, qk.onboarding]) {
+            qc.invalidateQueries({ queryKey: key });
+          }
           const label = JOB_LABELS[ev.type] ?? ev.type;
           if (ev.status === "completed") toast.success(`${label} finished`);
           else if (ev.status === "failed") toast.danger(`${label} failed`, ev.message ?? undefined);
@@ -44,28 +41,9 @@ export function useNativeEventBridge() {
         }
       }),
     );
-    unsubs.push(
-      events.onLightroom((ev) => {
-        qc.invalidateQueries({ queryKey: qk.lightroom });
-        qc.invalidateQueries({ queryKey: qk.capabilities });
-        qc.invalidateQueries({ queryKey: qk.system });
-        if (ev.type === "connected")
-          toast.success(
-            "Lightroom Classic connected",
-            `${ev.connection.catalogName ?? "Catalog"} · Lightroom ${ev.connection.lightroomVersion}`,
-          );
-        if (ev.type === "disconnected") toast.warning("Lightroom disconnected", ev.reason);
-      }),
-    );
     unsubs.push(events.onEngineStatus(() => qc.invalidateQueries({ queryKey: qk.system })));
-    unsubs.push(
-      events.onEngineEvent((ev) => {
-        if (ev.event === "engine.exited")
-          toast.warning("Analysis engine stopped", "Mimic will restart it automatically.");
-      }),
-    );
     return () => {
-      for (const p of unsubs) p.then((u) => u()).catch(() => {});
+      for (const u of unsubs) void u.then((fn) => fn());
     };
   }, [qc]);
 }

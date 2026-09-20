@@ -1,21 +1,19 @@
+import { useEffect } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Button, EmptyState } from "@mimic/ui";
 import { queryClient } from "./queryClient";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { AppShell } from "@/components/AppShell";
-import { HomePage } from "@/features/home/HomePage";
-import { StylesPage } from "@/features/styles/StylesPage";
-import { StyleDetailPage } from "@/features/styles/StyleDetailPage";
-import { SessionsPage } from "@/features/sessions/SessionsPage";
-import { SessionDetailPage } from "@/features/sessions/SessionDetailPage";
-import { ReviewPage } from "@/features/review/ReviewPage";
+import { ComposePage } from "@/features/compose/ComposePage";
+import { PeoplePage } from "@/features/people/PeoplePage";
+import { VoicePage } from "@/features/voice/VoicePage";
+import { SourcesPage } from "@/features/sources/SourcesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { OnboardingFlow } from "@/features/onboarding/OnboardingFlow";
 import { useOnboardingState, useSettings } from "@/hooks/useSystem";
 import { useUpdater } from "@/features/updater/useUpdater";
 import { isTauri } from "@/lib/tauri";
-import { useEffect } from "react";
 
 function ThemeSync() {
   const settings = useSettings();
@@ -64,12 +62,10 @@ function Gate() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/styles" element={<StylesPage />} />
-        <Route path="/styles/:styleId" element={<StyleDetailPage />} />
-        <Route path="/sessions" element={<SessionsPage />} />
-        <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
-        <Route path="/review" element={<ReviewPage />} />
+        <Route path="/" element={<ComposePage />} />
+        <Route path="/people" element={<PeoplePage />} />
+        <Route path="/voice" element={<VoicePage />} />
+        <Route path="/sources" element={<SourcesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

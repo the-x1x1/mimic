@@ -1,9 +1,10 @@
 pub mod app;
+pub mod compose;
 pub mod diagnostics;
 pub mod jobs;
-pub mod libraries;
-pub mod lightroom;
-pub mod sessions;
+pub mod people;
+pub mod providers;
 pub mod settings;
-pub mod styles;
+pub mod sources;
 pub mod updater;
+pub mod voice;

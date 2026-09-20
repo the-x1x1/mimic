@@ -1,8 +1,8 @@
 {
   "name": "mimic-workspace",
-  "version": "0.5.0-alpha.1",
+  "version": "0.6.0-alpha.1",
   "private": true,
-  "description": "Mimic — teach Lightroom Classic your editing habits. Formicaria product family.",
+  "description": "Mimic \u2014 drafts that sound like you. Formicaria product family.",
   "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=22.12.0",
@@ -19,8 +19,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "sync-version": "node scripts/sync-version.mjs",
-    "verify-version": "node scripts/sync-version.mjs --check",
-    "contracts:fixtures": "pnpm --filter @mimic/contracts test"
+    "verify-version": "node scripts/sync-version.mjs --check"
   },
   "devDependencies": {
     "prettier": "^3.6.2"

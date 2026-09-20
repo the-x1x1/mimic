@@ -1,0 +1,293 @@
+{
+  "channel": "chat",
+  "conversations": [
+    {
+      "id": "thread-ada",
+      "subject": "Quarterly deck",
+      "messages": [
+        {
+          "id": "a1",
+          "sentAt": "2026-01-05T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "morning! can you send the quarterly deck when you get a sec"
+        },
+        {
+          "id": "a2",
+          "sentAt": "2026-01-05T09:04:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "yeah sending it over in a bit"
+        },
+        {
+          "id": "a3",
+          "sentAt": "2026-01-06T10:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "did the numbers change much"
+        },
+        {
+          "id": "a4",
+          "sentAt": "2026-01-06T10:03:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "not really, let me know if you want the breakdown"
+        },
+        {
+          "id": "a5",
+          "sentAt": "2026-01-07T11:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "are you free tuesday for a call"
+        },
+        {
+          "id": "a6",
+          "sentAt": "2026-01-07T11:02:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "tuesday works, 2pm suits me"
+        },
+        {
+          "id": "a7",
+          "sentAt": "2026-01-08T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "anything from the board meeting"
+        },
+        {
+          "id": "a8",
+          "sentAt": "2026-01-08T09:05:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "nothing urgent, let me know if that changes"
+        },
+        {
+          "id": "a9",
+          "sentAt": "2026-01-09T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "can you review the appendix"
+        },
+        {
+          "id": "a10",
+          "sentAt": "2026-01-09T09:06:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "sure, i'll take a look this afternoon"
+        },
+        {
+          "id": "a11",
+          "sentAt": "2026-01-10T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "any luck with the appendix"
+        },
+        {
+          "id": "a12",
+          "sentAt": "2026-01-10T09:02:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "yeah looks fine to me"
+        },
+        {
+          "id": "a13",
+          "sentAt": "2026-01-11T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "do we need a second reviewer"
+        },
+        {
+          "id": "a14",
+          "sentAt": "2026-01-11T09:07:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "probably not, let me know if you disagree"
+        },
+        {
+          "id": "a15",
+          "sentAt": "2026-01-12T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "sending the invite now"
+        },
+        {
+          "id": "a16",
+          "sentAt": "2026-01-12T09:01:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "got it thanks"
+        },
+        {
+          "id": "a17",
+          "sentAt": "2026-01-13T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "moving the call to wednesday, ok?"
+        },
+        {
+          "id": "a18",
+          "sentAt": "2026-01-13T09:04:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "wednesday works fine"
+        },
+        {
+          "id": "a19",
+          "sentAt": "2026-01-14T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "one more thing on the forecast"
+        },
+        {
+          "id": "a20",
+          "sentAt": "2026-01-14T09:09:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "go on, i'm listening"
+        },
+        {
+          "id": "a21",
+          "sentAt": "2026-01-15T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "the growth line looks optimistic"
+        },
+        {
+          "id": "a22",
+          "sentAt": "2026-01-15T09:03:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "agreed, i'll pull it back a bit"
+        },
+        {
+          "id": "a23",
+          "sentAt": "2026-01-16T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "much better, thanks"
+        },
+        {
+          "id": "a24",
+          "sentAt": "2026-01-16T09:02:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "no problem, let me know if anything else comes up"
+        },
+        {
+          "id": "a25",
+          "sentAt": "2026-01-17T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "are we still on for wednesday"
+        },
+        {
+          "id": "a26",
+          "sentAt": "2026-01-17T09:01:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "yep still on"
+        },
+        {
+          "id": "a27",
+          "sentAt": "2026-01-18T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "who else is joining"
+        },
+        {
+          "id": "a28",
+          "sentAt": "2026-01-18T09:05:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "just us i think, let me know if you want bob there"
+        },
+        {
+          "id": "a29",
+          "sentAt": "2026-01-19T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "no need"
+        },
+        {
+          "id": "a30",
+          "sentAt": "2026-01-19T09:02:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "sounds good to me"
+        },
+        {
+          "id": "a31",
+          "sentAt": "2026-01-20T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "here's the final version"
+        },
+        {
+          "id": "a32",
+          "sentAt": "2026-01-20T09:04:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "looks great, let me know when it goes out"
+        },
+        {
+          "id": "a33",
+          "sentAt": "2026-01-21T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "sent"
+        },
+        {
+          "id": "a34",
+          "sentAt": "2026-01-21T09:03:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "nice one"
+        },
+        {
+          "id": "a35",
+          "sentAt": "2026-01-22T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "board liked it"
+        },
+        {
+          "id": "a36",
+          "sentAt": "2026-01-22T09:06:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "glad to hear it, let me know if they want a follow up"
+        },
+        {
+          "id": "a37",
+          "sentAt": "2026-01-23T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "they might"
+        },
+        {
+          "id": "a38",
+          "sentAt": "2026-01-23T09:01:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "fine by me"
+        },
+        {
+          "id": "a39",
+          "sentAt": "2026-01-24T09:00:00Z",
+          "from": { "name": "Ada Lovelace", "email": "ada@example.com" },
+          "body": "thanks for all the help this month"
+        },
+        {
+          "id": "a40",
+          "sentAt": "2026-01-24T09:08:00Z",
+          "from": { "name": "C", "email": "c@example.com" },
+          "body": "any time, let me know what's next"
+        }
+      ]
+    },
+    {
+      "id": "thread-bob",
+      "subject": "Pub",
+      "channel": "sms",
+      "messages": [
+        {
+          "id": "b1",
+          "sentAt": "2026-01-25T18:00:00Z",
+          "from": { "name": "Bob", "phone": "+1 (555) 010-2222" },
+          "body": "pub friday?"
+        },
+        {
+          "id": "b2",
+          "sentAt": "2026-01-25T18:02:00Z",
+          "from": { "name": "C", "phone": "555-010-1111" },
+          "body": "yeah im in"
+        },
+        {
+          "id": "b3",
+          "sentAt": "2026-01-25T18:10:00Z",
+          "from": { "name": "Bob", "phone": "5550102222" },
+          "body": "7?"
+        },
+        {
+          "id": "b4",
+          "sentAt": "2026-01-25T18:11:00Z",
+          "from": { "name": "C", "phone": "+15550101111" },
+          "body": "works"
+        }
+      ]
+    },
+    {
+      "id": "thread-unknown",
+      "messages": [
+        {
+          "id": "u1",
+          "sentAt": "2026-01-26T09:00:00Z",
+          "from": { "name": "A ghost" },
+          "body": "who wrote this"
+        }
+      ]
+    }
+  ]
+}

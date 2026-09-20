@@ -1,58 +1,71 @@
 # Architecture
 
+One desktop application, three processes' worth of code, one SQLite file.
+
 ```
-┌────────────────────────── Mimic desktop (Tauri 2) ──────────────────────────┐
-│  React/TS UI ── typed IPC (zod) ── Rust shell (apps/desktop/src-tauri)       │
-│                                        │                                     │
-│                              mimic-core (crates/mimic-core)                  │
-│      ┌──────────┬──────────┬───────────┼───────────┬──────────────┐          │
-│      db (SQLite) jobs      edit_dna    capability  diagnostics   ingest      │
-│      └──────────┴──────────┴───────────┴───────────┴──────────────┘          │
-│            │                       │                        │                │
-│   %LOCALAPPDATA%\Formicaria\Mimic  │ bridge (127.0.0.1)     │ engine client  │
-│   data/ cache/ models/ logs/ ...   │ token + long-poll      │ NDJSON stdio   │
-└────────────────────────────────────┼────────────────────────┼────────────────┘
-                                     │                        │
-                        Lightroom Classic + Mimic.lrplugin   mimic-engine (Python)
-                        (Lua, official SDK only)             scan · xmp · raw · features
+┌─ apps/desktop ──────────────────────────────────────────────────┐
+│  React 19 + Vite + TanStack Query                               │
+│  Compose · People · Voice · Sources · Settings                  │
+│         ↕ typed IPC, every payload zod-validated (lib/ipc.ts)   │
+│  Tauri 2 shell (Rust): commands, secrets, updater, logging      │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+┌─ crates/mimic-core ──────┴──────────────────────────────────────┐
+│  db          SQLite, forward-only migrations, backup on upgrade │
+│  sources     CommunicationSource connectors (mbox, mimic_json)  │
+│  import      streaming import, identity resolution, dedupe      │
+│  voice       deterministic metrics, layered profiles, examples  │
+│  retrieval   metadata-filtered, ranked candidate exchanges      │
+│  generation  context builder → prompt assembler → draft         │
+│  providers   ModelProvider trait: local HTTP, Anthropic, mock   │
+│  privacy     cascading deletion and rebuild                     │
+│  jobs        persistent queue, progress, cancellation, recovery │
+│  engine      NDJSON sidecar client                              │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ NDJSON over stdio
+┌─ engine (Python) ────────┴──────────────────────────────────────┐
+│  text embeddings · similarity · held-out evaluation             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Processes and trust
+## Why this shape
 
-- **Rust shell** (trusted): owns the database, job queue, bridge server, engine child, updater state, discovery file. All filesystem writes happen here or in the engine's own cache directories.
-- **Frontend** (untrusted-ish webview): talks only through `invoke` commands enumerated in `lib.rs`; every response is zod-validated (`packages/contracts`). No direct FS access except the asset protocol scoped to the app data folder for previews.
-- **Engine** (child process): spawned with an argument array, never a shell string. Reads the same SQLite database read-only (`file:…?mode=ro`) for training and prediction; writes only under `cache/` and `models/`. Speaks NDJSON on stdio; messages above 32 MiB are rejected and the child restarted.
-- **Lightroom plugin** (runs inside Lightroom): polls the bridge; executes a fixed command set with SDK calls; never touches the `.lrcat`, XMP, or pixels.
+**Rust holds the domain.** Import, voice metrics, retrieval filtering, prompt assembly and deletion are all in `mimic-core`, which has no Tauri dependency and is therefore testable headlessly in CI. The shell is thin: it resolves paths, owns the credential store, maps errors to `{code, message}`, and forwards events.
 
-## Data flow: historical ingest
+**Python holds only what numpy is better at.** In this release that is text embeddings, similarity ranking and the evaluation harness. It is a sidecar rather than a library because an ML dependency tree should not be able to take the application down with it, and because the restart-and-recover machinery already exists and is tested.
 
-1. UI creates a library (folder or Lightroom) and a Style, enqueues `scan_library` or `ingest_lightroom`.
-2. `JobRunner` marks it running, heart-beats, and calls the executor (`ingest::IngestExecutor`).
-3. Folder path: engine `scan.folder` → assets + sidecars; per XMP `xmp.parse` (skipped when the sidecar hash is unchanged and a snapshot exists) → `edit_dna::normalize` in Rust → `edit_snapshots` row with `normalized_settings_json`, `raw_settings_json`, `unknown_settings_json`, `mapping_version`.
-4. Lightroom path: bridge `get_selected_photos` → per 25 photos `get_develop_settings` → normalize → snapshot with `capability_schema_version` and provenance.
-5. `image.analyze_batch` for assets lacking `features_v1`: preview (LibRaw/Pillow, cached), statistics, scene labels, embedding `.npy` → `visual_features` row (embedding referenced by artifact id, never stored in SQLite).
-6. `ingest::data_quality_report` aggregates from SQL.
+**One SQLite file.** No server, no sync, no account. WAL, foreign keys on, forward-only numbered migrations embedded in the binary with a timestamped backup written before any migration touches an existing install.
 
-## Data flow: session → apply (0.3.0)
+## Data flow
 
-1. `sessions::create_session` makes a hidden `purpose = session` library plus the `sessions` row; `ingest_session` reuses the folder/Lightroom ingest (same normalizer, features, previews) and fills `session_assets` in capture order.
-2. `group_session` → engine `session.group` → `scene_clusters` + per-asset cluster/burst ids.
-3. `predict_session` → engine `model.predict` with the active version's artifact and the cluster map (`groups`) → `predictions` rows (canonical settings, confidence, components, nearest examples, capability schema version).
-4. Review sets `reviewed`/`rejected`; `apply_session` runs `apply_preflight`, resolves Lightroom photo ids, sends batches of 25 through the bridge with snapshot + read-back, verifies each item with `edit_dna::verify_readback`, records `applied_edits` and a `prediction` edit snapshot; `restore_batch` writes the recorded before-values back and verifies again.
-5. `sync_corrections` (0.4.0) reads the applied photos back with `collect_correction_state`, records untouched vs corrected per photo (`corrections`, `correction_syncs`, `correction` edit snapshots); the next `train_style` consumes pending corrections as training pairs and `style_health` derives the No-Touch Rate and insights.
+**Import.** A connector streams conversations; the importer resolves each author against the user's declared identifiers (self), then against known participants (other), then gives up honestly (unknown); messages are written in batches of 500 inside a transaction, replies are linked and latency derived per conversation, and every profile is marked stale at the end. Cancellation is checked between conversations, so stopping leaves a smaller consistent database rather than a broken one. Re-importing the same file inserts nothing: `(source_id, external_id)` is unique.
 
-## Engine protocol (§20)
+**Analysis.** For each scope — global, then each channel, then each person the user has written to at least twenty times — the user's own messages are paged in, `voice::metrics::compute` runs over them, and a profile row plus a set of representative examples is written. A scope below the threshold gets a row with its sample size and no metrics.
 
-Request `{"protocolVersion":1,"requestId":"uuid","method":"…","params":{}}`; response `{"protocolVersion":1,"requestId":"uuid","ok":true,"result":{}}` or `ok:false` with `{code,message,details}`; unsolicited events `{"event":"job.progress","jobId":…,"phase":…,"current":n,"total":n}` and `{"event":"log",…}`. Methods: `engine.hello`, `engine.configure`, `engine.health`, `engine.shutdown`, `scan.folder`, `xmp.parse`, `image.metadata`, `image.analyze`, `image.analyze_batch`, `training.train`, `model.predict`. The Rust client (`engine/mod.rs`) enforces timeouts, correlates by id, restarts on exit with a budget of 5, and fails all pending requests when the child dies.
+**Generation.** `build_context` gathers evidence: the resolved voice layers, retrieved past exchanges, the tail of the conversation, the person. `assemble` turns that into a prompt — a pure function, which is what makes `prompt_hash` worth recording and the prompt worth testing. The provider runs. The draft is stored with its context and its evidence.
 
-## Bridge protocol (§10)
+**Feedback.** The user says what they actually sent. `feedback::diff_draft` describes the difference; an explicit correction the user types outweighs an inferred edit three to one. Nothing changes a profile on the strength of one diff.
 
-See LIGHTROOM_INTEGRATION.md. Fixtures in `fixtures/bridge/` are asserted by Rust (`tests/bridge_protocol.rs`), TypeScript (contracts tests) and Lua (`tests/json_test.lua`).
+## The rules that shape the code
 
-## Versioning
+**Nothing is evidence unless its direction is `self`.** Every metric, every representative example, every retrieved exchange is drawn from `direction = 'self'`. Messages from other people are kept — a conversation needs both halves — and never counted as how the user writes.
 
-Root `package.json` is the single source; `scripts/sync-version.mjs` propagates to the desktop package, Tauri config, Cargo workspace, engine (PEP 440), plugin `Info.lua`/`Version.lua`, and checks Cargo.lock and CHANGELOG. Protocol versions (`BRIDGE_PROTOCOL_VERSION`, `ENGINE_PROTOCOL_VERSION`) are independent integers bumped on incompatible wire changes; the plugin refuses to talk to a desktop whose bridge protocol differs.
+**A number that was not measured is `None`, not zero.** This runs from `VoiceMetrics` through the zod contracts to the components that render them. `emojiRate: 0.0` means "this person does not use emoji". `null` means "we have not seen enough".
 
-## Extension points prepared, not built
+**Deletion is explicit and reported.** `privacy` enumerates what will go before it goes, and the preview is produced by the same code path as the deletion, so it cannot understate it. Foreign keys do the cascade; the rebuild of derived aggregates is an explicit step.
 
-Job kinds are strings dispatched through `CompositeExecutor`; ingest, training, session (ingest/group/predict/apply/restore) and corrections (sync) executors are registered. Model artifacts are content-addressed files under `models/styles/`. Capability matrix statuses leave room for `supported` local edits once proven.
+**Credentials never touch the database.** Providers receive them through `SecretStore`, implemented in the shell. Diagnostics strip them. Logs never carry message content.
+
+**Every shared shape has a checked-in fixture.** `crates/mimic-core/tests/pipeline_e2e.rs` writes the read models to `fixtures/contracts/`; `packages/contracts/test/contracts.test.ts` parses them with zod. A change on one side that is not made on the other fails a test.
+
+## Scale
+
+The schema and the queries are written for 100k–1M+ messages: indexes on `(conversation_id, sequence_index)`, `(participant_id, sent_at)`, `(direction, channel, sent_at)`; keyset pagination rather than `OFFSET`; batched inserts; participant resolution through an in-memory cache during import; embeddings out of the row. Analysis and import are background jobs with progress and cancellation. The one known weak point is that analysis currently materializes a scope's messages in memory before computing over them — fine at a hundred thousand, not at a million. See `docs/ROADMAP.md`.
+
+## Process model
+
+The shell starts, opens and migrates the database, loads credentials, builds the provider registry, resolves and spawns the engine, recovers interrupted jobs, and opens the window. Engine failure does not block launch; its status is shown. The job runner drains one job at a time, heart-beating every three seconds; a job that dies with the process becomes `interrupted` on the next start and is re-queued if its kind is resumable. Import is resumable (re-running skips what is already there); analysis is not (a half-recomputed profile set would mix two corpora).
+
+## Decisions recorded elsewhere
+
+`docs/adr/` holds the decisions that predate this product and still hold: Tauri as the shell, local-first as the data model, the signed-updater arrangement. The photography-era decisions are in `archive/legacy-photography/docs/`.

@@ -1,4 +1,7 @@
-"""Mimic engine: deterministic image analysis, XMP ingest, Style Brain training."""
+"""Mimic engine: text embeddings, similarity and held-out evaluation.
 
-__version__ = "0.5.0a1"
+Runs as a stdio NDJSON sidecar of the Mimic desktop app.
+"""
+
+__version__ = "0.6.0a1"
 PROTOCOL_VERSION = 1

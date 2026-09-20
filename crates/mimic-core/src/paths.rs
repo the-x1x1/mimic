@@ -2,10 +2,10 @@
 //!
 //! ```text
 //! <root>/
-//!   data/mimic.db
-//!   cache/previews/  cache/embeddings/
-//!   models/encoders/ models/styles/
-//!   logs/  bridge/  updates/  tmp/  plugin/
+//!   data/mimic.db  data/backups/
+//!   cache/embeddings/
+//!   models/encoders/
+//!   credentials/   logs/  updates/  tmp/
 //! ```
 //!
 //! On Windows the root is `%LOCALAPPDATA%\Formicaria\Mimic`. The Tauri shell
@@ -53,27 +53,19 @@ impl AppPaths {
     pub fn backups_dir(&self) -> PathBuf {
         self.data_dir().join("backups")
     }
-    pub fn previews_cache(&self) -> PathBuf {
-        self.root.join("cache").join("previews")
-    }
     pub fn embeddings_cache(&self) -> PathBuf {
         self.root.join("cache").join("embeddings")
     }
     pub fn encoders_dir(&self) -> PathBuf {
         self.root.join("models").join("encoders")
     }
-    pub fn styles_dir(&self) -> PathBuf {
-        self.root.join("models").join("styles")
-    }
     pub fn logs_dir(&self) -> PathBuf {
         self.root.join("logs")
     }
-    pub fn bridge_dir(&self) -> PathBuf {
-        self.root.join("bridge")
-    }
-    /// Discovery file the Lightroom plugin reads to find the bridge port + token.
-    pub fn bridge_discovery_file(&self) -> PathBuf {
-        self.bridge_dir().join("bridge.json")
+    /// Provider credentials. Owner-only; see `secrets.rs` in the desktop crate
+    /// for what that does and does not guarantee.
+    pub fn credentials_dir(&self) -> PathBuf {
+        self.root.join("credentials")
     }
     pub fn updates_dir(&self) -> PathBuf {
         self.root.join("updates")
@@ -81,24 +73,16 @@ impl AppPaths {
     pub fn tmp_dir(&self) -> PathBuf {
         self.root.join("tmp")
     }
-    /// App-managed copy of `Mimic.lrplugin` that Lightroom's Plugin Manager points at.
-    pub fn plugin_install_dir(&self) -> PathBuf {
-        self.root.join("plugin").join("Mimic.lrplugin")
-    }
-
     pub fn all_dirs(&self) -> Vec<PathBuf> {
         vec![
             self.data_dir(),
             self.backups_dir(),
-            self.previews_cache(),
             self.embeddings_cache(),
             self.encoders_dir(),
-            self.styles_dir(),
+            self.credentials_dir(),
             self.logs_dir(),
-            self.bridge_dir(),
             self.updates_dir(),
             self.tmp_dir(),
-            self.root.join("plugin"),
         ]
     }
 
@@ -107,12 +91,12 @@ impl AppPaths {
         for d in self.all_dirs() {
             std::fs::create_dir_all(&d)?;
         }
-        restrict_dir_permissions(&self.bridge_dir());
+        restrict_dir_permissions(&self.credentials_dir());
         Ok(())
     }
 }
 
-/// Best-effort: on Unix make the bridge directory owner-only. Windows
+/// Best-effort: on Unix make the credentials directory owner-only. Windows
 /// `%LOCALAPPDATA%` is already per-user ACL'd.
 fn restrict_dir_permissions(dir: &Path) {
     #[cfg(unix)]

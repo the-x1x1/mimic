@@ -2,6 +2,66 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.6.0-alpha.1] — 2026-09-20
+
+**Mimic is now a different product.** It no longer learns how you edit photographs in Lightroom Classic. It learns how you communicate, from messages you have already written, and helps you draft replies that sound like yourself.
+
+Versions 0.1.0 through 0.5.0 were a Lightroom Classic editing assistant. Everything below describes retiring that product and building the first working slice of this one. `docs/MIGRATION_AUDIT.md` records the whole decision, component by component.
+
+### Removed
+
+- The photography domain in full: `edit_dna` (Lightroom develop-setting normalization), `bridge` (the loopback HTTP server the Lightroom plugin talked to), `capability` (the runtime SDK probe), `sessions` (shoots, scene clusters, predictions, apply batches, restores), `ingest` and `training` in their photography form, the Python image pipeline (XMP parsing, RAW previews, EXIF, visual features, scene heuristics, the hybrid KNN + ridge trainer), and roughly 5,500 lines of photography UI.
+- Nineteen database tables, dropped by migration `0005`: `libraries`, `assets`, `sidecars`, `edit_snapshots`, `visual_features`, `style_profiles`, `style_profile_libraries`, `sessions`, `session_assets`, `scene_clusters`, `training_sets`, `model_versions`, `model_artifacts`, `predictions`, `apply_batches`, `applied_edits`, `corrections`, `correction_syncs`, `lightroom_connections`.
+- Dependencies: `axum`, `tower`, `tower-http` and `reqwest` (dev) on the Rust side; `pillow`, `exifread` and the `rawpy` extra on the Python side; the Tauri `protocol-asset` feature and the asset protocol itself.
+- The `plugin` CI job, the Lua version targets in `sync-version.mjs`, the plugin zip in the release workflow, `install-lightroom-plugin.ps1` and `test-plugin.ps1`, the synthetic image fixtures, and the image encoder manifests.
+
+### Archived
+
+Moved to `archive/legacy-photography/`, excluded from every workspace, from CI and from the bundle: the Lightroom Classic plugin and its tests; `edit_mapping_v1.json` with `EDIT_DNA.md`; the Lightroom integration and capability-matrix documents; `ML_PIPELINE.md`, for the shoot-grouped split reasoning that the new evaluation harness reuses; ADRs 003, 004 and 005; and the golden XMP corpus that proved the mapping. None of it is built or shipped.
+
+### Changed
+
+- `mimic-core` is now database, sources, import, voice, retrieval, generation, providers, privacy and jobs. The SQLite layer, the migration mechanism, the job queue, the engine sidecar client, `paths`, `ids`, `version` and `diagnostics` carry over unchanged in substance.
+- The Python engine is a text engine: embeddings, similarity and held-out evaluation. The NDJSON server, dispatch, progress and error envelopes are untouched.
+- Navigation is Compose / People / Voice / Sources / Settings. Compose is the home screen.
+- Diagnostics report providers instead of a Lightroom bridge, and strip `token`, `apiKey`, `api_key`, `password` and `secret` at every depth.
+- The app data layout loses `cache/previews`, `models/styles`, `bridge/` and `plugin/`, and gains `credentials/`.
+- `docs/ARCHITECTURE.md`, `PRIVACY.md`, `PROJECT_STATUS.md` and `ROADMAP.md` were rewritten from scratch; `DATABASE.md`, `TEST_STRATEGY.md` and `UI_SPEC.md` were replaced by `DATA_MODEL.md`, the testing section of `ARCHITECTURE.md`, and `PRODUCT.md`.
+
+### Added
+
+- **Schema v5** (`0005_communication.sql`): user identity and identifiers; sources; participants and their identifiers; conversations, conversation participants and messages; message embeddings; situations; layered voice profiles, manual preferences and representative examples; drafts and draft feedback; analysis runs; evaluations and evaluation cases. Indexed for 100k–1M+ messages. A v4 photography database upgrades cleanly, keeping settings, jobs and events.
+- **Source connectors** behind one `CommunicationSource` trait that streams conversations to a sink: `mbox` (RFC 4155, reference-chain threading with a narrow subject fallback, separator detection that does not split on a body line beginning with "From ", content-derived ids when `Message-ID` is missing) and `mimic_json` (the documented generic format). Validation is a dry run of the connector's own import, so it cannot disagree with what the import will do.
+- **Normalization** that removes quoted history, attribution lines in four languages, forwarded banners, Outlook reply blocks and signatures — while keeping sign-offs the user typed, because "Thanks, C" is how someone writes and a `--` block is not.
+- **Import**: identity-based direction (`self` / `other` / `unknown`, never guessed), participant resolution through a cache, batched inserts of 500 in a transaction, reply linking and response latency derived per conversation, cancellation between conversations, and a resume that costs nothing because `(source_id, external_id)` is unique. Refuses to run when no identity is declared.
+- **The voice engine**: deterministic metrics over the user's own messages (length distribution, terminal punctuation, capitalization two ways, emoji, contractions per hundred words, greetings, sign-offs, repeated phrases, response latency), computed per layer — global, channel, relationship — with a 20-message floor below which a scope reports its sample size and no rates. Representative examples chosen deterministically and de-duplicated.
+- **Retrieval** that filters on participant, channel, relationship, situation, conversation, source and date range before ranking, and ranks lexically with inverse document frequency.
+- **Generation**: a context builder that gathers evidence, a prompt assembler that is a pure function of that context, measured habits turned into instructions rather than quoted as numbers, an output budget derived from the user's own p90 message length, and four adjustments.
+- **Model providers** behind one trait: a local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp) whose locality claim is computed from the URL rather than asserted, the Claude Messages API, and a deterministic mock for tests. The default is always a local provider.
+- **Deletion that deletes**: a preview produced by the same code path as the deletion, removal of the user's own half of a one-to-one conversation, survival of group threads minus that person, invalidation of every aggregate computed over the removed material, source deletion, and a delete-everything that keeps settings and identity.
+- **The learning loop's recording half**: draft, what was actually sent, a described diff, and weights in which a stated preference outranks an inferred edit three to one.
+- **A held-out evaluation harness** in the engine: conversation-grouped splitting so no thread straddles the boundary, and comparison along named components — length, vocabulary, punctuation, embedding — with **no headline score**.
+- **The interface**: Compose with the intent field as its centre and an evidence panel beside every draft; People with per-person counts and a deletion dialog that states consequences in sentences; Voice, which shows what was measured and what was not; Sources with pre-import validation; Settings covering identity, provider, privacy and deletion.
+- **Cross-language contract fixtures**: the Rust end-to-end test writes `fixtures/contracts/`, the zod suite parses them, and a shape change on one side that is not made on the other fails a test.
+
+### Migration notes
+
+- **A v4 database loses its photography data.** That data describes a product that no longer exists. `Db::open` writes a timestamped backup to `data/backups/` before the migration runs, so it is recoverable if anyone needs it.
+- Settings, jobs, the event log and update state survive. `review.highThreshold`, `review.mediumThreshold`, `performance.accelerator`, `performance.previewCacheMaxMb` and `performance.inferenceBatchSize` are gone; `generation.provider`, `generation.localUrl`, `generation.localModel` and `generation.anthropicModel` are new.
+- The Lightroom plugin is no longer installed or updated by the app. An existing copy under `%LOCALAPPDATA%\Formicaria\Mimic\plugin\` is left alone rather than deleted, and can be removed by hand.
+- Anyone who wants the photography product should use the `v0.5.0-alpha.1` tag; it is the last release before this one and the full record of what was removed.
+
+### Known limitations
+
+- **No accuracy figure anywhere**, because the evaluation harness has not been run over a real corpus and neither baseline is implemented. This is deliberate; see `docs/VOICE_ENGINE.md`.
+- Embeddings are `lexical_v1` — hashed word and character n-grams. Genuinely useful, not semantic, and the engine reports `semantic: false` so the app cannot imply otherwise.
+- The situational voice layer has a schema, a resolution path and a prompt slot; nothing classifies into it yet.
+- Provider credentials live in an owner-only file, not the OS credential store.
+- Voice analysis materializes a scope's messages in memory before computing. Fine at a hundred thousand; not at a million.
+- The Anthropic provider has never been exercised against the live API in CI.
+- `tauri build` has not been run in this environment, so the Windows installer and the signed updater path are unverified for this release.
+- The nightly smoke workflow was rewritten against the packaged engine but has never been observed running.
+
 ## [0.5.0-alpha.1] — 2026-09-17
 
 Session intelligence: reference photos, group editing, per-group and per-camera confidence, and group-outlier flags.
