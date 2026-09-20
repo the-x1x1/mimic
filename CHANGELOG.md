@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.6.0-alpha.2] — 2026-09-20
+
+Release-pipeline fix only; application code is identical to 0.6.0-alpha.1 (whose Release workflow never produced an installer).
+
+### Fixed
+
+- `scripts/package-engine.ps1` still copied `packages/contracts/edit_mapping_v1.json` into the packaged engine. The migration moved that file to `archive/legacy-photography/contracts/`, so the "Package engine" step failed with `Cannot find path ... edit_mapping_v1.json` after PyInstaller had already succeeded, and no draft release was ever created. The copy is gone, along with the `rawpy` binary collection and the `PIL._tkinter_finder` hidden import — both left over from the image pipeline, neither a dependency of the text engine.
+
 ## [0.6.0-alpha.1] — 2026-09-20
 
 **Mimic is now a different product.** It no longer learns how you edit photographs in Lightroom Classic. It learns how you communicate, from messages you have already written, and helps you draft replies that sound like yourself.

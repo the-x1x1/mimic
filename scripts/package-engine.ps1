@@ -9,12 +9,11 @@ if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 uv run pyinstaller --noconfirm --clean --name mimic-engine --onedir --console `
   --collect-all mimic_engine --collect-submodules sklearn --collect-submodules scipy `
-  --collect-binaries onnxruntime --collect-binaries rawpy --hidden-import PIL._tkinter_finder `
+  --collect-binaries onnxruntime `
   --distpath (Join-Path $repo "engine\dist") --workpath (Join-Path $repo "engine\build") `
   --specpath (Join-Path $repo "engine\build") `
   (Join-Path $repo "engine\src\mimic_engine\__main__.py")
 Copy-Item (Join-Path $repo "engine\dist\mimic-engine\*") $out -Recurse -Force
-Copy-Item (Join-Path $repo "packages\contracts\edit_mapping_v1.json") $out -Force
 $exe = Join-Path $out "mimic-engine.exe"
 if (-not (Test-Path $exe)) { $exe = Join-Path $out "mimic-engine" }
 & $exe --version
