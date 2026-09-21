@@ -21,27 +21,36 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* Heights, not paddings: every button a person is meant to press is at least
+   44px tall, which is the one accessibility number this app cannot get wrong
+   — its reader may be sixty and using a trackpad. `sm` is for controls inside
+   a row of text, never for a primary action. */
 .ui-btn--sm {
-  padding: 5px 10px;
+  min-height: 34px;
+  padding: 0 12px;
   font-size: var(--text-body-sm);
 }
 .ui-btn--md {
-  padding: 8px 14px;
+  min-height: 44px;
+  padding: 0 20px;
 }
 .ui-btn--lg {
-  padding: 12px 20px;
+  min-height: 48px;
+  padding: 0 22px;
   font-size: var(--text-title-sm);
-  border-radius: var(--radius-md);
 }
 .ui-btn--primary {
   background: var(--accent);
   color: var(--on-accent);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 .ui-btn--primary:hover:not(:disabled) {
   background: var(--accent-strong);
 }
 .ui-btn--secondary {
   background: var(--surface-2);
+  font-weight: 500;
   color: var(--text-primary);
   border-color: var(--border);
 }
@@ -63,7 +72,8 @@
   border-color: var(--border);
 }
 .ui-btn--danger:hover:not(:disabled) {
-  background: rgba(224, 108, 108, 0.12);
+  background: var(--surface-3);
+  border-color: var(--danger);
 }
 .ui-btn__icon {
   display: inline-flex;
@@ -87,38 +97,41 @@
   }
 }
 
+/* A badge states a fact in passing. It is not a pill, not a colour block, and
+   never the loudest thing in its row: tone colours the text and the rule, and
+   nothing else, so a screen with four of them still has one focus. */
 .ui-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   font-size: var(--text-caption);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  background: var(--surface-2);
+  background: transparent;
 }
 .ui-badge--success {
   color: var(--success);
-  border-color: rgba(111, 191, 115, 0.35);
+  border-color: currentColor;
 }
 .ui-badge--warning {
   color: var(--warning);
-  border-color: rgba(224, 176, 74, 0.35);
+  border-color: currentColor;
 }
 .ui-badge--danger {
   color: var(--danger);
-  border-color: rgba(224, 108, 108, 0.35);
+  border-color: currentColor;
 }
 .ui-badge--info {
   color: var(--info);
-  border-color: rgba(110, 168, 224, 0.35);
+  border-color: currentColor;
 }
 .ui-badge--accent {
-  color: var(--accent-strong);
-  border-color: rgba(214, 153, 72, 0.4);
+  color: var(--accent);
+  border-color: currentColor;
   background: var(--accent-soft);
 }
 
@@ -126,12 +139,11 @@
    margin used to leave a screen-high gap between it and whatever came next. */
 .ui-empty {
   max-width: 560px;
-  margin: 0 auto;
-  text-align: center;
-  padding: var(--space-6);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-1);
+  margin: 0;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .ui-empty__icon {
   color: var(--text-muted);
@@ -143,8 +155,9 @@
 }
 .ui-empty__title {
   margin: 0 0 var(--space-2);
-  font-size: var(--text-title-sm);
+  font-size: var(--text-title);
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .ui-empty__body {
   color: var(--text-secondary);
@@ -152,9 +165,10 @@
 }
 .ui-empty__actions {
   display: flex;
-  gap: var(--space-2);
-  justify-content: center;
-  margin-top: var(--space-5);
+  gap: var(--space-3);
+  justify-content: flex-start;
+  align-items: center;
+  margin-top: var(--space-4);
   flex-wrap: wrap;
 }
 
@@ -281,29 +295,87 @@
   color: var(--danger);
 }
 
+/* A card is a section of a page, drawn however the theme draws sections: a
+   bordered panel in plain and night, nothing at all in paper, where a rule
+   under the heading and the space around it do the same work. Every page below
+   composes with this rather than branching on the theme. */
 .ui-card {
-  border: 1px solid var(--border);
+  border: var(--card-border);
   border-radius: var(--radius-lg);
   background: var(--surface-1);
 }
+[data-theme="paper"] .ui-card {
+  background: transparent;
+}
 .ui-card__header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-3);
   border-bottom: 1px solid var(--border);
+}
+[data-theme="paper"] .ui-card__header {
+  padding-left: 0;
+  padding-right: 0;
 }
 .ui-card__title {
   margin: 0;
-  font-size: var(--text-body);
+  font-size: var(--text-title-sm);
   font-weight: 600;
+  letter-spacing: -0.01em;
+}
+[data-theme="paper"] .ui-card__title {
+  font-family: var(--font-serif);
+  font-weight: 500;
 }
 .ui-card__actions {
   display: flex;
   gap: var(--space-2);
 }
 .ui-card__body {
-  padding: var(--space-4);
+  padding: var(--space-5);
+}
+[data-theme="paper"] .ui-card__body {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Anything that is writing — a message someone sent, a reply Mimic drafted,
+   an example of how you put things — is set as a letter, in every theme. This
+   is the one class that carries the idea, so it lives with the primitives and
+   not in a feature's stylesheet. */
+.letter {
+  font-family: var(--font-serif);
+  font-size: var(--text-letter);
+  line-height: 1.62;
+  white-space: pre-wrap;
+}
+.letter--theirs {
+  color: var(--text-secondary);
+}
+.letter--mine {
+  color: var(--text-primary);
+  font-size: calc(var(--text-letter) + 1px);
+}
+/* The label above a letter: who is speaking, in the tool's voice, small. */
+.letter-label {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.letter-label--mine {
+  color: var(--accent);
+}
+[data-theme="paper"] .letter-label {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: var(--text-body-sm);
 }
 
 /* Dashboard: waiting threads and the drafts prepared for them. */

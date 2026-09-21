@@ -1,6 +1,6 @@
 {
   "name": "@mimic/contracts",
-  "version": "0.8.0-alpha.3",
+  "version": "0.9.0-alpha.1",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",

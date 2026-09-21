@@ -1,7 +1,15 @@
 import { z } from "zod";
 
+/**
+ * Named for what they look like, not for a brightness. An install from 0.8.0
+ * or earlier stored "dark" or "light"; migration 0006 carries those over, so
+ * nothing outside it needs to know they existed.
+ */
+export const Theme = z.enum(["plain", "paper", "night"]);
+export type Theme = z.infer<typeof Theme>;
+
 export const Settings = z.object({
-  "general.theme": z.enum(["dark", "light"]),
+  "general.theme": Theme,
   "performance.workerConcurrency": z.number(),
   "privacy.networkFeatures": z.boolean(),
   "updates.channel": z.enum(["stable", "beta"]),

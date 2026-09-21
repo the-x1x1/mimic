@@ -1,4 +1,4 @@
-# Project status — 0.8.0-alpha.3
+# Project status — 0.9.0-alpha.1
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -10,7 +10,7 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 | ------------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------- |
 | SQLite, WAL, foreign keys, one connection behind a mutex           | IMPLEMENTED | `db::tests::foreign_keys_are_enforced`, `reopen_is_idempotent_and_keeps_data`         |
 | Forward-only migrations with a backup before upgrading an install  | IMPLEMENTED | `db::tests::upgrade_from_older_schema_creates_backup`                                 |
-| Schema v5; a v4 photography database upgrades cleanly              | IMPLEMENTED | `migrations::tests::photography_database_upgrades_to_the_communication_schema`        |
+| Schema v6; a v4 photography database upgrades cleanly              | IMPLEMENTED | `migrations::tests::photography_database_upgrades_to_the_communication_schema`        |
 | Schema invariants (direction vocabulary, import key, cascades)     | IMPLEMENTED | `migrations::tests::communication_schema_enforces_its_invariants`                     |
 | Persistent job queue: progress, cancellation, interrupted recovery | IMPLEMENTED | `jobs::tests::runs_completes_and_fails_jobs`, `cancel_stops_between_items`            |
 | Python engine sidecar: NDJSON, restart budget, size caps, timeouts | IMPLEMENTED | `tests/engine_protocol.rs` (4 tests against a real child process)                     |
@@ -130,6 +130,9 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 | The provider's locality is shown in the top bar                                    | IMPLEMENTED | `StatusBadges.test.tsx`                                                                        |
 | The window does not scroll; only the content pane does                             | IMPLEMENTED | `layout.test.ts` "the shell is the window, and only the content scrolls"                       |
 | No control falls back to the system's own styling                                  | IMPLEMENTED | `layout.test.ts` "no control falls back to the system's own styling"                           |
+| Anything that is writing is set as a letter, in every theme                        | IMPLEMENTED | `tokens.test.ts` "the serif carries the writing"                                               |
+| Three themes come from one token set, with no component branching on the name      | IMPLEMENTED | `tokens.test.ts` "every theme defines every token the others do"                               |
+| An older install's theme name is carried over rather than failing validation       | IMPLEMENTED | `migrations::tests::an_old_theme_name_is_carried_over_instead_of_breaking_the_first_render`    |
 | Deletion dialog states consequences, not counts                                    | IMPLEMENTED | `contracts.test.ts` "deletion is described in consequences"                                    |
 | Onboarding advances on facts, not checkboxes                                       | IMPLEMENTED | `contracts.test.ts` "onboarding advances on facts"                                             |
 | Onboarding reacts to a finished import or analysis                                 | IMPLEMENTED | `useNativeEventBridge` mounted above the gate in `App.tsx`                                     |

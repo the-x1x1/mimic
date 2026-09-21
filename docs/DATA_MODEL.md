@@ -1,6 +1,6 @@
 # Data model
 
-SQLite, schema version 5. Timestamps are RFC 3339 UTC `TEXT`, ids are UUID v4 `TEXT`, JSON columns end in `_json`. The authoritative definition is `crates/mimic-core/src/db/migrations/0005_communication.sql`; this file explains why the tables are shaped the way they are.
+SQLite, schema version 6. Timestamps are RFC 3339 UTC `TEXT`, ids are UUID v4 `TEXT`, JSON columns end in `_json`. The authoritative definition is `crates/mimic-core/src/db/migrations/0005_communication.sql`, with `0006_themes.sql` carrying an older install's theme name over; this file explains why the tables are shaped the way they are.
 
 ## Identity
 

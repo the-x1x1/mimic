@@ -1,77 +1,134 @@
-/* Mimic design tokens (spec §34). Dark graphite is the polished default; the
-   light theme is token-complete but visually unreviewed in 0.1. Photos must
-   stay colour-neutral: the accent is used for controls, never over previews. */
-:root,
-[data-theme="dark"] {
-  --bg: #141517;
-  --surface-1: #1c1d20;
-  --surface-2: #232529;
-  --surface-3: #2b2e33;
-  --border: #33363c;
-  --border-strong: #454951;
-  --text-primary: #ececec;
-  --text-secondary: #b3b7be;
-  --text-muted: #7f848c;
-  --accent: #d69948;
-  --accent-strong: #e5aa5c;
-  --accent-soft: rgba(214, 153, 72, 0.14);
-  --on-accent: #1a1204;
-  --success: #6fbf73;
-  --warning: #e0b04a;
-  --danger: #e06c6c;
-  --info: #6ea8e0;
-  --focus: #8ec5ff;
-  --photo-bg: #0d0e10;
+/* Mimic design tokens.
+ *
+ * One idea holds the look together: anything that is *writing* is set in a
+ * serif, and the app around it is set in a grotesque. A message someone sent
+ * you and a reply Mimic drafted are letters, and they read like letters; the
+ * buttons, labels and counts are a tool, and they read like a tool. Nothing
+ * else in here is decorative.
+ *
+ * Three themes, all from the same token names, all real — `plain` is the
+ * default because it is the one that does not ask anything of the reader.
+ * `paper` drops boxes almost entirely and separates with hairlines and space.
+ * `night` is the same layout on near-black.
+ *
+ * Deliberately absent: gradients, glows, shadows used as decoration, large
+ * radii. Radii are 2–4px because this is a desk tool, not a phone app.
+ */
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
-  --text-caption: 11px;
-  --text-body-sm: 12.5px;
-  --text-body: 14px;
-  --text-title-sm: 16px;
-  --text-title: 20px;
-  --text-display: 28px;
+:root,
+[data-theme="plain"] {
+  --bg: #f4f2ed;
+  --surface-1: #fbfaf7;
+  --surface-2: #ffffff;
+  --surface-3: #eeebe4;
+  --border: #e0ddd6;
+  --border-strong: #c9c5bc;
+  --text-primary: #17171a;
+  --text-secondary: #56565f;
+  --text-muted: #6e6e77;
+  --accent: #0e4f6b;
+  --accent-strong: #0a3b50;
+  --accent-soft: rgba(14, 79, 107, 0.09);
+  --on-accent: #ffffff;
+  --success: #1f6b4a;
+  --warning: #8a5a12;
+  --danger: #9b2f2f;
+  --info: #0e4f6b;
+  --focus: #0e4f6b;
+
+  /* The serif is not a heading face: it is the face of the writing itself. */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  /* Bigger than the old scale throughout. Someone reading their own mail on a
+     desktop screen should not have to lean in. */
+  --text-caption: 13px;
+  --text-body-sm: 14px;
+  --text-body: 16px;
+  --text-title-sm: 19px;
+  --text-title: 24px;
+  --text-display: 34px;
+  /* The one size used for a message or a draft. */
+  --text-letter: 17px;
 
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
+  --space-4: 18px;
+  --space-5: 26px;
+  --space-6: 36px;
+  --space-7: 52px;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
   --radius-pill: 999px;
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.4);
-  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-1: none;
+  --shadow-2: 0 8px 28px rgba(23, 23, 26, 0.1);
+  --shadow-3: 0 18px 44px rgba(23, 23, 26, 0.16);
 
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* Paper draws rules where the other themes draw boxes; the components read
+     these two rather than branching on the theme name. */
+  --card-border: 1px solid var(--border);
+  --card-padding: var(--space-5);
 }
 
-[data-theme="light"] {
-  --bg: #f4f4f5;
-  --surface-1: #ffffff;
-  --surface-2: #f7f7f8;
-  --surface-3: #ececee;
-  --border: #dcdde1;
-  --border-strong: #c6c8ce;
-  --text-primary: #17181b;
-  --text-secondary: #4b4f57;
-  --text-muted: #7b8089;
-  --accent: #b9772b;
-  --accent-strong: #a2661f;
-  --accent-soft: rgba(185, 119, 43, 0.12);
-  --on-accent: #ffffff;
-  --photo-bg: #e9e9eb;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.1);
-  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.14);
+[data-theme="paper"] {
+  --bg: #ede7da;
+  --surface-1: #f3eee3;
+  --surface-2: #f7f3ea;
+  --surface-3: #e4dccb;
+  --border: #cfc5b0;
+  --border-strong: #b9ae97;
+  --text-primary: #23201a;
+  --text-secondary: #5c5648;
+  --text-muted: #6b6354;
+  --accent: #8c3b2e;
+  --accent-strong: #6f2d22;
+  --accent-soft: rgba(140, 59, 46, 0.1);
+  --on-accent: #fbf7ee;
+  --success: #3f5f2f;
+  --warning: #7a5312;
+  --danger: #8c3b2e;
+  --info: #4a5f77;
+  --focus: #8c3b2e;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --shadow-2: 0 8px 28px rgba(35, 32, 26, 0.12);
+  --shadow-3: 0 18px 44px rgba(35, 32, 26, 0.18);
+  /* No boxes. A section is separated from the next by a rule and by air. */
+  --card-border: none;
+  --card-padding: 0;
+}
+
+[data-theme="night"] {
+  --bg: #100f12;
+  --surface-1: #17161a;
+  --surface-2: #1a191d;
+  --surface-3: #232228;
+  --border: #2d2c33;
+  --border-strong: #45444c;
+  --text-primary: #f2f1ee;
+  --text-secondary: #a8a6b0;
+  --text-muted: #9a98a2;
+  --accent: #7fc4d8;
+  --accent-strong: #a3d8e8;
+  --accent-soft: rgba(127, 196, 216, 0.12);
+  --on-accent: #0b1418;
+  --success: #7bbf92;
+  --warning: #d6ad5f;
+  --danger: #e08080;
+  --info: #7fc4d8;
+  --focus: #7fc4d8;
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 18px 44px rgba(0, 0, 0, 0.62);
 }
 
 @media (prefers-reduced-motion: reduce) {

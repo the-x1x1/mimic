@@ -22,6 +22,7 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0004_session_intelligence.sql"),
     },
     Migration { version: 5, name: "communication", sql: include_str!("migrations/0005_communication.sql") },
+    Migration { version: 6, name: "themes", sql: include_str!("migrations/0006_themes.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -76,7 +77,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 5);
+        assert_eq!(latest_version(), 6);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -88,6 +89,27 @@ mod tests {
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {
         let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap();
         stmt.query_map([], |r| r.get::<_, String>(1)).unwrap().map(Result::unwrap).collect()
+    }
+
+    /// A theme name that this build cannot render is carried over rather than
+    /// left in place to fail validation the first time settings are parsed.
+    #[test]
+    fn an_old_theme_name_is_carried_over_instead_of_breaking_the_first_render() {
+        for (stored, expected) in [("\"dark\"", "\"night\""), ("\"light\"", "\"plain\""), ("\"graphite\"", "\"plain\"")]
+        {
+            let mut conn = Connection::open_in_memory().unwrap();
+            migrate_to(&mut conn, 5).unwrap();
+            conn.execute(
+                "INSERT INTO app_settings(key, value_json, updated_at) VALUES ('general.theme', ?1, 't')",
+                params![stored],
+            )
+            .unwrap();
+            migrate(&mut conn).unwrap();
+            let got: String = conn
+                .query_row("SELECT value_json FROM app_settings WHERE key='general.theme'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(got, expected, "{stored} should become {expected}");
+        }
     }
 
     /// A photography install upgrades cleanly: the generic tables keep their
@@ -130,7 +152,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5]);
+        assert_eq!(applied, vec![5, 6]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
 
         let tables = table_names(&conn);
@@ -184,10 +206,11 @@ mod tests {
             assert!(tables.contains(&created.to_string()), "missing table {created}");
         }
 
-        // Generic rows survived the drop.
+        // Generic rows survived the drop, and the one whose vocabulary changed
+        // was carried over rather than left to fail validation on first render.
         let theme: String =
             conn.query_row("SELECT value_json FROM app_settings WHERE key='general.theme'", [], |r| r.get(0)).unwrap();
-        assert_eq!(theme, "\"dark\"");
+        assert_eq!(theme, "\"night\"", "an install that stored 'dark' should land on the dark theme, not lose it");
         let jobs: i64 = conn.query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0)).unwrap();
         let events: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0)).unwrap();
         assert_eq!((jobs, events), (1, 1));
