@@ -20,6 +20,7 @@ import {
   VoiceOverview,
   Dashboard,
   canFinishOnboarding,
+  canLeaveOnboarding,
   composeReadiness,
   describeDeletion,
   describeFeed,
@@ -267,6 +268,22 @@ describe("onboarding cannot dead-end", () => {
     expect(nextOnboardingStep(base)).toBe("analyze");
     expect(canFinishOnboarding({ ...base, hasOwnMessages: false })).toBe(false);
     expect(canFinishOnboarding({ ...base, hasSource: false })).toBe(false);
+  });
+
+  it("lets someone who has imported nothing look around anyway", () => {
+    // The screen that prompted this: identity declared, no source yet, and no
+    // way forward but exporting a mailbox first.
+    const atSource = { ...base, hasSource: false, hasOwnMessages: false };
+    expect(canFinishOnboarding(atSource)).toBe(false);
+    expect(canLeaveOnboarding(atSource)).toBe(true);
+    // Same at the import step, where a source exists but nothing of the user's
+    // has landed yet.
+    expect(canLeaveOnboarding({ ...base, hasOwnMessages: false })).toBe(true);
+  });
+
+  it("holds the identity step, because an import before it attributes nothing", () => {
+    expect(canLeaveOnboarding({ ...base, hasIdentity: false })).toBe(false);
+    expect(canFinishOnboarding({ ...base, hasIdentity: false })).toBe(false);
   });
 
   it("names the state where an import read a file and found nothing of yours", () => {

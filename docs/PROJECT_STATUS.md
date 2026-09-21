@@ -1,4 +1,4 @@
-# Project status — 0.8.0-alpha.1
+# Project status — 0.8.0-alpha.2
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -133,6 +133,8 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 | Onboarding reacts to a finished import or analysis                            | IMPLEMENTED | `useNativeEventBridge` mounted above the gate in `App.tsx`                                     |
 | Onboarding recovers from an import that matched none of the user's addresses  | IMPLEMENTED | `contracts.test.ts` "onboarding cannot dead-end"; `importStepState`                            |
 | A user under the twenty-message floor can still leave onboarding              | IMPLEMENTED | `contracts.test.ts` `canFinishOnboarding`                                                      |
+| A user who has imported nothing can still leave onboarding and look around    | IMPLEMENTED | `contracts.test.ts` "lets someone who has imported nothing look around anyway"                 |
+| Onboarding holds the identity step, because an import before it attributes nothing | IMPLEMENTED | `contracts.test.ts` "holds the identity step"                                             |
 | The model badge follows a real reachability check                             | IMPLEMENTED | `StatusBadges.test.tsx`; `http::tests::a_local_endpoint_with_nothing_listening_is_unreachable` |
 | Compose refuses to draft when the model is not answering                      | IMPLEMENTED | `contracts.test.ts` "refuses the draft outright when the model is not answering"               |
 | Diagnostics bundle, engine restart and update install reachable from Settings | IMPLEMENTED | `SettingsPage.tsx`; the commands were already tested natively                                  |
