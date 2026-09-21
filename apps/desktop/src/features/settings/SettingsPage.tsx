@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Badge, Button, Card, Field, InlineError } from "@mimic/ui";
 import { ANTHROPIC_SECRET_KEY, IDENTIFIER_LABELS, IdentifierKind } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
-import { useAppInfo, useSettings } from "@/hooks/useSystem";
+import { useAppInfo, useSettings, useSystemStatus } from "@/hooks/useSystem";
 import {
   useAddIdentifier,
   useIdentity,
@@ -10,6 +10,7 @@ import {
   useSetIdentity,
 } from "@/hooks/usePeople";
 import { useProviderState } from "@/hooks/useCompose";
+import { useUpdater } from "@/features/updater/useUpdater";
 import { ipc } from "@/lib/ipc";
 import { toast } from "@/state/toast";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,7 +23,9 @@ export function SettingsPage() {
       <PageHeader title="Settings" />
       <IdentitySection />
       <ProviderSection />
+      <EngineSection />
       <PrivacySection />
+      <UpdatesSection />
       <AboutSection />
     </div>
   );
@@ -203,9 +206,111 @@ function ProviderSection() {
   );
 }
 
+/**
+ * The engine is the Python sidecar. Importing and measuring a voice do not
+ * need it; text similarity and the evaluation harness do. When it is not
+ * running the failure belongs on screen next to the one action that fixes it,
+ * rather than only in a top-bar badge.
+ */
+function EngineSection() {
+  const system = useSystemStatus();
+  const qc = useQueryClient();
+  const [restarting, setRestarting] = useState(false);
+  const engine = system.data?.engine;
+  if (!engine) return null;
+  return (
+    <Card title="Engine">
+      <div className="row gap-2 between">
+        <span>
+          <Badge
+            tone={
+              engine.state === "ready"
+                ? "success"
+                : engine.state === "failed"
+                  ? "danger"
+                  : "neutral"
+            }
+          >
+            {engine.state === "ready"
+              ? "Running"
+              : engine.state === "failed"
+                ? "Not running"
+                : "Starting"}
+          </Badge>{" "}
+          {engine.engineVersion ? (
+            <span className="muted small mono">{engine.engineVersion}</span>
+          ) : null}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={restarting}
+          onClick={async () => {
+            setRestarting(true);
+            try {
+              await ipc.restartEngine();
+              toast.success("Engine restarted");
+            } catch (e) {
+              toast.danger("The engine did not start", (e as Error).message);
+            } finally {
+              setRestarting(false);
+              qc.invalidateQueries({ queryKey: qk.system });
+            }
+          }}
+        >
+          {restarting ? "Restarting…" : "Restart"}
+        </Button>
+      </div>
+      {engine.lastError ? <InlineError>{engine.lastError}</InlineError> : null}
+      <p className="muted small">
+        The engine computes text similarity and runs the evaluation harness. Importing messages and
+        measuring how you write do not need it.
+      </p>
+    </Card>
+  );
+}
+
+/** Updates, reachable from the badge in the top bar, which links here. */
+function UpdatesSection() {
+  const settings = useSettings();
+  const updater = useUpdater(false);
+  return (
+    <Card title="Updates" id="updates">
+      <label className="row gap-2">
+        <input
+          type="checkbox"
+          checked={settings.data?.["updates.automatic"] ?? true}
+          onChange={(e) => ipc.setSetting("updates.automatic", e.target.checked)}
+        />
+        <span>Check for updates automatically and download them in the background</span>
+      </label>
+      <div className="row gap-2">
+        <Button size="sm" variant="ghost" disabled={updater.checking} onClick={updater.checkNow}>
+          {updater.checking ? "Checking…" : "Check now"}
+        </Button>
+        {updater.available ? (
+          <Button size="sm" variant="primary" onClick={updater.install}>
+            Install {updater.available.version} and restart
+          </Button>
+        ) : null}
+      </div>
+      {updater.available ? (
+        <p className="muted small">
+          {updater.downloaded
+            ? "Downloaded and ready. Mimic will not install while a job is running."
+            : "Available. Installing will download it first."}
+        </p>
+      ) : null}
+      {updater.lastError ? <InlineError>{updater.lastError}</InlineError> : null}
+    </Card>
+  );
+}
+
 function PrivacySection() {
   const settings = useSettings();
   const [confirming, setConfirming] = useState(false);
+  const [bundle, setBundle] = useState<string | null>(null);
+  const [building, setBuilding] = useState(false);
   return (
     <Card title="Privacy">
       <p className="neutral">
@@ -222,6 +327,51 @@ function PrivacySection() {
         <span>Include full file paths in diagnostics bundles</span>
       </label>
       <div className="row gap-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={building}
+          onClick={async () => {
+            setBuilding(true);
+            try {
+              setBundle(JSON.stringify(await ipc.diagnostics(), null, 2));
+            } catch (e) {
+              toast.danger("Could not build a diagnostics bundle", (e as Error).message);
+            } finally {
+              setBuilding(false);
+            }
+          }}
+        >
+          {building ? "Collecting…" : "Create a diagnostics bundle"}
+        </Button>
+        {bundle ? (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                await navigator.clipboard.writeText(bundle);
+                toast.success("Copied");
+              }}
+            >
+              Copy
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setBundle(null)}>
+              Hide
+            </Button>
+          </>
+        ) : null}
+      </div>
+      {bundle ? (
+        <>
+          <p className="muted small">
+            Versions, settings and counts. No message content, no credentials
+            {settings.data?.["diagnostics.includePaths"] ? "" : ", and file paths redacted"}.
+          </p>
+          <pre className="diagnostics">{bundle}</pre>
+        </>
+      ) : null}
+      <div className="row gap-2">
         <Button variant="danger" onClick={() => setConfirming(true)}>
           Delete everything Mimic has imported
         </Button>
@@ -233,7 +383,6 @@ function PrivacySection() {
 
 function AboutSection() {
   const info = useAppInfo();
-  const settings = useSettings();
   return (
     <Card title="About">
       <dl className="kv">
@@ -246,14 +395,6 @@ function AboutSection() {
         <dt>Data folder</dt>
         <dd className="mono">{info.data?.dataRoot}</dd>
       </dl>
-      <label className="row gap-2">
-        <input
-          type="checkbox"
-          checked={settings.data?.["updates.automatic"] ?? true}
-          onChange={(e) => ipc.setSetting("updates.automatic", e.target.checked)}
-        />
-        <span>Check for updates automatically</span>
-      </label>
       <Button size="sm" variant="ghost" onClick={() => ipc.openLogsFolder()}>
         Open logs folder
       </Button>

@@ -16,6 +16,7 @@ import { usePeople } from "@/hooks/usePeople";
 import {
   useGenerateDraft,
   useGenerationContext,
+  useProviderHealth,
   useProviderState,
   useResolveDraft,
 } from "@/hooks/useCompose";
@@ -53,8 +54,19 @@ export function ComposePage() {
   );
 
   const context = useGenerationContext(request, true);
-  const readiness = composeReadiness(context.data);
   const activeProvider = providers.data?.providers.find((p) => p.id === providers.data?.active);
+  const health = useProviderHealth(activeProvider?.id);
+  const readiness = composeReadiness(
+    context.data,
+    activeProvider
+      ? {
+          displayName: activeProvider.displayName,
+          local: activeProvider.local,
+          reachable: health.data ? health.data.reachable : null,
+          error: health.data?.error ?? null,
+        }
+      : undefined,
+  );
   const dirty = draft !== null && edited !== draft.generatedText;
 
   async function run(adjustment?: Adjustment) {
@@ -174,7 +186,12 @@ export function ComposePage() {
               anything you have not written here.
             </p>
             <div className="row gap-2">
-              <Button variant="primary" onClick={() => run()} disabled={generate.isPending}>
+              <Button
+                variant="primary"
+                onClick={() => run()}
+                disabled={generate.isPending || !readiness.ready}
+                title={readiness.ready ? undefined : (readiness.reason ?? undefined)}
+              >
                 {generate.isPending ? "Writing…" : draft ? "Regenerate" : "Write a draft"}
               </Button>
               {draft
@@ -183,7 +200,7 @@ export function ComposePage() {
                       key={a}
                       variant="ghost"
                       onClick={() => run(a)}
-                      disabled={generate.isPending}
+                      disabled={generate.isPending || !readiness.ready}
                     >
                       {ADJUSTMENT_LABELS[a]}
                     </Button>
@@ -234,7 +251,11 @@ export function ComposePage() {
         </div>
 
         <div className="stack gap-3">
-          {readiness.reason ? <Card title="Worth knowing">{readiness.reason}</Card> : null}
+          {readiness.reason ? (
+            <Card title={readiness.ready ? "Worth knowing" : "Mimic cannot draft right now"}>
+              {readiness.reason}
+            </Card>
+          ) : null}
           <EvidencePanel context={context.data} loading={context.isLoading} />
         </div>
       </div>

@@ -35,7 +35,7 @@ for line in sys.stdin:
     params = req.get("params") or {}
     if method == "engine.hello":
         reply(req, {"engineVersion": "fake-0.0.0", "protocolVersion": PROTOCOL, "pythonVersion": sys.version.split()[0],
-                    "accelerator": "cpu", "capabilities": {"rawDecode": False, "onnx": False}})
+                    "accelerator": "cpu", "capabilities": {"embeddings": True, "onnx": False}})
     elif method == "engine.shutdown":
         reply(req, {})
         break

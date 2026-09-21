@@ -141,11 +141,29 @@ export type DraftOutcomes = z.infer<typeof DraftOutcomes>;
  * this here rather than in a component means the Compose screen and the
  * onboarding cannot disagree about it.
  */
-export function composeReadiness(ctx: GenerationContext | undefined): {
+export function composeReadiness(
+  ctx: GenerationContext | undefined,
+  provider?: {
+    displayName: string;
+    local: boolean;
+    reachable: boolean | null;
+    error?: string | null;
+  },
+): {
   ready: boolean;
   reason: string | null;
 } {
   if (!ctx) return { ready: false, reason: null };
+  // A model that does not answer is the one thing that makes the button a lie,
+  // so it outranks everything else this function has to say.
+  if (provider && provider.reachable === false) {
+    return {
+      ready: false,
+      reason: provider.local
+        ? `${provider.displayName} is not answering. Start it, or point Mimic at a different endpoint in Settings.${provider.error ? ` (${provider.error})` : ""}`
+        : `${provider.displayName} is not answering.${provider.error ? ` (${provider.error})` : ""}`,
+    };
+  }
   if (!ctx.effective.measurable) {
     return {
       ready: true,

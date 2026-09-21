@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { PenLine, Users, AudioLines, Inbox, Settings as SettingsIcon } from "lucide-react";
-import { useNativeEventBridge, useSystemStatus } from "@/hooks/useSystem";
-import { useProviderState } from "@/hooks/useCompose";
+import { useSystemStatus } from "@/hooks/useSystem";
+import { useProviderHealth, useProviderState } from "@/hooks/useCompose";
 import { EngineBadge, ProviderBadge, UpdateBadge } from "./StatusBadges";
 import { JobTray } from "./JobTray";
 import { Toaster } from "./Toaster";
@@ -15,11 +15,11 @@ const NAV = [
 ];
 
 export function AppShell() {
-  useNativeEventBridge();
   const system = useSystemStatus();
   const providers = useProviderState();
   const navigate = useNavigate();
   const active = providers.data?.providers.find((p) => p.id === providers.data?.active);
+  const health = useProviderHealth(active?.id);
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="Primary">
@@ -47,11 +47,14 @@ export function AppShell() {
       <div className="main">
         <header className="topbar">
           <div className="topbar__status">
-            <ProviderBadge provider={active} />
+            <ProviderBadge provider={active} health={health.data} />
             <EngineBadge status={system.data?.engine} />
           </div>
           <div className="topbar__right">
-            <UpdateBadge state={system.data?.update} onClick={() => navigate("/settings")} />
+            <UpdateBadge
+              state={system.data?.update}
+              onClick={() => navigate("/settings#updates")}
+            />
           </div>
         </header>
         <main className="content">

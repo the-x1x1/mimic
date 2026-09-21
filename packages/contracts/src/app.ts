@@ -66,6 +66,35 @@ export function nextOnboardingStep(
   return null;
 }
 
+/**
+ * Whether the user can leave onboarding and use the app, which is a weaker
+ * condition than having finished every step. Someone whose mailbox holds
+ * fifteen of their own messages will never get a measurable profile, and
+ * refusing to let them in would be a permanent lock-out rather than a
+ * standard. Compose already says plainly when it is drafting without a
+ * measured style.
+ */
+export function canFinishOnboarding(s: OnboardingState): boolean {
+  return s.hasIdentity && s.hasSource && s.hasOwnMessages;
+}
+
+/**
+ * What the import step should show. The dead case is the middle one: an import
+ * that read the file, attributed nothing to the user, and left the step
+ * unfinished with no button on it. That happens when the declared identifiers
+ * do not match the addresses in the export, which is the most likely mistake
+ * on a first run, so it gets a named state and a way out.
+ */
+export function importStepState(
+  sources: Array<{ status: string; messageCount: number }>,
+): "no-source" | "not-started" | "running" | "failed" | "none-of-yours" {
+  if (sources.length === 0) return "no-source";
+  if (sources.some((s) => s.status === "importing")) return "running";
+  if (sources.every((s) => s.status === "failed")) return "failed";
+  if (sources.some((s) => s.status !== "imported" && s.status !== "failed")) return "not-started";
+  return "none-of-yours";
+}
+
 export const EventRow = z.object({
   id: z.number(),
   level: z.string(),

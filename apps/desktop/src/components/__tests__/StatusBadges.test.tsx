@@ -24,6 +24,21 @@ describe("ProviderBadge", () => {
     expect(screen.getByText("Sends to Claude")).toBeInTheDocument();
   });
 
+  it("stops claiming a model is there when it does not answer", () => {
+    render(
+      <ProviderBadge
+        provider={provider()}
+        health={{ reachable: false, error: "connection refused" }}
+      />,
+    );
+    expect(screen.getByText("Local model · not answering")).toBeInTheDocument();
+  });
+
+  it("says nothing new until the check has actually run", () => {
+    render(<ProviderBadge provider={provider()} health={undefined} />);
+    expect(screen.getByText("Local model")).toBeInTheDocument();
+  });
+
   it("does not imply a provider exists when none is configured", () => {
     render(<ProviderBadge provider={undefined} />);
     expect(screen.getByText("No model configured")).toBeInTheDocument();

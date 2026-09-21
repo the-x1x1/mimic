@@ -2,6 +2,35 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.7.0-alpha.1] — 2026-09-20
+
+The first run works. 0.6.0 built the pipeline and could be walked through by someone who knew where the walls were; this release is about a person installing Mimic, opening it, and getting to a draft without being stranded or misled.
+
+### Fixed
+
+- **Onboarding no longer sits on "Importing…" forever.** Native job events were subscribed inside the application shell, which onboarding does not render, so a finished import or analysis never reached the screen that was waiting for it. The only way past was to quit and reopen the app. The subscription now lives above the gate, and onboarding shows the running job's progress.
+- **An import that finds nothing of yours says so.** When the file is read and not one message matches a declared identifier — the likeliest first-run mistake, and the one the add-source dialog warns about — the step used to render a paragraph and no button at all. It now names the addresses it looked for, takes another one inline, and re-reads the file (which costs nothing, because messages are keyed on their own identifiers).
+- **A small mailbox is no longer a lock-out.** Finishing onboarding required a measurable voice profile, which needs twenty of the user's own messages; below that, the last step re-rendered forever. Anyone with their own messages imported can now leave onboarding, and Compose already says when it is drafting without a measured style.
+- **Adding a second address no longer throws you forward.** The identity step is left on a click rather than on the first identifier appearing.
+- **A failed import offers to retry or to remove the source**, rather than leaving the step in the same shape as a successful one.
+
+### Changed
+
+- **The model badge stops claiming a model is there.** The local provider is always registered, so the top bar showed a green "Local model" on a machine with nothing listening on the endpoint, and every draft failed with a toast underneath it. The badge now reflects a real reachability check, and until that check has run the answer is "unknown", not "fine".
+- **Compose refuses to draft when the model is not answering**, and says which one and why. `composeReadiness` takes the provider's state and is the one place that decides; the button is disabled rather than pretending.
+- Settings gained the three things it configured but could not do: create a diagnostics bundle (the "include full paths" checkbox now has something to affect), restart the engine when it is not running, and check for or install an update. The update badge in the top bar links to that section instead of to the top of the page.
+- The Voice empty state links to Sources instead of describing where to go.
+- `PeoplePage` uses the shared `MIN_SAMPLE` rather than its own copy of `20`.
+- `scripts/test.ps1 -Quick` now means something: it skips the production frontend build, which is what `validate.ps1` without `-Full` advertised and did not do.
+- Stale text removed: `CONTRIBUTING.md` no longer asks for a Lightroom capability matrix or names the bridge and EditDNA contracts; the Tauri capability description no longer mentions an asset protocol that is disabled; the install guard's comment names imports and analyses rather than photography jobs.
+
+### Packaging
+
+- The release job installs the engine's Python environment **before** `cargo test --workspace`. It ran after, so the four engine-protocol tests — the ones that exercise the thing the release ships — skipped themselves on every release build while CI ran them properly.
+- The release job now fails if the bundle was built without a packaged engine, or if the installer is implausibly small to contain one. The previous failure mode was an installer that opened to a permanent "Engine unavailable".
+- `models/manifests/` is no longer bundled: it contains one README and no encoder ships in this version.
+- `package-engine.ps1` writes back the tracked `resources/engine/README.txt` it deletes, so packaging locally no longer shows up as a deleted file.
+
 ## [0.6.0-alpha.2] — 2026-09-20
 
 Release-pipeline fix only; application code is identical to 0.6.0-alpha.1 (whose Release workflow never produced an installer).

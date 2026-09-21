@@ -6,7 +6,7 @@ Phases, not dates. A phase is complete when its rows in `docs/PROJECT_STATUS.md`
 
 Retire the photography product; keep the infrastructure that was worth five releases of hardening. Audit first (`docs/MIGRATION_AUDIT.md`), archive selectively, delete the rest, then build.
 
-## Phase 1 — Mimic Core · PARTIAL (0.6.0-alpha.1)
+## Phase 1 — Mimic Core · PARTIAL (0.6.0-alpha.1, first run repaired in 0.7.0-alpha.1)
 
 The end-to-end path: import messages, learn how the user writes, draft a reply.
 
@@ -64,6 +64,7 @@ Designed, deliberately not scheduled. See `docs/PRODUCT.md`. The blocker is not 
 
 Small things the migration left behind, listed so they are not lost:
 
-- `apps/desktop/src-tauri/icons/` still holds the photography icon set.
 - The nightly smoke workflow was rewritten but has never been observed running.
 - macOS is still unbuilt; nothing in the new code is Windows-specific, but nothing has been tested there either.
+- The updater ships with the development public key, which `verify-release.ps1` warns about and allows for alpha builds. A real key is a prerequisite for a beta.
+- The icon set is a plain wordmark rather than a designed one. It is product-neutral, so it is a want and not a blocker.

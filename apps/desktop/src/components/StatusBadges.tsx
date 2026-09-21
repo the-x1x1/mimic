@@ -22,11 +22,25 @@ export function EngineBadge({ status }: { status: EngineStatus | undefined }) {
  * Where drafts are written. This is a privacy fact, so it is in the top bar
  * rather than buried in Settings.
  */
-export function ProviderBadge({ provider }: { provider: ProviderInfo | undefined }) {
+export function ProviderBadge({
+  provider,
+  health,
+}: {
+  provider: ProviderInfo | undefined;
+  health?: { reachable: boolean; error: string | null };
+}) {
   if (!provider) return <Badge tone="warning">No model configured</Badge>;
+  const where = provider.local ? "Local model" : `Sends to ${provider.displayName}`;
+  if (health && !health.reachable) {
+    return (
+      <Badge tone="danger" title={health.error ?? undefined}>
+        {where} · not answering
+      </Badge>
+    );
+  }
   return (
     <Badge tone={provider.local ? "success" : "warning"} title={provider.description}>
-      {provider.local ? "Local model" : `Sends to ${provider.displayName}`}
+      {where}
     </Badge>
   );
 }

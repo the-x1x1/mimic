@@ -1,4 +1,4 @@
-# Project status — 0.6.0-alpha.2
+# Project status — 0.7.0-alpha.1
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -123,22 +123,28 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 
 ## Interface
 
-| Item                                             | Status      | Evidence                                                    |
-| ------------------------------------------------ | ----------- | ----------------------------------------------------------- |
-| Compose / People / Voice / Sources / Settings    | IMPLEMENTED | `apps/desktop/src/features/`                                |
-| Evidence panel with measured habits and examples | IMPLEMENTED | `EvidencePanel.test.tsx` (5 tests)                          |
-| The provider's locality is shown in the top bar  | IMPLEMENTED | `StatusBadges.test.tsx`                                     |
-| Deletion dialog states consequences, not counts  | IMPLEMENTED | `contracts.test.ts` "deletion is described in consequences" |
-| Onboarding advances on facts, not checkboxes     | IMPLEMENTED | `contracts.test.ts` "onboarding advances on facts"          |
-| Conversation view; Compose opened from a thread  | PLANNED     | Phase 5                                                     |
+| Item                                                                          | Status      | Evidence                                                                                       |
+| ----------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------- |
+| Compose / People / Voice / Sources / Settings                                 | IMPLEMENTED | `apps/desktop/src/features/`                                                                   |
+| Evidence panel with measured habits and examples                              | IMPLEMENTED | `EvidencePanel.test.tsx` (5 tests)                                                             |
+| The provider's locality is shown in the top bar                               | IMPLEMENTED | `StatusBadges.test.tsx`                                                                        |
+| Deletion dialog states consequences, not counts                               | IMPLEMENTED | `contracts.test.ts` "deletion is described in consequences"                                    |
+| Onboarding advances on facts, not checkboxes                                  | IMPLEMENTED | `contracts.test.ts` "onboarding advances on facts"                                             |
+| Onboarding reacts to a finished import or analysis                            | IMPLEMENTED | `useNativeEventBridge` mounted above the gate in `App.tsx`                                     |
+| Onboarding recovers from an import that matched none of the user's addresses  | IMPLEMENTED | `contracts.test.ts` "onboarding cannot dead-end"; `importStepState`                            |
+| A user under the twenty-message floor can still leave onboarding              | IMPLEMENTED | `contracts.test.ts` `canFinishOnboarding`                                                      |
+| The model badge follows a real reachability check                             | IMPLEMENTED | `StatusBadges.test.tsx`; `http::tests::a_local_endpoint_with_nothing_listening_is_unreachable` |
+| Compose refuses to draft when the model is not answering                      | IMPLEMENTED | `contracts.test.ts` "refuses the draft outright when the model is not answering"               |
+| Diagnostics bundle, engine restart and update install reachable from Settings | IMPLEMENTED | `SettingsPage.tsx`; the commands were already tested natively                                  |
+| Conversation view; Compose opened from a thread                               | PLANNED     | Phase 5                                                                                        |
 
 ## Packaging
 
-| Item                                            | Status      | Evidence                                                                                  |
-| ----------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- |
-| Version consistency across every manifest       | IMPLEMENTED | `node scripts/sync-version.mjs --check`, in CI                                            |
-| CI: frontend, Rust, Python, security            | IMPLEMENTED | `.github/workflows/ci.yml`                                                                |
-| Signed updater, `latest.json`, release workflow | PARTIAL     | Plumbing unchanged from 0.5.0 and never observed producing a Windows installer end to end |
-| Windows installer                               | PARTIAL     | `tauri build` has not been run in this environment                                        |
-| macOS                                           | PLANNED     | Nothing is Windows-specific; nothing has been tested                                      |
-| Nightly smoke workflow                          | PARTIAL     | Still exercises the photography path; needs rewriting                                     |
+| Item                                            | Status      | Evidence                                                                                                                                                                                                   |
+| ----------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Version consistency across every manifest       | IMPLEMENTED | `node scripts/sync-version.mjs --check`, in CI                                                                                                                                                             |
+| CI: frontend, Rust, Python, security            | IMPLEMENTED | `.github/workflows/ci.yml`                                                                                                                                                                                 |
+| Signed updater, `latest.json`, release workflow | PARTIAL     | Plumbing unchanged from 0.5.0 and never observed producing a Windows installer end to end. The job now installs the engine environment before `cargo test`, and fails if the bundle has no packaged engine |
+| Windows installer                               | PARTIAL     | `tauri build` has not been run in this environment                                                                                                                                                         |
+| macOS                                           | PLANNED     | Nothing is Windows-specific; nothing has been tested                                                                                                                                                       |
+| Nightly smoke workflow                          | PARTIAL     | Rewritten for this product (Windows debug build, packaged-engine protocol smoke); never yet observed running                                                                                               |

@@ -1,4 +1,6 @@
 # Runs everything CI runs, in the same order. Stops at the first red step.
+# -Quick skips the production frontend build, which is the slowest step and is
+# covered again by the release build itself.
 # Works in Windows PowerShell 5.1 and PowerShell 7.
 param([switch]$Quick)
 $ErrorActionPreference = "Stop"
@@ -20,7 +22,7 @@ Run "prettier" pnpm @("format:check")
 Run "typecheck" pnpm @("typecheck")
 Run "eslint" pnpm @("lint")
 Run "vitest" pnpm @("test")
-Run "frontend build" pnpm @("--filter", "@mimic/desktop", "build")
+if (-not $Quick) { Run "frontend build" pnpm @("--filter", "@mimic/desktop", "build") }
 Run "cargo fmt" cargo @("fmt", "--all", "--", "--check")
 Run "cargo clippy" cargo @("clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
 Run "cargo test" cargo @("test", "--workspace")

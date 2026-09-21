@@ -52,3 +52,28 @@ export function useDraftOutcomes() {
 export function useProviderState() {
   return useQuery({ queryKey: qk.providers, queryFn: ipc.providerState });
 }
+
+export type ProviderHealth = { reachable: boolean; error: string | null };
+
+/**
+ * Does the configured model actually answer? Until this has run, the answer is
+ * `undefined` rather than `true`: a local endpoint with nothing listening is
+ * the ordinary first-run state, and the top bar used to show a green "Local
+ * model" for it while every draft failed.
+ */
+export function useProviderHealth(providerId: string | undefined) {
+  return useQuery<ProviderHealth>({
+    queryKey: qk.providerHealth(providerId ?? ""),
+    enabled: !!providerId,
+    retry: false,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      try {
+        await ipc.checkProvider(providerId!);
+        return { reachable: true, error: null };
+      } catch (e) {
+        return { reachable: false, error: (e as Error).message };
+      }
+    },
+  });
+}
