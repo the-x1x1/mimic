@@ -18,6 +18,8 @@
 //!   valid answer and a fabricated percentage is not;
 //! * credentials live in the OS secure store, never in the database.
 
+pub mod assist;
+pub mod dashboard;
 pub mod db;
 pub mod diagnostics;
 pub mod engine;

@@ -80,6 +80,18 @@ impl Db {
             .optional()?)
     }
 
+    /// Whether a relationship-layer profile exists for this person. The
+    /// dashboard uses it to say whether a draft would be shaped by how the
+    /// user writes *to them*, rather than only by how they write in general.
+    pub fn has_relationship_profile(&self, participant_id: &str) -> DbResult<bool> {
+        let n: i64 = self.conn().query_row(
+            "SELECT COUNT(*) FROM voice_profiles WHERE layer='relationship' AND participant_id=?1",
+            [participant_id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn list_voice_profiles(&self, analysis_version: &str) -> DbResult<Vec<VoiceProfileRow>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!(

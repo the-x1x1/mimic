@@ -31,7 +31,14 @@ export function useNativeEventBridge() {
       events.onJob((ev) => {
         qc.invalidateQueries({ queryKey: qk.jobs });
         if (ev.status === "completed" || ev.status === "failed" || ev.status === "canceled") {
-          for (const key of [qk.sources, qk.people, qk.voice, qk.system, qk.onboarding]) {
+          for (const key of [
+            qk.sources,
+            qk.people,
+            qk.voice,
+            qk.system,
+            qk.onboarding,
+            qk.dashboard,
+          ]) {
             qc.invalidateQueries({ queryKey: key });
           }
           const label = JOB_LABELS[ev.type] ?? ev.type;

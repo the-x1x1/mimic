@@ -47,6 +47,8 @@ pub fn run() {
             commands::app::get_system_status,
             commands::app::get_onboarding_state,
             commands::app::complete_onboarding,
+            commands::dashboard::get_dashboard,
+            commands::dashboard::start_assist_drafts,
             commands::settings::get_settings,
             commands::settings::set_setting,
             commands::sources::list_connectors,

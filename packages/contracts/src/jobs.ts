@@ -45,9 +45,11 @@ export type JobEvent = z.infer<typeof JobEvent>;
 export const JOB_KINDS = {
   importSource: "import_source",
   analyzeVoice: "analyze_voice",
+  assistDrafts: "assist_drafts",
 } as const;
 
 export const JOB_LABELS: Record<string, string> = {
   import_source: "Importing messages",
   analyze_voice: "Analyzing how you write",
+  assist_drafts: "Preparing replies",
 };

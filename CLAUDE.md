@@ -36,8 +36,8 @@ Documentation follows reality. Never let a doc lead the code.
 ## Repository map
 
 ```
-apps/desktop/            Tauri 2 shell (src-tauri/, Rust) + React/TS frontend (src/)
-crates/mimic-core/       db, sources, import, voice, retrieval, generation, providers, privacy, jobs, engine client
+apps/desktop/            Tauri 2 shell (src-tauri/, Rust) + React/TS frontend (src/); Dashboard is the home screen
+crates/mimic-core/       db, sources, import, voice, retrieval, generation, providers, privacy, jobs, assist, dashboard, engine client
 engine/                  Python sidecar (uv): NDJSON protocol, text embeddings, similarity, evaluation
 packages/contracts/      zod contracts mirroring every IPC payload
 packages/ui/             design tokens + primitives
@@ -67,11 +67,13 @@ Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`
 
 Regenerating the contract fixtures after a deliberate shape change: `MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e`.
 
-## What is implemented (0.7.0-alpha.1)
+## What is implemented (0.8.0-alpha.1)
 
-Phase 0 (migration) is complete; Phase 1 (Mimic Core) is partial. Working end to end: schema v5 with a clean upgrade from the photography schema; the `CommunicationSource` contract with `mbox` and `mimic_json` connectors; streaming import with identity-based direction, dedupe, cancellation and free resume; the layered voice engine (global, channel, relationship) with deterministic metrics, a 20-message floor and deterministic representative examples; metadata-filtered lexical retrieval; the generation context builder and pure prompt assembler; the model-provider abstraction with a local endpoint and Anthropic; real cascading deletion with an honest preview; the Compose / People / Voice / Sources / Settings interface; and the recording half of the learning loop. As of 0.7.0 the first run is the part that has had attention: onboarding subscribes to native job events above the gate, names the state where an import matched none of the user's addresses, and lets someone with fewer than twenty own messages leave anyway; the provider badge and the Compose button follow a real reachability check instead of assuming the local endpoint is up.
+Phase 0 (migration) is complete; Phase 1 (Mimic Core) is partial. Working end to end: schema v5 with a clean upgrade from the photography schema; the `CommunicationSource` contract with `mbox` and `mimic_json` connectors; streaming import with identity-based direction, dedupe, cancellation and free resume; the layered voice engine (global, channel, relationship) with deterministic metrics, a 20-message floor and deterministic representative examples; metadata-filtered lexical retrieval; the generation context builder and pure prompt assembler; the model-provider abstraction with a local endpoint and Anthropic; real cascading deletion with an honest preview; the Dashboard / People / Voice / Sources / Settings interface, with Compose folded into the dashboard; and the recording half of the learning loop. As of 0.7.0 the first run is the part that has had attention: onboarding subscribes to native job events above the gate, names the state where an import matched none of the user's addresses, and lets someone with fewer than twenty own messages leave anyway; the provider badge and the Compose button follow a real reachability check instead of assuming the local endpoint is up.
 
-Not implemented, deliberately: situational classification; embedding-backed retrieval; feedback that changes a profile; the evaluation loop over a real corpus; any accuracy figure in the UI; ASSISTED and TRUSTED modes. See `docs/PROJECT_STATUS.md` for the row-by-row picture and `docs/ROADMAP.md` for where each lands.
+0.8.0 adds the home screen: threads whose last message came from someone else and was never answered, the draft Mimic has for each, and approve / modify / reject that records a real outcome. Assisted drafting (`assist.autoDraft`) prepares those drafts in the background after an import — off by default, bounded per run, and it never reaches a provider while off.
+
+Not implemented, deliberately: any send path; situational classification; embedding-backed retrieval; feedback that changes a profile; the evaluation loop over a real corpus; any accuracy figure in the UI; the inbox connector ASSISTED mode needs to be more than post-import drafting; TRUSTED mode. See `docs/PROJECT_STATUS.md` for the row-by-row picture and `docs/ROADMAP.md` for where each lands.
 
 ## How to update PROJECT_STATUS
 

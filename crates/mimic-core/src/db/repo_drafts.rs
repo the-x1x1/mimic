@@ -174,6 +174,33 @@ impl Db {
     }
 
     /// Feedback that no analysis version has consumed yet.
+    /// Drafts the user has not resolved yet, newest first. A draft is
+    /// "pending" purely because nothing has been recorded about what happened
+    /// to it — there is no separate approval state to drift out of step.
+    pub fn pending_drafts(&self, limit: usize) -> DbResult<Vec<Draft>> {
+        let conn = self.conn();
+        let sql =
+            format!("SELECT {COLS} FROM drafts WHERE outcome IS NULL ORDER BY created_at DESC, id DESC LIMIT {limit}");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], map)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// The newest unresolved draft for a conversation, if there is one.
+    pub fn pending_draft_for_conversation(&self, conversation_id: &str) -> DbResult<Option<Draft>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM drafts WHERE conversation_id = ?1 AND outcome IS NULL
+                     ORDER BY created_at DESC, id DESC LIMIT 1"
+                ),
+                [conversation_id],
+                map,
+            )
+            .optional()?)
+    }
+
     pub fn pending_feedback_count(&self) -> DbResult<i64> {
         Ok(self.conn().query_row(
             "SELECT COUNT(*) FROM draft_feedback WHERE applied_to_analysis_version IS NULL",

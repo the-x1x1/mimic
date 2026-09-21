@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { PenLine, Users, AudioLines, Inbox, Settings as SettingsIcon } from "lucide-react";
+import { LayoutDashboard, Users, AudioLines, Inbox, Settings as SettingsIcon } from "lucide-react";
 import { useSystemStatus } from "@/hooks/useSystem";
 import { useProviderHealth, useProviderState } from "@/hooks/useCompose";
 import { EngineBadge, ProviderBadge, UpdateBadge } from "./StatusBadges";
@@ -7,7 +7,7 @@ import { JobTray } from "./JobTray";
 import { Toaster } from "./Toaster";
 
 const NAV = [
-  { to: "/", label: "Compose", icon: PenLine, end: true },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/people", label: "People", icon: Users },
   { to: "/voice", label: "Voice", icon: AudioLines },
   { to: "/sources", label: "Sources", icon: Inbox },

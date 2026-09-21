@@ -15,7 +15,9 @@ pub struct AppState {
     pub db: Db,
     pub engine: EngineClient,
     pub jobs: JobRunner,
-    pub providers: RwLock<ProviderRegistry>,
+    /// Shared so background jobs can resolve the current provider without
+    /// holding a reference to the whole state.
+    pub providers: Arc<RwLock<ProviderRegistry>>,
     pub secrets: Arc<crate::secrets::FileSecretStore>,
     pub started_at: String,
     /// Repository root when running from `pnpm tauri dev` (used to find the engine).

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { Participant } from "./identity";
+import { Draft, DraftOutcomes } from "./compose";
 import { Job } from "./jobs";
 import { UpdateState } from "./updater";
 
@@ -139,3 +141,68 @@ export type SystemStatus = z.infer<typeof SystemStatus>;
 
 export const CommandError = z.object({ code: z.string(), message: z.string() });
 export type CommandError = z.infer<typeof CommandError>;
+
+// ------------------------------------------------------------- dashboard
+
+/**
+ * One row of the home screen: a conversation whose last message came from
+ * someone else and was never answered, plus the draft Mimic has for it, if it
+ * has one. `draft` is null until a draft actually exists — there is no
+ * placeholder state.
+ */
+export const DashboardThread = z.object({
+  conversationId: z.string(),
+  channel: z.string(),
+  subject: z.string().nullable(),
+  isGroup: z.boolean(),
+  messageCount: z.number(),
+  lastMessage: z.string(),
+  lastMessageAt: z.string().nullable(),
+  lastMessageId: z.string(),
+  participant: Participant.nullable(),
+  hasRelationshipProfile: z.boolean(),
+  draft: Draft.nullable(),
+});
+export type DashboardThread = z.infer<typeof DashboardThread>;
+
+export const Dashboard = z.object({
+  people: z.number(),
+  conversations: z.number(),
+  messages: z.number(),
+  ownMessages: z.number(),
+  awaiting: z.array(DashboardThread),
+  awaitingTotal: z.number(),
+  pendingDrafts: z.array(Draft),
+  outcomes: DraftOutcomes,
+  /** When the last import finished. Null before the first one. */
+  lastImportAt: z.string().nullable(),
+  /** Whether Mimic prepares replies without being asked. Off by default. */
+  autoDraft: z.boolean(),
+});
+export type Dashboard = z.infer<typeof Dashboard>;
+
+export const AssistSummary = z.object({
+  considered: z.number(),
+  drafted: z.number(),
+  failed: z.number(),
+  disabled: z.boolean(),
+});
+export type AssistSummary = z.infer<typeof AssistSummary>;
+
+/**
+ * What the dashboard says about itself, in one sentence. Kept here so the
+ * screen cannot quietly start implying that messages arrive on their own:
+ * nothing does until a connector exists, and this sentence says so.
+ */
+export function describeFeed(d: Dashboard): string {
+  if (d.lastImportAt === null) {
+    return "Nothing imported yet. Mimic reads exports you point it at; it is not connected to a mailbox.";
+  }
+  if (d.awaitingTotal === 0) {
+    return "Nothing is waiting on you in what has been imported.";
+  }
+  const shown =
+    d.awaiting.length < d.awaitingTotal ? ` Showing the ${d.awaiting.length} most recent.` : "";
+  const threads = d.awaitingTotal === 1 ? "1 thread" : `${d.awaitingTotal} threads`;
+  return `${threads} ended with a message from someone else.${shown}`;
+}

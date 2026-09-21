@@ -89,6 +89,15 @@ impl Db {
         }
         Ok(())
     }
+    /// When any source last finished an import. `None` before the first one,
+    /// which is how the dashboard knows not to describe itself as up to date.
+    pub fn last_import_at(&self) -> DbResult<Option<String>> {
+        Ok(self.conn().query_row(
+            "SELECT MAX(last_imported_at) FROM sources WHERE last_imported_at IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )?)
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,154 @@
+{
+  "people": 2,
+  "conversations": 3,
+  "messages": 46,
+  "ownMessages": 22,
+  "awaiting": [
+    {
+      "conversationId": "9e9300f7-1431-4c83-8f89-ec6b2954bc57",
+      "channel": "sms",
+      "subject": "Pub",
+      "isGroup": false,
+      "messageCount": 5,
+      "lastMessage": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
+      "lastMessageAt": "2026-01-25T18:40:00Z",
+      "lastMessageId": "9135d31a-ec6d-4698-9545-666f84f31cd9",
+      "participant": {
+        "id": "c8dc2790-0f5a-461b-aa6c-933356c94e07",
+        "displayName": "Bob",
+        "isSelf": false,
+        "relationship": null,
+        "notes": null,
+        "identifiers": [
+          {
+            "id": "0e522e75-fbaa-4223-8f4c-bf969f6d876f",
+            "kind": "phone",
+            "value": "+1 (555) 010-2222",
+            "normalizedValue": "5550102222"
+          }
+        ],
+        "createdAt": "2026-09-21T02:06:03.241Z",
+        "updatedAt": "2026-09-21T02:06:03.241Z"
+      },
+      "hasRelationshipProfile": false,
+      "draft": {
+        "id": "67965a7c-a402-4a0a-b39a-ffe9ff3210a9",
+        "participantId": "c8dc2790-0f5a-461b-aa6c-933356c94e07",
+        "conversationId": "9e9300f7-1431-4c83-8f89-ec6b2954bc57",
+        "channel": "sms",
+        "situationId": null,
+        "incomingMessage": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
+        "intent": null,
+        "generatedText": "sure, sending it now",
+        "finalText": null,
+        "provider": "mock",
+        "model": "mock-1",
+        "context": {
+          "layers": [
+            {
+              "layer": "global",
+              "sampleSize": 22,
+              "measurable": true
+            },
+            {
+              "layer": "channel",
+              "sampleSize": 2,
+              "measurable": false
+            }
+          ],
+          "adjustment": null,
+          "examples": 2
+        },
+        "promptHash": "6542754d351df432bad54975db5a9d4776849f70a7723ad0f53b75d5b4ceba66",
+        "evidence": {
+          "statements": [
+            "No profile for this person yet — using how you write generally, not how you write to them",
+            "22 of your messages overall",
+            "2 past replies of yours, chosen by similarity"
+          ],
+          "examples": [
+            {
+              "messageId": "370f313d-19a1-476f-a593-4b5c3ad3805e",
+              "reason": "similar wording: friday",
+              "score": 0.059
+            },
+            {
+              "messageId": "202fa5a7-fb15-423f-a385-cbe8c7580028",
+              "reason": "same person and channel",
+              "score": -0.0
+            }
+          ]
+        },
+        "createdAt": "2026-09-21T02:06:03.254Z",
+        "resolvedAt": null,
+        "outcome": null
+      }
+    }
+  ],
+  "awaitingTotal": 1,
+  "pendingDrafts": [
+    {
+      "id": "67965a7c-a402-4a0a-b39a-ffe9ff3210a9",
+      "participantId": "c8dc2790-0f5a-461b-aa6c-933356c94e07",
+      "conversationId": "9e9300f7-1431-4c83-8f89-ec6b2954bc57",
+      "channel": "sms",
+      "situationId": null,
+      "incomingMessage": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
+      "intent": null,
+      "generatedText": "sure, sending it now",
+      "finalText": null,
+      "provider": "mock",
+      "model": "mock-1",
+      "context": {
+        "layers": [
+          {
+            "layer": "global",
+            "sampleSize": 22,
+            "measurable": true
+          },
+          {
+            "layer": "channel",
+            "sampleSize": 2,
+            "measurable": false
+          }
+        ],
+        "adjustment": null,
+        "examples": 2
+      },
+      "promptHash": "6542754d351df432bad54975db5a9d4776849f70a7723ad0f53b75d5b4ceba66",
+      "evidence": {
+        "statements": [
+          "No profile for this person yet — using how you write generally, not how you write to them",
+          "22 of your messages overall",
+          "2 past replies of yours, chosen by similarity"
+        ],
+        "examples": [
+          {
+            "messageId": "370f313d-19a1-476f-a593-4b5c3ad3805e",
+            "reason": "similar wording: friday",
+            "score": 0.059
+          },
+          {
+            "messageId": "202fa5a7-fb15-423f-a385-cbe8c7580028",
+            "reason": "same person and channel",
+            "score": -0.0
+          }
+        ]
+      },
+      "createdAt": "2026-09-21T02:06:03.254Z",
+      "resolvedAt": null,
+      "outcome": null
+    }
+  ],
+  "outcomes": {
+    "total": 1,
+    "resolved": 0,
+    "sentUnedited": 0,
+    "sentEdited": 0,
+    "discarded": 0,
+    "uneditedRate": null,
+    "meanLengthDelta": null
+  },
+  "lastImportAt": "2026-09-21T02:06:03.243Z",
+  "autoDraft": true
+}

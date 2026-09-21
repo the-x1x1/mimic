@@ -1,4 +1,4 @@
-# Project status — 0.7.0-alpha.1
+# Project status — 0.8.0-alpha.1
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -137,6 +137,15 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 | Compose refuses to draft when the model is not answering                      | IMPLEMENTED | `contracts.test.ts` "refuses the draft outright when the model is not answering"               |
 | Diagnostics bundle, engine restart and update install reachable from Settings | IMPLEMENTED | `SettingsPage.tsx`; the commands were already tested natively                                  |
 | Conversation view; Compose opened from a thread                               | PLANNED     | Phase 5                                                                                        |
+
+## Assisted automation
+
+| Item                                                                | Status      | Evidence                                                                                                  |
+| ------------------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------- |
+| Background drafting for waiting threads (`assist.autoDraft`)        | IMPLEMENTED | `assist::tests` (4 tests); queued from `startup.rs` after an import or analysis                           |
+| Off unless the user turns it on; a disabled run reaches no provider | IMPLEMENTED | `assist::tests::nothing_is_drafted_while_the_setting_is_off`                                              |
+| Bounded per run, one draft per thread, cancellable                  | IMPLEMENTED | `assist::MAX_PER_RUN`; `a_waiting_thread_gets_one_draft_and_only_one`, `cancelling_stops_between_threads` |
+| A send path                                                         | UNSUPPORTED | Deliberate. Mimic drafts; the user sends. See `docs/PRODUCT.md`                                           |
 
 ## Packaging
 

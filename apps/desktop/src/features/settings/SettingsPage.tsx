@@ -23,6 +23,7 @@ export function SettingsPage() {
       <PageHeader title="Settings" />
       <IdentitySection />
       <ProviderSection />
+      <AssistSection />
       <EngineSection />
       <PrivacySection />
       <UpdatesSection />
@@ -202,6 +203,41 @@ function ProviderSection() {
           onBlur={(e) => ipc.setSetting("generation.localModel", e.target.value)}
         />
       </Field>
+    </Card>
+  );
+}
+
+/**
+ * Assisted drafting. This is the one setting that changes what leaves the
+ * machine without the user acting, so the copy says exactly that rather than
+ * "improve your experience", and it is off until turned on here.
+ */
+function AssistSection() {
+  const settings = useSettings();
+  const providers = useProviderState();
+  const active = providers.data?.providers.find((p) => p.id === providers.data?.active);
+  const on = settings.data?.["assist.autoDraft"] ?? false;
+  return (
+    <Card title="Preparing replies in advance">
+      <p className="neutral">
+        Mimic normally drafts only when you ask it to. With this on, it drafts a reply for every
+        thread that ends with someone else&rsquo;s message, after each import, and the dashboard
+        shows them waiting for your approval.
+      </p>
+      <label className="row gap-2">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => ipc.setSetting("assist.autoDraft", e.target.checked)}
+        />
+        <span>Prepare replies without asking me each time</span>
+      </label>
+      <p className="muted small">
+        {active?.local
+          ? `Those messages go to ${active.displayName}, which runs on this computer.`
+          : `Those messages are sent to ${active?.displayName ?? "the configured provider"} — including messages you have not read yet.`}{" "}
+        Mimic still never sends a reply: every draft waits for you.
+      </p>
     </Card>
   );
 }

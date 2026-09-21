@@ -18,6 +18,9 @@ pub fn defaults() -> Map<String, Value> {
     m.insert("generation.localUrl".into(), json!(crate::providers_config::DEFAULT_LOCAL_URL));
     m.insert("generation.localModel".into(), json!(crate::providers_config::DEFAULT_LOCAL_MODEL));
     m.insert("generation.anthropicModel".into(), json!(crate::providers_config::DEFAULT_ANTHROPIC_MODEL));
+    // Off by design: with it on, a model sees incoming messages the user did
+    // not personally hand it. See `mimic_core::assist`.
+    m.insert(mimic_core::assist::SETTING.into(), json!(false));
     m.insert("onboarding.completed".into(), json!(false));
     m
 }

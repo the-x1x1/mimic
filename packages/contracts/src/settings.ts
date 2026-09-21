@@ -11,6 +11,8 @@ export const Settings = z.object({
   "generation.localUrl": z.string(),
   "generation.localModel": z.string(),
   "generation.anthropicModel": z.string(),
+  /** Prepare replies without being asked. Off unless the user turns it on. */
+  "assist.autoDraft": z.boolean(),
   "onboarding.completed": z.boolean(),
 });
 export type Settings = z.infer<typeof Settings>;
