@@ -81,6 +81,26 @@ export function canFinishOnboarding(s: OnboardingState): boolean {
 }
 
 /**
+ * Whether the user can leave onboarding to look around, which is weaker again
+ * than `canFinishOnboarding`: nothing has been imported, so the app will be
+ * empty. It is allowed anyway. Exporting a mailbox is a real piece of work,
+ * and an app that will not open its own front door until you have done it is
+ * one nobody can evaluate before committing to it. Every screen already has an
+ * honest empty state, and the dashboard says in as many words that nothing has
+ * been imported and that Mimic is not connected to a mailbox.
+ *
+ * Identity is the one thing that stays mandatory, and not as a formality: the
+ * importer decides a message's `direction` by matching it against the
+ * identifiers declared here, so an import run before then attributes nothing
+ * to anyone and quietly produces a corpus with no evidence of the user's
+ * writing in it. One field is a fair price for not having that happen
+ * silently.
+ */
+export function canLeaveOnboarding(s: OnboardingState): boolean {
+  return s.hasIdentity;
+}
+
+/**
  * What the import step should show. The dead case is the middle one: an import
  * that read the file, attributed nothing to the user, and left the step
  * unfinished with no button on it. That happens when the declared identifiers

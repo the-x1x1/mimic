@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.8.0-alpha.1`
+## Current status — `0.8.0-alpha.2`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -31,7 +31,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | Deletion that actually deletes, with a preview that cannot understate it                             | Implemented and tested                                                                            |
 | Learning loop: draft → sent → diff → weighted feedback                                               | Recorded; nothing changes a profile from it yet (Phase 3)                                         |
 | Held-out evaluation harness                                                                          | Implemented; not yet run over a real corpus, so **no accuracy figure appears anywhere**           |
-| First run: onboarding that reacts to finished jobs and recovers from a bad import                    | Implemented and tested                                                                            |
+| First run: onboarding that reacts to finished jobs, recovers from a bad import, and can be left early | Implemented and tested                                                                            |
 | Model reachability: the badge and the draft button follow a real check                               | Implemented and tested                                                                            |
 | Windows installer and signed updater                                                                 | Plumbing unchanged from 0.5.0 and never observed producing a build end to end                     |
 
@@ -45,13 +45,14 @@ The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJ
 
 ## Quick start
 
-1. Install and launch. Onboarding asks four things, in order.
+1. Install and launch. Onboarding asks four things, in order. Only the first is required: once Mimic knows which addresses are yours, "Look around first" opens the empty app and setup waits for you under Sources.
 2. **Tell Mimic which addresses are yours.** This is not a profile page: it is how Mimic tells the messages you wrote from the ones you received, and everything downstream depends on it.
 3. **Add a source** — point Mimic at your export. It reads the file and tells you what it found before importing: how many messages, what date range, which addresses appear most often, and anything it could not make sense of.
 4. **Import.** Nothing is uploaded. Re-importing the same file later is free.
 5. **Analyze.** Mimic measures your own messages: length, punctuation, capitalization, how you open and close, the phrases you repeat, how quickly you reply. This is arithmetic over your text — no model is involved.
-6. **Compose.** Pick who it is going to, paste what you are replying to, say what you want to say in shorthand, and read the draft. Beside it, always: what it was based on.
-7. **Tell Mimic what you actually sent.** It compares its draft with your version and records the difference. This is the only way it improves, and it never sends anything for you.
+6. **The dashboard.** Mimic opens on the threads whose last message came from someone else and was never answered, with the draft it has for each and approve / modify / reject beside it.
+7. **Compose.** Pick who it is going to, paste what you are replying to, say what you want to say in shorthand, and read the draft. Beside it, always: what it was based on.
+8. **Tell Mimic what you actually sent.** It compares its draft with your version and records the difference. This is the only way it improves, and it never sends anything for you.
 
 Only import communication you own or have permission to process.
 

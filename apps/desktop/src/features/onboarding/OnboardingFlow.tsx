@@ -4,7 +4,9 @@ import {
   IDENTIFIER_LABELS,
   IdentifierKind,
   JOB_LABELS,
+  type OnboardingState,
   canFinishOnboarding,
+  canLeaveOnboarding,
   importStepState,
   nextOnboardingStep,
 } from "@mimic/contracts";
@@ -85,15 +87,39 @@ export function OnboardingFlow() {
 
         <ActiveWork />
 
-        {onboarding.data && step !== null && canFinishOnboarding(onboarding.data) ? (
-          <p className="muted small">
-            <Button variant="ghost" size="sm" onClick={finish}>
-              Skip the rest and use Mimic now
-            </Button>
-          </p>
-        ) : null}
+        {onboarding.data && step !== null ? <LeaveEarly state={onboarding.data} onLeave={finish} /> : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The way out, on every step that has one.
+ *
+ * There are two of them and they are not the same offer. Someone whose
+ * messages are already imported is being told they may skip the last step;
+ * someone who has imported nothing is being told they may look at an empty
+ * app, which is worth saying out loud rather than letting them find out.
+ */
+function LeaveEarly({ state, onLeave }: { state: OnboardingState; onLeave: () => void }) {
+  if (canFinishOnboarding(state)) {
+    return (
+      <p className="muted small">
+        <Button variant="ghost" size="sm" onClick={onLeave}>
+          Skip the rest and use Mimic now
+        </Button>
+      </p>
+    );
+  }
+  if (!canLeaveOnboarding(state)) return null;
+  return (
+    <p className="muted small">
+      <Button variant="ghost" size="sm" onClick={onLeave}>
+        Look around first
+      </Button>{" "}
+      Mimic will be empty until you import something — the dashboard, People and Voice all have
+      nothing to show yet. You can pick up setup again under Sources whenever you want.
+    </p>
   );
 }
 

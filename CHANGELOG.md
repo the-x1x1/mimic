@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.8.0-alpha.2] — 2026-09-21
+
+Onboarding no longer holds the app shut until a mailbox has been exported.
+
+### Fixed
+
+- **"Look around first"** on the source and import steps. Until now the only way past them was `canFinishOnboarding`, which requires messages of your own to already be imported, so a first run with nothing imported had no button on it at all — the app could not be looked at before committing to exporting a mailbox. Leaving early is now allowed from any step after identity, and the link says what to expect: an empty dashboard, an empty People and an empty Voice, with setup waiting under Sources.
+- Identity stays mandatory, and the reason is recorded next to the check rather than implied: the importer decides each message's `direction` by matching it against the declared identifiers, so an import run before one exists attributes nothing to anyone and produces a corpus with no evidence of the user's writing in it.
+
 ## [0.8.0-alpha.1] — 2026-09-20
 
 A home screen. Mimic opens on what is waiting for a reply, with the draft it has written for each one, and approve / modify / reject on every draft. Compose is folded into it rather than being a screen of its own.
