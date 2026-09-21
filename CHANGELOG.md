@@ -2,6 +2,24 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.9.0-alpha.3] — 2026-09-21
+
+Setup no longer requires knowing what Ollama is.
+
+### Added
+
+- **Mimic gets the model itself.** `localmodel.rs` observes what is actually on the machine — is anything listening, what does it have, is it the model Mimic wants — and computes the single next action from that: ready, get the host, or pull the model. Pulling is Mimic's job and it does the whole thing, streaming Ollama's NDJSON progress into a real progress bar with gigabyte figures, cancellable between lines rather than after several gigabytes, resilient to a line that does not parse, and never letting a multi-line error from the host reach the screen.
+- **Setup is three plain steps and none of them uses a technical word.** Your email address, your old mail, and the part that does the writing. The third runs in parallel rather than in sequence, because making someone watch a two-gigabyte download before they are allowed to go and export their mailbox wastes the one part of setup that takes real time. The same three states appear in Settings, first after Appearance, because "it isn't writing anything" is what brings people there.
+- Requests to the model host bypass any proxy in the environment. It is on this machine; a proxy has no business in that path, and on a managed machine it will swallow the request and report the host as absent.
+
+### Changed
+
+- The default local model is `llama3.2:3b` rather than `llama3.1:8b`. Setup now downloads this for people who have never installed one, and two gigabytes on a laptop is a different proposition from five. Anyone who wants a larger one changes it in Settings.
+
+### Not in this release
+
+**Mimic does not download or run the model host's installer.** Fetching an executable and launching it is only safe when the bytes are pinned to a hash that ships with the app, and such a hash goes stale the moment upstream publishes a new build. So that one step opens the official download page in the browser, the person installs it themselves, and Mimic watches and takes over again the moment it appears. One click, no terminal, and nothing executed that the user did not run.
+
 ## [0.9.0-alpha.2] — 2026-09-21
 
 One screen. Everything else is behind it, and Mimic says "I".

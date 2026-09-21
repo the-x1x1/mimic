@@ -49,6 +49,8 @@ pub fn run() {
             commands::app::complete_onboarding,
             commands::dashboard::get_dashboard,
             commands::dashboard::start_assist_drafts,
+            commands::localmodel::local_model_status,
+            commands::localmodel::start_model_pull,
             commands::settings::get_settings,
             commands::settings::set_setting,
             commands::sources::list_connectors,

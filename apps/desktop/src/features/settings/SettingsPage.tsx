@@ -21,6 +21,7 @@ import { toast } from "@/state/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/app/queryClient";
 import { DeleteEverythingDialog } from "./DeleteEverythingDialog";
+import { ModelStep } from "@/features/onboarding/ModelStep";
 
 export function SettingsPage() {
   return (
@@ -28,6 +29,7 @@ export function SettingsPage() {
       <PageHeader title="Settings" />
       <IdentitySection />
       <AppearanceSection />
+      <WritingEngineSection />
       <ProviderSection />
       <AssistSection />
       <EngineSection />
@@ -133,7 +135,7 @@ function ProviderSection() {
   }
 
   return (
-    <Card title="Model">
+    <Card title="Where your replies are written">
       {(providers.data?.providers ?? []).map((p) => (
         <div key={p.id} className="provider">
           <div className="row gap-2 between">
@@ -195,20 +197,38 @@ function ProviderSection() {
         </div>
       ))}
       <Field
-        label="Local endpoint"
-        hint="Anything that speaks the OpenAI chat API: Ollama, LM Studio, llama.cpp."
+        label="Where the model is"
+        hint="Anything on this computer that speaks the OpenAI chat API: Ollama, LM Studio, llama.cpp. Most people never touch this."
       >
         <input
           defaultValue={settings.data?.["generation.localUrl"] ?? ""}
           onBlur={(e) => ipc.setSetting("generation.localUrl", e.target.value)}
         />
       </Field>
-      <Field label="Local model">
+      <Field label="Which model">
         <input
           defaultValue={settings.data?.["generation.localModel"] ?? ""}
           onBlur={(e) => ipc.setSetting("generation.localModel", e.target.value)}
         />
       </Field>
+    </Card>
+  );
+}
+
+/**
+ * The same three states as setup, in the place someone comes back to when
+ * something has stopped working. It is the first section after Appearance
+ * because "it isn't writing anything" is the complaint that brings people to
+ * Settings at all.
+ */
+function WritingEngineSection() {
+  return (
+    <Card title="The part that does the writing">
+      <p className="neutral">
+        This runs on your computer rather than someone else&rsquo;s, which is why nothing you write
+        or receive leaves it.
+      </p>
+      <ModelStep />
     </Card>
   );
 }

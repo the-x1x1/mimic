@@ -20,3 +20,22 @@ export const ProviderState = z.object({
 export type ProviderState = z.infer<typeof ProviderState>;
 
 export const ANTHROPIC_SECRET_KEY = "provider.anthropic.apiKey";
+
+/**
+ * What is true about the model on this computer, and the one thing to do next.
+ *
+ * The step is computed in the core and sent here rather than being worked out
+ * on screen, so the UI cannot invent a fourth situation or disagree with the
+ * command that acts on it.
+ */
+export const LocalModelStatus = z.object({
+  endpoint: z.string(),
+  hostReachable: z.boolean(),
+  models: z.array(z.string()),
+  wanted: z.string(),
+  wantedPresent: z.boolean(),
+  error: z.string().nullable(),
+  nextStep: z.enum(["ready", "getTheHost", "pullModel"]),
+  downloadPage: z.string(),
+});
+export type LocalModelStatus = z.infer<typeof LocalModelStatus>;

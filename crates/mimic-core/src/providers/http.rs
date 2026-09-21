@@ -32,7 +32,7 @@ pub struct LocalHttpProvider {
 
 impl Default for LocalHttpProvider {
     fn default() -> Self {
-        Self { base_url: "http://127.0.0.1:11434/v1".into(), model: "llama3.1:8b".into() }
+        Self { base_url: "http://127.0.0.1:11434/v1".into(), model: "llama3.2:3b".into() }
     }
 }
 

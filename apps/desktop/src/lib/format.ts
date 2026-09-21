@@ -43,3 +43,15 @@ export function truncateMiddle(s: string, max = 48): string {
   const keep = Math.floor((max - 1) / 2);
   return `${s.slice(0, keep)}…${s.slice(-keep)}`;
 }
+
+/**
+ * Bytes, in the terms of someone watching a download rather than in the terms
+ * of the thing sending it. Until the host says how big the file is the total
+ * is zero, and the honest answer then is that it has started — not a
+ * percentage of a number nobody has.
+ */
+export function describeDownload(current: number, total: number): string {
+  if (total <= 0) return "Starting the download…";
+  const gb = (n: number) => `${(n / 1_000_000_000).toFixed(1)} GB`;
+  return `${gb(current)} of ${gb(total)}`;
+}

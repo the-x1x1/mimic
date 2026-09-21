@@ -37,7 +37,7 @@ Documentation follows reality. Never let a doc lead the code.
 
 ```
 apps/desktop/            Tauri 2 shell (src-tauri/, Rust) + React/TS frontend (src/); one screen (features/replies) with a drawer over it
-crates/mimic-core/       db, sources, import, voice, retrieval, generation, providers, privacy, jobs, assist, dashboard, engine client
+crates/mimic-core/       db, sources, import, voice, retrieval, generation, providers, privacy, jobs, assist, dashboard, localmodel, engine client
 engine/                  Python sidecar (uv): NDJSON protocol, text embeddings, similarity, evaluation
 packages/contracts/      zod contracts mirroring every IPC payload
 packages/ui/             design tokens + primitives
@@ -67,9 +67,11 @@ Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`
 
 Regenerating the contract fixtures after a deliberate shape change: `MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e`.
 
-## What is implemented (0.9.0-alpha.2)
+## What is implemented (0.9.0-alpha.3)
 
 Phase 0 (migration) is complete; Phase 1 (Mimic Core) is partial. Working end to end: schema v6 with a clean upgrade from the photography schema; the `CommunicationSource` contract with `mbox` and `mimic_json` connectors; streaming import with identity-based direction, dedupe, cancellation and free resume; the layered voice engine (global, channel, relationship) with deterministic metrics, a 20-message floor and deterministic representative examples; metadata-filtered lexical retrieval; the generation context builder and pure prompt assembler; the model-provider abstraction with a local endpoint and Anthropic; real cascading deletion with an honest preview; the one-screen interface, with People / How you write / Your mail / Settings in a drawer over it; and the recording half of the learning loop. As of 0.7.0 the first run is the part that has had attention: onboarding subscribes to native job events above the gate, names the state where an import matched none of the user's addresses, and lets someone with fewer than twenty own messages leave anyway; the provider badge and the Compose button follow a real reachability check instead of assuming the local endpoint is up.
+
+0.9.0-alpha.3 makes setup survivable by someone who has never installed a model: `localmodel` observes what is on the machine and computes one next action from it, and Mimic pulls the model itself with a real progress bar. It deliberately does not download or run the host's installer — see the note at the top of `localmodel.rs`.
 
 0.9.0-alpha.2 collapses the interface to one screen — who is waiting, what they said, what Mimic would say — with everything else in a drawer over it, and rewrites the copy in Mimic's own first person. No screen says direction, corpus, provider or profile.
 

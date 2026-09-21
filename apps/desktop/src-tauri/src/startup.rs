@@ -86,6 +86,13 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         mimic_core::import::ImportExecutor::shared(),
         mimic_core::voice::AnalyzeExecutor::shared(),
         mimic_core::assist::AssistExecutor::shared(resolve_provider),
+        // The endpoint and model are read per run for the same reason: a
+        // download queued before the user changed either should use what is
+        // configured when it starts, not when it was asked for.
+        mimic_core::localmodel::PullExecutor::shared(std::sync::Arc::new(|db| {
+            mimic_core::localmodel::configured(db)
+                .unwrap_or_else(|_| ("http://127.0.0.1:11434/v1".to_string(), "llama3.2:3b".to_string()))
+        })),
     ]));
     let jobs = JobRunner::new(db.clone(), executor);
     let (interrupted, requeued) = jobs.recover()?;

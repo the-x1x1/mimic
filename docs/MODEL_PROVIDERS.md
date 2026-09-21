@@ -20,7 +20,7 @@ A provider takes an assembled prompt and returns text. It never sees the databas
 
 ### `local` — an OpenAI-compatible endpoint on this machine
 
-Default: `http://127.0.0.1:11434/v1` with `llama3.1:8b`, which is Ollama out of the box. LM Studio and llama.cpp's server speak the same shape.
+Default: `http://127.0.0.1:11434/v1` with `llama3.2:3b`, which is Ollama out of the box. The small model is deliberate: setup downloads it for people who have never installed one, and two gigabytes on a laptop is a different proposition from five. Anyone who wants a larger one changes it in Settings. LM Studio and llama.cpp's server speak the same shape.
 
 `info().local` is computed from the configured URL rather than hard-coded. Pointing "local" at `192.168.1.50` stops it being local, the badge changes, and the description says the messages are sent to it. A provider that claims to be private while it is not is worse than no provider.
 

@@ -10,6 +10,7 @@ export const queryClient = new QueryClient({
 export const qk = {
   appInfo: ["appInfo"] as const,
   dashboard: ["dashboard"] as const,
+  localModel: ["localModel"] as const,
   system: ["system"] as const,
   onboarding: ["onboarding"] as const,
   settings: ["settings"] as const,
