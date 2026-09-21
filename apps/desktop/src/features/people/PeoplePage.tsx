@@ -24,7 +24,7 @@ export function PeoplePage() {
   if (people.isSuccess && people.data.length === 0) {
     return (
       <EmptyState
-        title="No one yet"
+        title="I haven’t met anyone yet"
         body="People appear here once you import messages. Mimic works out who is who from the addresses on them."
       />
     );
@@ -34,7 +34,7 @@ export function PeoplePage() {
     <div className="stack gap-3">
       <PageHeader
         title="People"
-        subtitle="Everyone Mimic has seen you talk to. Telling it how you know someone changes how it writes to them."
+        subtitle="Everyone I’ve seen you write to. Tell me how you know someone and I’ll write to them differently."
       />
       <Card>
         <table className="table">

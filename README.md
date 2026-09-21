@@ -10,14 +10,14 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.9.0-alpha.1`
+## Current status — `0.9.0-alpha.2`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
 | Area                                                                                                  | Status                                                                                            |
 | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Desktop shell: Dashboard (home) / People / Voice / Sources / Settings                                 | Implemented                                                                                       |
-| Dashboard: threads awaiting a reply, with approve / modify / reject on each draft                     | Implemented and tested                                                                            |
+| Desktop shell: one screen, with People / How you write / Your mail / Settings in a drawer over it     | Implemented                                                                                       |
+| The one screen: who is waiting, and use / change / drop on each reply                                 | Implemented and tested                                                                            |
 | Assisted drafting in the background, off by default                                                   | Implemented and tested; needs a connector before it is "in advance" rather than "after an import" |
 | Sending a reply                                                                                       | Deliberately not built                                                                            |
 | SQLite schema v6, migrations, backup before upgrade, resumable jobs                                   | Implemented and tested                                                                            |
@@ -50,8 +50,8 @@ The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJ
 3. **Add a source** — point Mimic at your export. It reads the file and tells you what it found before importing: how many messages, what date range, which addresses appear most often, and anything it could not make sense of.
 4. **Import.** Nothing is uploaded. Re-importing the same file later is free.
 5. **Analyze.** Mimic measures your own messages: length, punctuation, capitalization, how you open and close, the phrases you repeat, how quickly you reply. This is arithmetic over your text — no model is involved.
-6. **The dashboard.** Mimic opens on the threads whose last message came from someone else and was never answered, with the draft it has for each and approve / modify / reject beside it.
-7. **Compose.** Pick who it is going to, paste what you are replying to, say what you want to say in shorthand, and read the draft. Beside it, always: what it was based on.
+6. **The one screen.** Mimic opens on whoever is waiting on a reply, with what they wrote and what Mimic would say back, and use / change / drop beside each one.
+7. **Writing something new** lives behind “Write something new”: pick who it is going to, say what you want to say in shorthand, and read the draft. Beside it, always: what it was based on.
 8. **Tell Mimic what you actually sent.** It compares its draft with your version and records the difference. This is the only way it improves, and it never sends anything for you.
 
 Only import communication you own or have permission to process.

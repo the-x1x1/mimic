@@ -38,13 +38,13 @@ Beside the draft, always: what it was based on. Which voice layers applied, how 
 
 Five screens.
 
-| Screen        | What it is for                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------ |
-| **Dashboard** | Home. What is waiting on a reply, the draft Mimic has for each, and the box for writing something new. |
-| **People**    | Everyone Mimic has seen. Say how you know them; see how much it has learned; delete them.              |
-| **Voice**     | What Mimic has measured about how you write, per layer, with the examples that back each one.          |
-| **Sources**   | Where messages came from. Add, re-import, remove.                                                      |
-| **Settings**  | Your own addresses, the model provider, privacy, deletion.                                             |
+| Screen       | What it is for                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| **Replies**  | The only screen. Who is waiting, what they wrote, and what Mimic would say back, with use / change / drop on each one. |
+| **People**   | Everyone Mimic has seen. Say how you know them; see how much it has learned; delete them.                              |
+| **Voice**    | What Mimic has measured about how you write, per layer, with the examples that back each one.                          |
+| **Sources**  | Where messages came from. Add, re-import, remove.                                                                      |
+| **Settings** | Your own addresses, the model provider, privacy, deletion.                                                             |
 
 ## Autonomy
 

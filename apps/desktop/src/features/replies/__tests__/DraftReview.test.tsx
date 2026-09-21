@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { Draft } from "@mimic/contracts";
-import { DraftReview } from "../DashboardPage";
+import { DraftReview } from "../RepliesPage";
 
 const draft = (over: Partial<Draft> = {}): Draft => ({
   id: "d1",
@@ -37,22 +37,22 @@ function renderReview(d: Draft) {
 describe("reviewing a prepared draft", () => {
   it("offers approve, modify and reject, and never claims to send", () => {
     renderReview(draft());
-    expect(screen.getByText("Approve and copy")).toBeInTheDocument();
-    expect(screen.getByText("Modify")).toBeInTheDocument();
-    expect(screen.getByText("Reject")).toBeInTheDocument();
-    expect(screen.getByText(/Mimic never sends anything itself/)).toBeInTheDocument();
+    expect(screen.getByText("Use this")).toBeInTheDocument();
+    expect(screen.getByText("Change it")).toBeInTheDocument();
+    expect(screen.getByText("Not this one")).toBeInTheDocument();
+    expect(screen.getByText(/I never send anything/)).toBeInTheDocument();
     expect(screen.queryByText(/^Send$/)).toBeNull();
   });
 
   it("warns that a draft prepared in advance had no intent behind it", () => {
     renderReview(draft());
-    expect(screen.getByText(/you never stated an intent/)).toBeInTheDocument();
+    expect(screen.getByText(/didn't tell me what you wanted to say/)).toBeInTheDocument();
   });
 
   it("does not warn when the user said what they wanted", () => {
     renderReview(draft({ intent: "confirm friday, promise numbers thursday" }));
-    expect(screen.queryByText(/you never stated an intent/)).toBeNull();
-    expect(screen.getByText(/Written from what you said/)).toBeInTheDocument();
+    expect(screen.queryByText(/didn't tell me what you wanted to say/)).toBeNull();
+    expect(screen.getByText(/Written from what you told me/)).toBeInTheDocument();
   });
 
   it("shows the draft text itself, so approving is not blind", () => {

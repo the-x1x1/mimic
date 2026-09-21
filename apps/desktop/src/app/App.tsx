@@ -5,12 +5,12 @@ import { Button, EmptyState } from "@mimic/ui";
 import { queryClient } from "./queryClient";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { AppShell } from "@/components/AppShell";
-import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { PeoplePage } from "@/features/people/PeoplePage";
 import { VoicePage } from "@/features/voice/VoicePage";
 import { SourcesPage } from "@/features/sources/SourcesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { OnboardingFlow } from "@/features/onboarding/OnboardingFlow";
+import { ComposePanel } from "@/features/compose/ComposePanel";
 import { useNativeEventBridge, useOnboardingState, useSettings } from "@/hooks/useSystem";
 import { useUpdater } from "@/features/updater/useUpdater";
 import { isTauri } from "@/lib/tauri";
@@ -72,8 +72,11 @@ function Gate() {
   }
   return (
     <Routes>
+      {/* The shell renders the replies screen itself; these render in the
+          drawer over it, which is why "/" has no element of its own. */}
       <Route element={<AppShell />}>
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/" element={null} />
+        <Route path="/write" element={<ComposePanel />} />
         <Route path="/people" element={<PeoplePage />} />
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/sources" element={<SourcesPage />} />

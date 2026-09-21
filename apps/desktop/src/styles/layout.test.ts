@@ -26,18 +26,14 @@ function declarations(selector: string): string {
   return out;
 }
 
-describe("the shell is the window, and only the content scrolls", () => {
-  it("keeps the main column from growing past its grid row", () => {
-    // Without this the content pane cannot scroll: it grows instead, taking
-    // the sidebar's nav and the top bar off the top of the screen.
-    expect(declarations(".main")).toMatch(/min-height:\s*0/);
+describe("the app is the window, and only the content scrolls", () => {
+  it("keeps the scrolling pane from growing past its row", () => {
+    // Without this the content pane cannot scroll: it grows instead, and the
+    // top bar is the first thing to leave the screen.
+    expect(declarations(".app")).toMatch(/grid-template-rows:\s*auto minmax\(0, 1fr\)/);
+    expect(declarations(".app")).toMatch(/overflow:\s*hidden/);
+    expect(declarations(".content")).toMatch(/min-height:\s*0/);
     expect(declarations(".content")).toMatch(/overflow:\s*auto/);
-  });
-
-  it("clips the shell itself rather than letting the document scroll", () => {
-    const shell = declarations(".shell");
-    expect(shell).toMatch(/grid-template-rows:\s*100%/);
-    expect(shell).toMatch(/overflow:\s*hidden/);
   });
 
   it("holds page content to one measure", () => {

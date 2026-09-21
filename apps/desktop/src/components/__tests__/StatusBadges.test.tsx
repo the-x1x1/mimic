@@ -14,14 +14,14 @@ const provider = (over: Partial<ProviderInfo> = {}): ProviderInfo => ({
 });
 
 describe("ProviderBadge", () => {
-  it("says plainly when a provider keeps messages on the machine", () => {
+  it("says plainly when the writing happens on this machine", () => {
     render(<ProviderBadge provider={provider()} />);
-    expect(screen.getByText("Local model")).toBeInTheDocument();
+    expect(screen.getByText("Writing on this computer")).toBeInTheDocument();
   });
 
   it("says plainly when it does not", () => {
     render(<ProviderBadge provider={provider({ local: false, displayName: "Claude" })} />);
-    expect(screen.getByText("Sends to Claude")).toBeInTheDocument();
+    expect(screen.getByText("Writing at Claude")).toBeInTheDocument();
   });
 
   it("stops claiming a model is there when it does not answer", () => {
@@ -31,16 +31,16 @@ describe("ProviderBadge", () => {
         health={{ reachable: false, error: "connection refused" }}
       />,
     );
-    expect(screen.getByText("Local model · not answering")).toBeInTheDocument();
+    expect(screen.getByText("Writing on this computer · not answering")).toBeInTheDocument();
   });
 
   it("says nothing new until the check has actually run", () => {
     render(<ProviderBadge provider={provider()} health={undefined} />);
-    expect(screen.getByText("Local model")).toBeInTheDocument();
+    expect(screen.getByText("Writing on this computer")).toBeInTheDocument();
   });
 
-  it("does not imply a provider exists when none is configured", () => {
+  it("does not imply something is set up when nothing is", () => {
     render(<ProviderBadge provider={undefined} />);
-    expect(screen.getByText("No model configured")).toBeInTheDocument();
+    expect(screen.getByText("Nothing set up to write with")).toBeInTheDocument();
   });
 });

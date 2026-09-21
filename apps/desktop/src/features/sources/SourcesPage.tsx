@@ -23,8 +23,8 @@ export function SourcesPage() {
   return (
     <div className="stack gap-3">
       <PageHeader
-        title="Sources"
-        subtitle="Where your messages come from. Everything is read from files you point Mimic at; nothing is uploaded."
+        title="Your mail"
+        subtitle="Everything I know comes from files you hand me. Nothing is uploaded, and nothing arrives on its own."
         actions={
           <Button variant="primary" onClick={() => setAdding(true)}>
             Add a source
@@ -34,7 +34,7 @@ export function SourcesPage() {
 
       {sources.isSuccess && sources.data.length === 0 ? (
         <EmptyState
-          title="No sources yet"
+          title="You haven't given me any mail yet"
           body="Export your mail or messages and point Mimic at the file. Only import conversations you own or have permission to process."
           primary={
             <Button variant="primary" onClick={() => setAdding(true)}>

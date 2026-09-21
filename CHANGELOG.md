@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.9.0-alpha.2] — 2026-09-21
+
+One screen. Everything else is behind it, and Mimic says "I".
+
+### Changed
+
+- **The five-item sidebar is gone.** There is one screen — who is waiting, what they said, what Mimic would say back — and People, How you write, Your mail and Settings open in a drawer over it and close back onto it. The routes are unchanged, so every link and deep link still works; they land on the drawer instead of a page of their own. A sidebar asks someone to choose where to go before they have seen anything, and on this app the answer is always "the replies".
+- **Mimic writes in the first person.** "I'd say", "I haven't written this one yet", "I never send anything". The buttons say what they do in the words a person would use: Use this, Change it, Not this one. Nothing on screen says direction, corpus, provider or profile any more — the model badge says "Writing on this computer" or "Writing at Claude", which is the fact that actually matters, and the engine badge says whether it is working rather than naming a sidecar.
+- **`describeWaiting` replaces `describeFeed`.** It counts people only when every waiting thread really is one person: a group is not a person and an unattributed thread is nobody, so it steps back to "conversation" rather than guessing. With nothing imported it says so first, before anything else on the screen.
+- A thread with no draft now takes a line of shorthand and writes from that, rather than only offering a bare "Draft a reply" — and when Mimic has not seen enough of your mail with someone to know how you write to them, it says so there instead of drafting as if it had.
+- Escape closes the drawer, and there is a "Back to replies" button, because a panel dismissible only by a small × is a panel people get stuck in.
+
 ## [0.9.0-alpha.1] — 2026-09-21
 
 A design system with an idea in it, and three themes that are actually different.

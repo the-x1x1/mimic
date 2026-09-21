@@ -33,7 +33,7 @@ export function VoicePage() {
   if (overview.isSuccess && o!.ownMessages === 0) {
     return (
       <EmptyState
-        title="Mimic has not read anything you wrote"
+        title="I haven't read anything you wrote yet"
         body="It learns only from messages you sent, not ones you received. Import a source, and make sure every address you write from is listed under Settings — a missing one makes your own messages look like someone else's."
         primary={
           <Link to="/sources" className="ui-button ui-button--primary">
@@ -47,8 +47,8 @@ export function VoicePage() {
   return (
     <div className="stack gap-3">
       <PageHeader
-        title="Voice"
-        subtitle="Everything here was measured from your own messages. Nothing is estimated."
+        title="How you write"
+        subtitle="Everything here I counted in mail you sent. Nothing here is a guess."
         actions={
           <Button variant="primary" onClick={() => analyze.mutate()} disabled={analyze.isPending}>
             {o?.stale ? "Re-analyze" : "Analyze again"}
@@ -151,7 +151,7 @@ function Examples({ layer, scopeKey }: { layer: string; scopeKey: string }) {
   const examples = useVoiceExamples(layer, scopeKey);
   if (examples.isLoading) return <p className="neutral">Loading…</p>;
   if (!examples.data?.length)
-    return <p className="neutral">No examples were selected for this one.</p>;
+    return <p className="neutral">I didn’t pick out any examples for this one.</p>;
   return (
     <ul className="examples">
       {examples.data.map((e) => (

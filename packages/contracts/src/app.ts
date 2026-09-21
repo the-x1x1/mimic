@@ -210,19 +210,35 @@ export const AssistSummary = z.object({
 export type AssistSummary = z.infer<typeof AssistSummary>;
 
 /**
- * What the dashboard says about itself, in one sentence. Kept here so the
- * screen cannot quietly start implying that messages arrive on their own:
- * nothing does until a connector exists, and this sentence says so.
+ * The one sentence at the top of the home screen, in Mimic's own voice.
+ *
+ * Mimic speaks in the first person here and everywhere else a person reads it,
+ * because "Mimic reads exports you point it at" is a sentence about a program
+ * and "I haven't read any of your mail yet" is a sentence to a person. What it
+ * must not do is imply that mail arrives on its own: nothing does until there
+ * is a connector, and the first branch below says so plainly.
+ *
+ * Whether it counts people or conversations is decided by what is actually
+ * waiting rather than by which word sounds friendlier — a group thread is not
+ * a person, and an unattributed one is nobody.
  */
-export function describeFeed(d: Dashboard): string {
+export function describeWaiting(d: Dashboard): string {
   if (d.lastImportAt === null) {
-    return "Nothing imported yet. Mimic reads exports you point it at; it is not connected to a mailbox.";
+    return "I haven't read any of your mail yet, so there's nothing here. Point me at it and this fills up.";
   }
   if (d.awaitingTotal === 0) {
-    return "Nothing is waiting on you in what has been imported.";
+    return "You're all caught up. Nobody is waiting on a reply.";
   }
+  const everyoneIsAPerson = d.awaiting.every((t) => t.participant !== null && !t.isGroup);
+  const noun = everyoneIsAPerson
+    ? d.awaitingTotal === 1
+      ? "person is"
+      : "people are"
+    : d.awaitingTotal === 1
+      ? "conversation is"
+      : "conversations are";
+  const count = d.awaitingTotal === 1 ? "One" : String(d.awaitingTotal);
   const shown =
-    d.awaiting.length < d.awaitingTotal ? ` Showing the ${d.awaiting.length} most recent.` : "";
-  const threads = d.awaitingTotal === 1 ? "1 thread" : `${d.awaitingTotal} threads`;
-  return `${threads} ended with a message from someone else.${shown}`;
+    d.awaiting.length < d.awaitingTotal ? ` Here are the ${d.awaiting.length} most recent.` : "";
+  return `${count} ${noun} waiting on you.${shown}`;
 }
