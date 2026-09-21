@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countOf, formatBytes, formatRelative, truncateMiddle } from "./format";
+import { countOf, describeDownload, formatBytes, formatRelative, truncateMiddle } from "./format";
 
 describe("format helpers", () => {
   it("bytes", () => {
@@ -19,5 +19,16 @@ describe("format helpers", () => {
     expect(countOf(0, "message")).toBe("0 messages");
     expect(countOf(2400, "person", "people")).toBe("2,400 people");
     expect(truncateMiddle("abcdefghijklmnop", 9)).toBe("abcd…mnop");
+  });
+});
+
+describe("a download in progress", () => {
+  it("does not report a percentage of a size nobody has yet", () => {
+    expect(describeDownload(0, 0)).toBe("Starting the download…");
+    expect(describeDownload(4_000_000, 0)).toBe("Starting the download…");
+  });
+
+  it("counts in gigabytes once the host says how big it is", () => {
+    expect(describeDownload(640_000_000, 2_100_000_000)).toBe("0.6 GB of 2.1 GB");
   });
 });

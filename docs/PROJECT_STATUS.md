@@ -1,4 +1,4 @@
-# Project status — 0.9.0-alpha.2
+# Project status — 0.9.0-alpha.3
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -123,29 +123,32 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 
 ## Interface
 
-| Item                                                                               | Status      | Evidence                                                                                       |
-| ---------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------- |
-| Compose / People / Voice / Sources / Settings                                      | IMPLEMENTED | `apps/desktop/src/features/`                                                                   |
-| Evidence panel with measured habits and examples                                   | IMPLEMENTED | `EvidencePanel.test.tsx` (5 tests)                                                             |
-| The provider's locality is shown in the top bar                                    | IMPLEMENTED | `StatusBadges.test.tsx`                                                                        |
-| The window does not scroll; only the content pane does                             | IMPLEMENTED | `layout.test.ts` "the shell is the window, and only the content scrolls"                       |
-| There is one screen; everything else opens in a drawer over it                     | IMPLEMENTED | `layout.test.ts` "the app is the window, and only the content scrolls"; `AppShell.tsx`         |
-| The home screen counts people only when every waiting thread is one person         | IMPLEMENTED | `contracts.test.ts` "counts people only when every waiting thread really is one person"        |
-| No control falls back to the system's own styling                                  | IMPLEMENTED | `layout.test.ts` "no control falls back to the system's own styling"                           |
-| Anything that is writing is set as a letter, in every theme                        | IMPLEMENTED | `tokens.test.ts` "the serif carries the writing"                                               |
-| Three themes come from one token set, with no component branching on the name      | IMPLEMENTED | `tokens.test.ts` "every theme defines every token the others do"                               |
-| An older install's theme name is carried over rather than failing validation       | IMPLEMENTED | `migrations::tests::an_old_theme_name_is_carried_over_instead_of_breaking_the_first_render`    |
-| Deletion dialog states consequences, not counts                                    | IMPLEMENTED | `contracts.test.ts` "deletion is described in consequences"                                    |
-| Onboarding advances on facts, not checkboxes                                       | IMPLEMENTED | `contracts.test.ts` "onboarding advances on facts"                                             |
-| Onboarding reacts to a finished import or analysis                                 | IMPLEMENTED | `useNativeEventBridge` mounted above the gate in `App.tsx`                                     |
-| Onboarding recovers from an import that matched none of the user's addresses       | IMPLEMENTED | `contracts.test.ts` "onboarding cannot dead-end"; `importStepState`                            |
-| A user under the twenty-message floor can still leave onboarding                   | IMPLEMENTED | `contracts.test.ts` `canFinishOnboarding`                                                      |
-| A user who has imported nothing can still leave onboarding and look around         | IMPLEMENTED | `contracts.test.ts` "lets someone who has imported nothing look around anyway"                 |
-| Onboarding holds the identity step, because an import before it attributes nothing | IMPLEMENTED | `contracts.test.ts` "holds the identity step"                                                  |
-| The model badge follows a real reachability check                                  | IMPLEMENTED | `StatusBadges.test.tsx`; `http::tests::a_local_endpoint_with_nothing_listening_is_unreachable` |
-| Compose refuses to draft when the model is not answering                           | IMPLEMENTED | `contracts.test.ts` "refuses the draft outright when the model is not answering"               |
-| Diagnostics bundle, engine restart and update install reachable from Settings      | IMPLEMENTED | `SettingsPage.tsx`; the commands were already tested natively                                  |
-| Conversation view; Compose opened from a thread                                    | PLANNED     | Phase 5                                                                                        |
+| Item                                                                               | Status      | Evidence                                                                                                                                        |
+| ---------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Compose / People / Voice / Sources / Settings                                      | IMPLEMENTED | `apps/desktop/src/features/`                                                                                                                    |
+| Evidence panel with measured habits and examples                                   | IMPLEMENTED | `EvidencePanel.test.tsx` (5 tests)                                                                                                              |
+| The provider's locality is shown in the top bar                                    | IMPLEMENTED | `StatusBadges.test.tsx`                                                                                                                         |
+| The window does not scroll; only the content pane does                             | IMPLEMENTED | `layout.test.ts` "the shell is the window, and only the content scrolls"                                                                        |
+| There is one screen; everything else opens in a drawer over it                     | IMPLEMENTED | `layout.test.ts` "the app is the window, and only the content scrolls"; `AppShell.tsx`                                                          |
+| The next setup action is computed from what is on the machine, not assumed         | IMPLEMENTED | `localmodel::tests::the_next_step_follows_from_what_was_observed`                                                                               |
+| Mimic downloads the model itself, with real progress and cancellation              | IMPLEMENTED | `localmodel::tests::progress_follows_the_stream_and_the_last_line_wins`, `cancelling_stops_before_the_next_line_rather_than_after_the_download` |
+| Mimic never downloads or runs the model host's installer                           | UNSUPPORTED | Deliberate; the reasoning is at the top of `crates/mimic-core/src/localmodel.rs`                                                                |
+| The home screen counts people only when every waiting thread is one person         | IMPLEMENTED | `contracts.test.ts` "counts people only when every waiting thread really is one person"                                                         |
+| No control falls back to the system's own styling                                  | IMPLEMENTED | `layout.test.ts` "no control falls back to the system's own styling"                                                                            |
+| Anything that is writing is set as a letter, in every theme                        | IMPLEMENTED | `tokens.test.ts` "the serif carries the writing"                                                                                                |
+| Three themes come from one token set, with no component branching on the name      | IMPLEMENTED | `tokens.test.ts` "every theme defines every token the others do"                                                                                |
+| An older install's theme name is carried over rather than failing validation       | IMPLEMENTED | `migrations::tests::an_old_theme_name_is_carried_over_instead_of_breaking_the_first_render`                                                     |
+| Deletion dialog states consequences, not counts                                    | IMPLEMENTED | `contracts.test.ts` "deletion is described in consequences"                                                                                     |
+| Onboarding advances on facts, not checkboxes                                       | IMPLEMENTED | `contracts.test.ts` "onboarding advances on facts"                                                                                              |
+| Onboarding reacts to a finished import or analysis                                 | IMPLEMENTED | `useNativeEventBridge` mounted above the gate in `App.tsx`                                                                                      |
+| Onboarding recovers from an import that matched none of the user's addresses       | IMPLEMENTED | `contracts.test.ts` "onboarding cannot dead-end"; `importStepState`                                                                             |
+| A user under the twenty-message floor can still leave onboarding                   | IMPLEMENTED | `contracts.test.ts` `canFinishOnboarding`                                                                                                       |
+| A user who has imported nothing can still leave onboarding and look around         | IMPLEMENTED | `contracts.test.ts` "lets someone who has imported nothing look around anyway"                                                                  |
+| Onboarding holds the identity step, because an import before it attributes nothing | IMPLEMENTED | `contracts.test.ts` "holds the identity step"                                                                                                   |
+| The model badge follows a real reachability check                                  | IMPLEMENTED | `StatusBadges.test.tsx`; `http::tests::a_local_endpoint_with_nothing_listening_is_unreachable`                                                  |
+| Compose refuses to draft when the model is not answering                           | IMPLEMENTED | `contracts.test.ts` "refuses the draft outright when the model is not answering"                                                                |
+| Diagnostics bundle, engine restart and update install reachable from Settings      | IMPLEMENTED | `SettingsPage.tsx`; the commands were already tested natively                                                                                   |
+| Conversation view; Compose opened from a thread                                    | PLANNED     | Phase 5                                                                                                                                         |
 
 ## Assisted automation
 

@@ -3,6 +3,7 @@ pub mod compose;
 pub mod dashboard;
 pub mod diagnostics;
 pub mod jobs;
+pub mod localmodel;
 pub mod people;
 pub mod providers;
 pub mod settings;

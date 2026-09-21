@@ -7,7 +7,7 @@ use mimic_core::providers::http::{AnthropicProvider, LocalHttpProvider};
 use mimic_core::providers::{ModelProvider, SecretStore};
 
 pub const DEFAULT_LOCAL_URL: &str = "http://127.0.0.1:11434/v1";
-pub const DEFAULT_LOCAL_MODEL: &str = "llama3.1:8b";
+pub const DEFAULT_LOCAL_MODEL: &str = "llama3.2:3b";
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
 
 /// The local provider is always offered, even when nothing is listening on the

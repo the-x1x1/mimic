@@ -16,15 +16,20 @@ import { useSources, useStartImport, useDeleteSource } from "@/hooks/useSources"
 import { useStartAnalysis } from "@/hooks/useVoice";
 import { useJobs } from "@/hooks/useJobs";
 import { AddSourceDialog } from "@/features/sources/AddSourceDialog";
+import { ModelStep } from "./ModelStep";
 import { ipc } from "@/lib/ipc";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/app/queryClient";
 
 /**
- * Four steps, each gated on a fact rather than a checkbox: who you are, where
- * your messages come from, importing them, analyzing them. The step the user
- * is on is derived from the database, so closing the app mid-way resumes
- * exactly where it left off.
+ * Setting up, in as few decisions as it can be reduced to.
+ *
+ * The mail steps run in order, each gated on a fact about the database rather
+ * than on a checkbox, so closing the app mid-way resumes exactly where it left
+ * off. Getting the writing engine does not run in order: it is a download of a
+ * couple of gigabytes, and making someone watch it before they are allowed to
+ * go and export their mailbox wastes the one part of setup that takes real
+ * time. So it sits below, running in parallel, and says where it has got to.
  *
  * Two things this screen must never do, both of which it used to: sit on a
  * step that a finished background job has already completed, and reach a state
@@ -58,13 +63,13 @@ export function OnboardingFlow() {
   return (
     <div className="onboarding">
       <div className="onboarding__inner">
-        <h1 className="onboarding__title">Mimic</h1>
+        <h1 className="onboarding__title">Let&rsquo;s get you set up.</h1>
         <p className="onboarding__lede">
-          Mimic learns how you communicate from messages you have already written, and helps you
-          draft replies that sound like yourself. Everything stays on this computer.
+          I learn how you write by reading mail you&rsquo;ve already sent, and then I draft your
+          replies for you to check and send. Everything stays on this computer.
         </p>
         <p className="muted small">
-          Only import conversations you own or have permission to process.
+          Only bring in mail that is yours, or that you have permission to read.
         </p>
 
         {step === "identity" ? (
@@ -74,16 +79,25 @@ export function OnboardingFlow() {
         {step === "import" ? <ImportStep /> : null}
         {step === "analyze" ? <AnalyzeStep onFinish={finish} /> : null}
         {step === null && onboarding.data ? (
-          <Card title="Ready">
+          <Card title="That&rsquo;s everything">
             <p>
-              Mimic has read your messages and worked out how you write. The Compose screen is where
-              you use it.
+              I&rsquo;ve read your mail and worked out how you write. Let&rsquo;s see who&rsquo;s
+              waiting on you.
             </p>
             <Button variant="primary" onClick={finish}>
-              Start using Mimic
+              Take me in
             </Button>
           </Card>
         ) : null}
+
+        <Card title="The part that does the writing">
+          <p className="neutral">
+            This runs on your computer rather than someone else&rsquo;s, which is why your mail
+            never leaves it. You only do this once, and you can get on with the steps above while it
+            happens.
+          </p>
+          <ModelStep />
+        </Card>
 
         <ActiveWork />
 
@@ -108,7 +122,7 @@ function LeaveEarly({ state, onLeave }: { state: OnboardingState; onLeave: () =>
     return (
       <p className="muted small">
         <Button variant="ghost" size="sm" onClick={onLeave}>
-          Skip the rest and use Mimic now
+          Skip the rest and take me in
         </Button>
       </p>
     );
@@ -117,10 +131,11 @@ function LeaveEarly({ state, onLeave }: { state: OnboardingState; onLeave: () =>
   return (
     <p className="muted small">
       <Button variant="ghost" size="sm" onClick={onLeave}>
-        Look around first
+        Have a look around first
       </Button>{" "}
-      Mimic will be empty until you import something — the dashboard, People and Voice all have
-      nothing to show yet. You can pick up setup again under Sources whenever you want.
+      There won&rsquo;t be anything in there yet &mdash; no replies, nobody I&rsquo;ve met, nothing
+      about how you write &mdash; but you can see where things are. Setup will be waiting under
+      Settings.
     </p>
   );
 }
@@ -131,7 +146,7 @@ function ActiveWork() {
   const active = jobs.data ?? [];
   if (active.length === 0) return null;
   return (
-    <Card title="Working">
+    <Card title="Going on right now">
       {active.map((j) => (
         <ProgressBar
           key={j.id}
@@ -154,11 +169,11 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
   const identifiers = identity.data?.identifiers ?? [];
 
   return (
-    <Card title="First, which messages are yours">
+    <Card title="First, your email address">
       <p className="neutral">
-        Mimic learns only from things you wrote. It tells them apart by the address they were sent
-        from, so it needs to know yours — every address you have written from, or the messages sent
-        from the missing ones will be read as someone else&rsquo;s.
+        This is how I tell the mail you wrote apart from the mail you were sent &mdash; I only learn
+        from yours. Add every address you have written from, or the mail you sent from the missing
+        ones will read to me like someone else&rsquo;s.
       </p>
       {!identity.data ? (
         <>
@@ -202,7 +217,7 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
           </div>
           {identifiers.length > 0 ? (
             <p className="muted small">
-              Added: {identifiers.map((i) => i.value).join(", ")}. You can add more later in
+              Added: {identifiers.map((i) => i.value).join(", ")}. You can add more later under
               Settings.
             </p>
           ) : null}
@@ -219,15 +234,18 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
 function SourceStep() {
   const [adding, setAdding] = useState(false);
   return (
-    <Card title="Now, where your messages live">
+    <Card title="Now, your old mail">
       <p className="neutral">
-        Export your mail or messages from wherever they are and point Mimic at the file. A standard
-        .mbox from Gmail Takeout or Thunderbird works; so does Mimic&rsquo;s own JSON format for
-        anything else.
+        Save a copy of your mailbox and point me at the file. Gmail, Outlook and Thunderbird can all
+        do this. I read it here and nothing is uploaded.
       </p>
       <Button variant="primary" onClick={() => setAdding(true)}>
-        Choose a file
+        Choose the file
       </Button>
+      <p className="muted small">
+        Not sure how? In Gmail it&rsquo;s Google Takeout; in Thunderbird, right-click the folder and
+        choose Export. Either gives you one file.
+      </p>
       {adding ? <AddSourceDialog onClose={() => setAdding(false)} /> : null}
     </Card>
   );
@@ -365,11 +383,11 @@ function AnalyzeStep({ onFinish }: { onFinish: () => void }) {
   const running = (jobs.data ?? []).some((j) => j.type === "analyze");
   const [tried, setTried] = useState(false);
   return (
-    <Card title="Last, work out how you write">
+    <Card title="Last, let me read it">
       <p className="neutral">
-        Mimic reads back the messages you sent and measures them: how long they are, how you open
-        and close, your punctuation, the phrases you repeat. This is arithmetic over your own text —
-        nothing is sent anywhere.
+        I read back the mail you sent and count things: how long your messages are, how you open and
+        close, your punctuation, the phrases you come back to. It is arithmetic over your own words
+        and nothing is sent anywhere.
       </p>
       <Button
         variant="primary"

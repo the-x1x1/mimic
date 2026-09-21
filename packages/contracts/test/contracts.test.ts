@@ -427,7 +427,7 @@ describe("settings and updater contracts", () => {
       "diagnostics.includePaths": false,
       "generation.provider": "local",
       "generation.localUrl": "http://127.0.0.1:11434/v1",
-      "generation.localModel": "llama3.1:8b",
+      "generation.localModel": "llama3.2:3b",
       "generation.anthropicModel": "claude-sonnet-4-5",
       "assist.autoDraft": false,
       "onboarding.completed": false,
