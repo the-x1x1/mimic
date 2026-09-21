@@ -41,6 +41,30 @@ describe("the app is the window, and only the content scrolls", () => {
   });
 });
 
+describe("a screen that can outgrow the window scrolls", () => {
+  it("lets setup scroll, since body does not", () => {
+    // body has overflow:hidden, so a full-height screen that grows past the
+    // viewport has no scrollbar and everything below the fold is unreachable.
+    // That is how setup lost its buttons the moment a step was added to it.
+    const onboarding = declarations(".onboarding");
+    expect(onboarding).toMatch(/overflow-y:\s*auto/);
+    expect(onboarding).toMatch(/height:\s*100%/);
+    // Centring a tall page pushes its first step off the top of the screen.
+    expect(onboarding).toMatch(/align-content:\s*start/);
+  });
+
+  it("defines each full-height screen exactly once", () => {
+    // The bug above was really two .onboarding rules, the later one quietly
+    // winning. A rule declared twice is a rule nobody can reason about.
+    for (const selector of [".onboarding", ".app", ".content", ".drawer"]) {
+      const count = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].filter(([, sel]) =>
+        (sel ?? "").split(",").some((s) => s.trim() === selector),
+      ).length;
+      expect(count, `${selector} is declared ${count} times`).toBe(1);
+    }
+  });
+});
+
 describe("no control falls back to the system's own styling", () => {
   it("styles select, textarea and text inputs together with .input", () => {
     for (const el of ["select", "textarea", 'input[type="text"]']) {

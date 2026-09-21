@@ -2,6 +2,13 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.9.0-alpha.4] — 2026-09-21
+
+### Fixed
+
+- **Setup could not be scrolled, so most of it could not be clicked.** `body` has `overflow: hidden` and the rule that won for `.onboarding` set `min-height: 100vh` with no scrolling of its own, so a setup screen taller than the window had no scrollbar and everything below the fold was unreachable — which is what adding the writing-engine step to it did. It scrolls now, and aligns to the top rather than centring, because centring a tall page pushes its first step off the screen.
+- `.onboarding` was declared twice, the later rule quietly overriding the earlier one. The duplicate is gone, and `layout.test.ts` now fails if any full-height screen is declared more than once, since a rule that exists twice is one nobody can reason about.
+
 ## [0.9.0-alpha.3] — 2026-09-21
 
 Setup no longer requires knowing what Ollama is.

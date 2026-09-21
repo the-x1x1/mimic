@@ -67,7 +67,7 @@ Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`
 
 Regenerating the contract fixtures after a deliberate shape change: `MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e`.
 
-## What is implemented (0.9.0-alpha.3)
+## What is implemented (0.9.0-alpha.4)
 
 Phase 0 (migration) is complete; Phase 1 (Mimic Core) is partial. Working end to end: schema v6 with a clean upgrade from the photography schema; the `CommunicationSource` contract with `mbox` and `mimic_json` connectors; streaming import with identity-based direction, dedupe, cancellation and free resume; the layered voice engine (global, channel, relationship) with deterministic metrics, a 20-message floor and deterministic representative examples; metadata-filtered lexical retrieval; the generation context builder and pure prompt assembler; the model-provider abstraction with a local endpoint and Anthropic; real cascading deletion with an honest preview; the one-screen interface, with People / How you write / Your mail / Settings in a drawer over it; and the recording half of the learning loop. As of 0.7.0 the first run is the part that has had attention: onboarding subscribes to native job events above the gate, names the state where an import matched none of the user's addresses, and lets someone with fewer than twenty own messages leave anyway; the provider badge and the Compose button follow a real reachability check instead of assuming the local endpoint is up.
 
