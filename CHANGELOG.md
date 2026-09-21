@@ -2,6 +2,22 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.9.0-alpha.1] — 2026-09-21
+
+A design system with an idea in it, and three themes that are actually different.
+
+### Added
+
+- **The serif carries the writing.** Anything that is a piece of writing — a message someone sent you, a reply Mimic drafted, an example of how you put things — is set in IBM Plex Serif and reads like a letter. Everything around it, the buttons and labels and counts, is IBM Plex Sans and reads like a tool. That one distinction is what the rest of the look is built on, so it lives in the primitives as `.letter` rather than in any one screen.
+- **Three themes: plain, paper, night**, all from the same token names. Plain is the default: warm grey, near-black, one deep blue, and type large enough to read without leaning in. Paper drops boxes entirely — a card there is a rule and some air — which the `--card-border` and `--card-padding` tokens carry, so no component branches on the theme name. Night is the same layout on near-black. Chosen in Settings by looking at three swatches painted in their own colours rather than by picking a word from a list.
+- Both faces are bundled with the app rather than fetched. A webfont request to a CDN would be the one thing on screen contradicting the promise that nothing leaves the computer.
+- Migration 0006 carries an older install's theme over: `dark` becomes `night`, `light` becomes `plain`, anything else becomes `plain`. Without it the first render after an upgrade fails contract validation on a value the app itself wrote.
+
+### Changed
+
+- Every button a person is meant to press is at least 44px tall, radii dropped to 2–4px, and shadows are gone except on things that genuinely float. A badge is a quiet outline that colours its own text, not a filled pill competing with the primary action.
+- An empty state is the page rather than a dashed box floating on it.
+
 ## [0.8.0-alpha.3] — 2026-09-21
 
 The window stops scrolling away from you, and the controls stop looking like someone else's app.

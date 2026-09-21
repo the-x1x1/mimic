@@ -18,7 +18,7 @@ import { isTauri } from "@/lib/tauri";
 function ThemeSync() {
   const settings = useSettings();
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.data?.["general.theme"] ?? "dark";
+    document.documentElement.dataset.theme = settings.data?.["general.theme"] ?? "plain";
   }, [settings.data]);
   return null;
 }

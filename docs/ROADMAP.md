@@ -10,7 +10,7 @@ Retire the photography product; keep the infrastructure that was worth five rele
 
 The end-to-end path: import messages, learn how the user writes, draft a reply.
 
-Done: schema v5; the source-connector contract with two real connectors; the streaming import with identity resolution, dedupe, cancellation and resume; the layered voice engine with deterministic metrics and representative examples; metadata-filtered retrieval; the generation context builder and prompt assembler; the model-provider abstraction with local and hosted providers; real cascading deletion; the five-screen UI; the draft/feedback record.
+Done: schema v6; the source-connector contract with two real connectors; the streaming import with identity resolution, dedupe, cancellation and resume; the layered voice engine with deterministic metrics and representative examples; metadata-filtered retrieval; the generation context builder and prompt assembler; the model-provider abstraction with local and hosted providers; real cascading deletion; the five-screen UI; the draft/feedback record.
 
 Not done, and the reason each is not just an oversight:
 

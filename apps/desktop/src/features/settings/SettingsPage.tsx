@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Badge, Button, Card, Field, InlineError } from "@mimic/ui";
-import { ANTHROPIC_SECRET_KEY, IDENTIFIER_LABELS, IdentifierKind } from "@mimic/contracts";
+import {
+  ANTHROPIC_SECRET_KEY,
+  IDENTIFIER_LABELS,
+  IdentifierKind,
+  type Theme,
+} from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
 import { useAppInfo, useSettings, useSystemStatus } from "@/hooks/useSystem";
 import {
@@ -22,6 +27,7 @@ export function SettingsPage() {
     <div className="stack gap-3">
       <PageHeader title="Settings" />
       <IdentitySection />
+      <AppearanceSection />
       <ProviderSection />
       <AssistSection />
       <EngineSection />
@@ -203,6 +209,70 @@ function ProviderSection() {
           onBlur={(e) => ipc.setSetting("generation.localModel", e.target.value)}
         />
       </Field>
+    </Card>
+  );
+}
+
+/**
+ * The three themes, shown as what they look like rather than as a dropdown of
+ * words. Each button is painted in its own theme's colours, so the choice is
+ * made by looking rather than by reading.
+ */
+const THEMES: Array<{
+  id: Theme;
+  name: string;
+  note: string;
+  bg: string;
+  ink: string;
+  accent: string;
+}> = [
+  {
+    id: "plain",
+    name: "Plain",
+    note: "Warm grey, big type",
+    bg: "#f4f2ed",
+    ink: "#17171a",
+    accent: "#0e4f6b",
+  },
+  {
+    id: "paper",
+    name: "Paper",
+    note: "Cream, serif, no boxes",
+    bg: "#ede7da",
+    ink: "#23201a",
+    accent: "#8c3b2e",
+  },
+  {
+    id: "night",
+    name: "Night",
+    note: "The same on near-black",
+    bg: "#100f12",
+    ink: "#f2f1ee",
+    accent: "#7fc4d8",
+  },
+];
+
+function AppearanceSection() {
+  const settings = useSettings();
+  const current = settings.data?.["general.theme"] ?? "plain";
+  return (
+    <Card title="Appearance">
+      <div className="theme-picker">
+        {THEMES.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            aria-pressed={current === t.id}
+            className={current === t.id ? "theme-swatch theme-swatch--on" : "theme-swatch"}
+            style={{ background: t.bg, color: t.ink }}
+            onClick={() => ipc.setSetting("general.theme", t.id)}
+          >
+            <span className="theme-swatch__name">{t.name}</span>
+            <span className="theme-swatch__note">{t.note}</span>
+            <span className="theme-swatch__rule" style={{ background: t.accent }} />
+          </button>
+        ))}
+      </div>
     </Card>
   );
 }

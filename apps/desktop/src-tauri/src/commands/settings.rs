@@ -8,7 +8,7 @@ use crate::SharedState;
 /// UI cannot invent state the app does not read.
 pub fn defaults() -> Map<String, Value> {
     let mut m = Map::new();
-    m.insert("general.theme".into(), json!("dark"));
+    m.insert("general.theme".into(), json!("plain"));
     m.insert("performance.workerConcurrency".into(), json!(2));
     m.insert("privacy.networkFeatures".into(), json!(false));
     m.insert("updates.channel".into(), json!("stable"));

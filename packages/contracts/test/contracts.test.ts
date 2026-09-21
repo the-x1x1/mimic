@@ -396,7 +396,7 @@ describe("enumerations stay in step with their labels", () => {
 describe("settings and updater contracts", () => {
   it("accepts the default settings map and rejects an unknown channel", () => {
     const defaults = {
-      "general.theme": "dark",
+      "general.theme": "plain",
       "performance.workerConcurrency": 2,
       "privacy.networkFeatures": false,
       "updates.channel": "stable",

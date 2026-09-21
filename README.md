@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.8.0-alpha.3`
+## Current status — `0.9.0-alpha.1`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -20,7 +20,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | Dashboard: threads awaiting a reply, with approve / modify / reject on each draft                     | Implemented and tested                                                                            |
 | Assisted drafting in the background, off by default                                                   | Implemented and tested; needs a connector before it is "in advance" rather than "after an import" |
 | Sending a reply                                                                                       | Deliberately not built                                                                            |
-| SQLite schema v5, migrations, backup before upgrade, resumable jobs                                   | Implemented and tested                                                                            |
+| SQLite schema v6, migrations, backup before upgrade, resumable jobs                                   | Implemented and tested                                                                            |
 | Source connectors: standard `.mbox`, and Mimic's own JSON export format                               | Implemented and tested                                                                            |
 | Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume             | Implemented and tested                                                                            |
 | Voice engine: deterministic metrics, global / channel / relationship layers, representative examples  | Implemented and tested                                                                            |
@@ -86,7 +86,7 @@ MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e
 | ------------------------------------------ | -------------------------------------------------------------------------- |
 | [PRODUCT](docs/PRODUCT.md)                 | What this is, what it is not, the core interaction, the autonomy modes     |
 | [ARCHITECTURE](docs/ARCHITECTURE.md)       | The three layers, why they are split that way, the rules that shape them   |
-| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v5, and why each table is shaped the way it is                      |
+| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v6, and why each table is shaped the way it is                      |
 | [VOICE_ENGINE](docs/VOICE_ENGINE.md)       | Every metric, how layers resolve, and how accuracy would have to be earned |
 | [IMPORT_PIPELINE](docs/IMPORT_PIPELINE.md) | The connector contract, the shipped connectors, the JSON format            |
 | [MODEL_PROVIDERS](docs/MODEL_PROVIDERS.md) | The provider boundary, credentials, and a known limitation                 |
