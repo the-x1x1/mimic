@@ -2,6 +2,17 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.8.0-alpha.3] — 2026-09-21
+
+The window stops scrolling away from you, and the controls stop looking like someone else's app.
+
+### Fixed
+
+- **The whole shell scrolled instead of the page.** `.main` had no `min-height: 0` and the grid had no explicit row, so a long page grew the shell past the window and the first things to leave the screen were the sidebar's navigation and the top bar — the two things that exist to stay put. The shell is now exactly the window, and `.content` is the only thing that scrolls.
+- **Drop-downs rendered as white Windows combo boxes** in a dark app, because a bare `<select>` was never styled. Every text control — `select`, `textarea`, and the text-like `input` types — now carries the same surface, border and focus ring whether or not the markup remembered to ask for it, with the arrow drawn back in the text colour after `appearance: none` removed the system one.
+- **Nothing shared an edge.** Pages had no measure, so on a wide window a 520px centred empty state sat above a full-width two-column form. Page content is now held to a single 1160px measure, and an empty state no longer adds a screen-high margin above whatever follows it.
+- Two fields side by side now share the width instead of each taking whatever its widest option needed.
+
 ## [0.8.0-alpha.2] — 2026-09-21
 
 Onboarding no longer holds the app shut until a mailbox has been exported.

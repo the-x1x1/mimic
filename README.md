@@ -10,30 +10,30 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.8.0-alpha.2`
+## Current status — `0.8.0-alpha.3`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
-| Area                                                                                                 | Status                                                                                            |
-| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Desktop shell: Dashboard (home) / People / Voice / Sources / Settings                                | Implemented                                                                                       |
-| Dashboard: threads awaiting a reply, with approve / modify / reject on each draft                    | Implemented and tested                                                                            |
-| Assisted drafting in the background, off by default                                                  | Implemented and tested; needs a connector before it is "in advance" rather than "after an import" |
-| Sending a reply                                                                                      | Deliberately not built                                                                            |
-| SQLite schema v5, migrations, backup before upgrade, resumable jobs                                  | Implemented and tested                                                                            |
-| Source connectors: standard `.mbox`, and Mimic's own JSON export format                              | Implemented and tested                                                                            |
-| Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume            | Implemented and tested                                                                            |
-| Voice engine: deterministic metrics, global / channel / relationship layers, representative examples | Implemented and tested                                                                            |
-| Situational voice layer                                                                              | Schema and prompt slot only — nothing classifies yet                                              |
-| Retrieval: metadata filter, then lexical ranking                                                     | Implemented; embedding-backed ranking is Phase 2                                                  |
-| Generation: context builder, prompt assembler, draft record                                          | Implemented and tested                                                                            |
-| Model providers: local OpenAI-compatible endpoint, Anthropic                                         | Implemented; the hosted one has never been exercised in CI                                        |
-| Deletion that actually deletes, with a preview that cannot understate it                             | Implemented and tested                                                                            |
-| Learning loop: draft → sent → diff → weighted feedback                                               | Recorded; nothing changes a profile from it yet (Phase 3)                                         |
-| Held-out evaluation harness                                                                          | Implemented; not yet run over a real corpus, so **no accuracy figure appears anywhere**           |
+| Area                                                                                                  | Status                                                                                            |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Desktop shell: Dashboard (home) / People / Voice / Sources / Settings                                 | Implemented                                                                                       |
+| Dashboard: threads awaiting a reply, with approve / modify / reject on each draft                     | Implemented and tested                                                                            |
+| Assisted drafting in the background, off by default                                                   | Implemented and tested; needs a connector before it is "in advance" rather than "after an import" |
+| Sending a reply                                                                                       | Deliberately not built                                                                            |
+| SQLite schema v5, migrations, backup before upgrade, resumable jobs                                   | Implemented and tested                                                                            |
+| Source connectors: standard `.mbox`, and Mimic's own JSON export format                               | Implemented and tested                                                                            |
+| Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume             | Implemented and tested                                                                            |
+| Voice engine: deterministic metrics, global / channel / relationship layers, representative examples  | Implemented and tested                                                                            |
+| Situational voice layer                                                                               | Schema and prompt slot only — nothing classifies yet                                              |
+| Retrieval: metadata filter, then lexical ranking                                                      | Implemented; embedding-backed ranking is Phase 2                                                  |
+| Generation: context builder, prompt assembler, draft record                                           | Implemented and tested                                                                            |
+| Model providers: local OpenAI-compatible endpoint, Anthropic                                          | Implemented; the hosted one has never been exercised in CI                                        |
+| Deletion that actually deletes, with a preview that cannot understate it                              | Implemented and tested                                                                            |
+| Learning loop: draft → sent → diff → weighted feedback                                                | Recorded; nothing changes a profile from it yet (Phase 3)                                         |
+| Held-out evaluation harness                                                                           | Implemented; not yet run over a real corpus, so **no accuracy figure appears anywhere**           |
 | First run: onboarding that reacts to finished jobs, recovers from a bad import, and can be left early | Implemented and tested                                                                            |
-| Model reachability: the badge and the draft button follow a real check                               | Implemented and tested                                                                            |
-| Windows installer and signed updater                                                                 | Plumbing unchanged from 0.5.0 and never observed producing a build end to end                     |
+| Model reachability: the badge and the draft button follow a real check                                | Implemented and tested                                                                            |
+| Windows installer and signed updater                                                                  | Plumbing unchanged from 0.5.0 and never observed producing a build end to end                     |
 
 The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). If this README and that file disagree, PROJECT_STATUS wins, and the source code wins over both.
 

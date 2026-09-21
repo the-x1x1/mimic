@@ -58,7 +58,9 @@ export function AppShell() {
           </div>
         </header>
         <main className="content">
-          <Outlet />
+          <div className="content__inner">
+            <Outlet />
+          </div>
         </main>
       </div>
       <Toaster />

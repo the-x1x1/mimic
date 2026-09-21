@@ -93,14 +93,23 @@ p {
 }
 
 /* Shell */
+/* The shell is exactly the window and never taller. Without the explicit row
+   and the min-height:0 below, a long page grows .main past the grid row, the
+   whole shell scrolls, and the first things to leave the screen are the
+   sidebar's nav and the top bar — the two things that are supposed to stay
+   put. Only .content scrolls. */
 .shell {
   display: grid;
   grid-template-columns: 220px 1fr;
+  grid-template-rows: 100%;
   height: 100%;
+  overflow: hidden;
 }
 .sidebar {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
   background: var(--surface-1);
   border-right: 1px solid var(--border);
   padding: var(--space-4) var(--space-3);
@@ -164,6 +173,7 @@ p {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 .topbar {
   display: flex;
@@ -188,8 +198,17 @@ p {
 }
 .content {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: var(--space-5) var(--space-6) var(--space-7);
+}
+
+/* One measure for every page. On a wide monitor an unconstrained page puts a
+   two-column form under a centred card and nothing shares an edge; this gives
+   them all the same left and right. */
+.content__inner {
+  max-width: 1160px;
+  margin: 0 auto;
 }
 
 .page-header {
@@ -409,9 +428,19 @@ p {
   gap: 4px;
 }
 
-/* Photo grid */
-.input {
-  width: 100%;
+/* Every text control looks the same whether or not the markup remembered to
+   ask. A bare <select> renders as a white Windows combo box in a dark app,
+   which is what it used to do on the dashboard, so the element selectors carry
+   the styling and `.input` is kept for the ones that set it explicitly. */
+.input,
+select,
+textarea,
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="url"],
+input[type="number"],
+input[type="password"] {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -419,10 +448,45 @@ p {
   color: var(--text-primary);
   font: inherit;
 }
-.input:focus {
+.input:focus,
+select:focus,
+textarea:focus,
+input:focus {
   border-color: var(--border-strong);
   outline: 2px solid var(--focus);
   outline-offset: 1px;
+}
+/* Only a control that owns its line is stretched. Leaving the width alone
+   otherwise means this rule changes how things look without changing where
+   anything sits. */
+.input,
+.ui-field > select,
+.ui-field > textarea,
+.ui-field > input {
+  width: 100%;
+}
+/* appearance:none takes the arrow with it, so it is drawn back as a chevron
+   in the text colour rather than the system's. */
+select {
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    right 15px center,
+    right 10px center;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+/* The dropdown itself is drawn by the OS; this is the one part of it that
+   takes a colour. */
+select option {
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 .input--narrow {
   width: 160px;
