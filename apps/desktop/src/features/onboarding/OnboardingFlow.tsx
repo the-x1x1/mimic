@@ -87,7 +87,9 @@ export function OnboardingFlow() {
 
         <ActiveWork />
 
-        {onboarding.data && step !== null ? <LeaveEarly state={onboarding.data} onLeave={finish} /> : null}
+        {onboarding.data && step !== null ? (
+          <LeaveEarly state={onboarding.data} onLeave={finish} />
+        ) : null}
       </div>
     </div>
   );

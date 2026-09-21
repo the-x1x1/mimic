@@ -122,9 +122,11 @@
   background: var(--accent-soft);
 }
 
+/* An empty state is the page, not a notice floating above one: the vertical
+   margin used to leave a screen-high gap between it and whatever came next. */
 .ui-empty {
-  max-width: 520px;
-  margin: var(--space-7) auto;
+  max-width: 560px;
+  margin: 0 auto;
   text-align: center;
   padding: var(--space-6);
   border: 1px dashed var(--border);
@@ -258,6 +260,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+}
+/* Fields sitting side by side share the width rather than each taking
+   whatever its widest option happens to need. */
+.row > .ui-field {
+  flex: 1 1 0;
 }
 .ui-field__label {
   font-size: var(--text-body-sm);
