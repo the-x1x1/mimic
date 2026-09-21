@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { Button, Card, EmptyState, Field, InlineError } from "@mimic/ui";
+import { Button, Card, Field, InlineError } from "@mimic/ui";
 import {
   ADJUSTMENT_LABELS,
   Adjustment,
@@ -10,7 +9,6 @@ import {
   type ComposeRequest,
   type Draft,
 } from "@mimic/contracts";
-import { PageHeader } from "@/components/PageHeader";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { usePeople } from "@/hooks/usePeople";
 import {
@@ -23,14 +21,16 @@ import {
 import { toast } from "@/state/toast";
 
 /**
- * The Compose screen. Four inputs, one output, and a panel that says what the
- * output was based on.
+ * Writing something new: four inputs, one output, and a panel that says what
+ * the output was based on.
  *
- * The intent field is the centre of the product, not an afterthought: Mimic
- * supplies how the user writes, the user supplies what they want to say. It is
- * therefore the largest input on the screen and the one focused first.
+ * This lives on the dashboard rather than on a screen of its own, because the
+ * two halves of the product are the same job — replying to what is waiting,
+ * and starting something. The intent field stays the centre of it: Mimic
+ * supplies how the user writes, the user supplies what they want to say, so it
+ * is the largest input here and the one focused first.
  */
-export function ComposePage() {
+export function ComposePanel({ title = "Write something new" }: { title?: string }) {
   const people = usePeople();
   const providers = useProviderState();
   const generate = useGenerateDraft();
@@ -96,26 +96,12 @@ export function ComposePage() {
     toast.info("Copied");
   }
 
-  if (people.isSuccess && people.data.length === 0 && !context.data?.effective.measurable) {
-    return (
-      <EmptyState
-        title="Nothing to work from yet"
-        body="Mimic writes in your voice by reading messages you have already written. Add a source and import some, and this screen becomes useful."
-        primary={
-          <Link to="/sources">
-            <Button variant="primary">Add a source</Button>
-          </Link>
-        }
-      />
-    );
-  }
-
   return (
     <div className="compose">
-      <PageHeader
-        title="Compose"
-        subtitle={
-          activeProvider ? (
+      <div className="compose__header">
+        <h2>{title}</h2>
+        <p className="muted small">
+          {activeProvider ? (
             <>
               Drafting with <strong>{activeProvider.displayName}</strong>
               {activeProvider.local
@@ -124,9 +110,9 @@ export function ComposePage() {
             </>
           ) : (
             "No model provider configured yet."
-          )
-        }
-      />
+          )}
+        </p>
+      </div>
 
       <div className="compose__grid">
         <div className="stack gap-3">

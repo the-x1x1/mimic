@@ -38,21 +38,23 @@ Beside the draft, always: what it was based on. Which voice layers applied, how 
 
 Five screens.
 
-| Screen       | What it is for                                                                                |
-| ------------ | --------------------------------------------------------------------------------------------- |
-| **Compose**  | The product. Draft a reply.                                                                   |
-| **People**   | Everyone Mimic has seen. Say how you know them; see how much it has learned; delete them.     |
-| **Voice**    | What Mimic has measured about how you write, per layer, with the examples that back each one. |
-| **Sources**  | Where messages came from. Add, re-import, remove.                                             |
-| **Settings** | Your own addresses, the model provider, privacy, deletion.                                    |
+| Screen        | What it is for                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------ |
+| **Dashboard** | Home. What is waiting on a reply, the draft Mimic has for each, and the box for writing something new. |
+| **People**    | Everyone Mimic has seen. Say how you know them; see how much it has learned; delete them.              |
+| **Voice**     | What Mimic has measured about how you write, per layer, with the examples that back each one.          |
+| **Sources**   | Where messages came from. Add, re-import, remove.                                                      |
+| **Settings**  | Your own addresses, the model provider, privacy, deletion.                                             |
 
 ## Autonomy
 
-Three modes are designed. One is implemented.
+Three modes are designed. One is implemented, one is half-built, one is deliberately not started.
 
 **MANUAL** — implemented. Mimic drafts; the user reads, edits and sends by hand, in whatever app they actually use. Mimic never has send access, and the learning loop depends on the user telling it what they sent.
 
-**ASSISTED** — designed, not implemented. Mimic watches a connected inbox, notices messages it could answer, and prepares drafts in advance. The user still sends. The schema supports it (`drafts` already carries a conversation and an incoming message); the connectors and the trigger logic do not exist.
+**ASSISTED** — partly implemented (0.8.0-alpha.1). Mimic notices threads it could answer — a conversation whose last message came from someone else and was never replied to — and prepares drafts for them, which wait on the dashboard for approve, modify or reject. The user still sends, by hand, elsewhere.
+
+Two things make this safe to have on: it is off until switched on in Settings, because with it on a model sees incoming messages nobody handed it; and it is bounded — ten threads per run, one draft per thread, cancellable between threads. What is missing is the _watching_: no connector exists, so "in advance" means "after the next import" rather than "as mail arrives". That is Phase 4, and until it lands ASSISTED is a convenience over imported history rather than a standing agent.
 
 **TRUSTED** — designed, deliberately not implemented. Mimic sends low-stakes replies itself within rules the user sets. This is not being built now, and the reason is not technical: a product that can send as you needs a much stronger account of what it will not send, how a mistake is caught, and what "low-stakes" means, than this product currently has. The data model does not need to change to support it later, which is the only preparation appropriate at this stage.
 

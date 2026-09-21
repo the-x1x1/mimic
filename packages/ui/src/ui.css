@@ -297,3 +297,40 @@
 .ui-card__body {
   padding: var(--space-4);
 }
+
+/* Dashboard: waiting threads and the drafts prepared for them. */
+.thread {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface-2);
+}
+.thread__message {
+  margin: 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.draft-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px dashed var(--border);
+  padding-top: var(--space-2);
+}
+.draft-review__text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.compose__header h2 {
+  margin: 0 0 var(--space-1);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.row.wrap {
+  flex-wrap: wrap;
+}

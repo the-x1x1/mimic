@@ -87,7 +87,7 @@ fn import_attributes_messages_across_channels_and_identifier_kinds() {
     let summary = run_import(&db, &source_id);
 
     assert_eq!(summary.conversations, 3);
-    assert_eq!(summary.inserted, 45);
+    assert_eq!(summary.inserted, 46);
     assert_eq!(summary.from_self, 22, "20 emails and 2 texts are the user's");
     assert_eq!(summary.unattributed, 1, "the author with no address stays unknown");
     assert_eq!(summary.participants_created, 2, "Ada and Bob — and the ghost is nobody");
@@ -98,7 +98,7 @@ fn import_attributes_messages_across_channels_and_identifier_kinds() {
     // Bob is one person, not three.
     let bob = db.list_participants(10).unwrap().into_iter().find(|p| p.participant.display_name == "Bob").unwrap();
     assert_eq!(bob.participant.identifiers.len(), 1);
-    assert_eq!(bob.message_count, 4);
+    assert_eq!(bob.message_count, 5);
 }
 
 #[test]
@@ -291,7 +291,7 @@ fn re_running_the_whole_pipeline_changes_nothing() {
 
     let second_import = run_import(&db, &source_id);
     assert_eq!(second_import.inserted, 0);
-    assert_eq!(second_import.duplicates, 45);
+    assert_eq!(second_import.duplicates, 46);
     voice::analyze(&db, &mut |_, _| {}).unwrap();
     let second = serde_json::to_value(voice::overview(&db).unwrap()).unwrap();
 
@@ -333,4 +333,52 @@ fn the_import_fixture_is_where_the_tests_say_it_is() {
     assert!(
         Path::new(&repo_root().join("fixtures/contracts")).exists() || std::env::var("MIMIC_REGEN_FIXTURES").is_ok()
     );
+}
+
+/// The home screen over a real import: what is waiting, what Mimic prepared
+/// for it, and the fixture the zod suite parses.
+#[test]
+fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
+    let (db, source_id) = setup();
+    run_import(&db, &source_id);
+    voice::analyze(&db, &mut |_, _| {}).unwrap();
+
+    let before = mimic_core::dashboard::dashboard(&db, 25, false).unwrap();
+    assert!(before.messages > 0);
+    assert!(before.last_import_at.is_some(), "an import has happened, so the screen may say so");
+    assert!(!before.auto_draft, "assisted drafting is off unless it was turned on");
+    assert!(
+        before.awaiting.iter().all(|t| t.draft.is_none()),
+        "nothing is drafted before assisted drafting runs or the user asks"
+    );
+    let waiting = before.awaiting.len();
+    assert!(waiting > 0, "the sample export ends on messages from other people");
+
+    // Turning it on is what allows a model to see an incoming message the user
+    // did not hand over itself.
+    db.set_setting(mimic_core::assist::SETTING, &true).unwrap();
+    let provider = MockProvider::answering("sure, sending it now");
+    let summary = mimic_core::assist::draft_waiting_threads(&db, &provider, 25, &mut |_, _| {}, &|| false).unwrap();
+    assert!(!summary.disabled);
+    assert_eq!(summary.drafted, summary.considered);
+    assert!(summary.drafted > 0);
+
+    let after = mimic_core::dashboard::dashboard(&db, 25, true).unwrap();
+    assert_eq!(after.awaiting.len(), waiting, "drafting a reply does not answer the thread");
+    let drafted = after.awaiting.iter().filter(|t| t.draft.is_some()).count();
+    assert_eq!(drafted, summary.drafted, "every prepared draft is attached to its thread");
+    assert_eq!(after.pending_drafts.len(), summary.drafted);
+    assert!(after.pending_drafts.iter().all(|d| d.outcome.is_none()), "prepared, never pre-approved");
+    assert_eq!(after.outcomes.unedited_rate, None, "nothing has been resolved, so the rate is unmeasured");
+
+    check_fixture("dashboard.json", &serde_json::to_value(&after).unwrap());
+
+    // Approving one is the ordinary draft resolution: it records what was
+    // sent and takes the draft off the screen. It does not send anything.
+    let draft = after.pending_drafts[0].clone();
+    let resolved = db.resolve_draft(&draft.id, "sent_unedited", Some(&draft.generated_text)).unwrap();
+    assert_eq!(resolved.outcome.as_deref(), Some("sent_unedited"));
+    let later = mimic_core::dashboard::dashboard(&db, 25, true).unwrap();
+    assert_eq!(later.pending_drafts.len(), summary.drafted - 1);
+    assert_eq!(later.outcomes.resolved, 1);
 }

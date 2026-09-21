@@ -8,6 +8,7 @@ import type { z } from "zod";
 import {
   AppInfo,
   ConnectorInfo,
+  Dashboard,
   DeletionReport,
   DiagnosticsBundle,
   Draft,
@@ -83,6 +84,8 @@ const z_string = AppInfo.shape.dataRoot;
 
 export const ipc = {
   appInfo: () => call("get_app_info", AppInfo),
+  dashboard: (limit = 25) => call("get_dashboard", Dashboard, { limit }),
+  startAssistDrafts: () => call("start_assist_drafts", Job),
   systemStatus: () => call("get_system_status", SystemStatus),
   onboardingState: () => call("get_onboarding_state", OnboardingState),
   completeOnboarding: () => call("complete_onboarding", z_void),

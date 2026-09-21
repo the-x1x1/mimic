@@ -21,7 +21,10 @@ export function useGenerateDraft() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ipc.generateDraft,
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.drafts }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.drafts });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+    },
     onError: (e: Error) => toast.danger("Could not write a draft", e.message),
   });
 }
@@ -41,6 +44,7 @@ export function useResolveDraft() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.drafts });
       qc.invalidateQueries({ queryKey: qk.draftOutcomes });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
     },
   });
 }

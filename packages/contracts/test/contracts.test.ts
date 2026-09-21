@@ -18,9 +18,11 @@ import {
   MIN_SAMPLE,
   Settings,
   VoiceOverview,
+  Dashboard,
   canFinishOnboarding,
   composeReadiness,
   describeDeletion,
+  describeFeed,
   describeImport,
   describeMetric,
   formatDuration,
@@ -55,6 +57,20 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(ctx.voice.layers.length).toBeGreaterThan(0);
   });
 
+  it("parses the dashboard, with a prepared draft attached to its thread", () => {
+    const view = Dashboard.parse(read(contractFixture("dashboard.json")));
+    expect(view.messages).toBeGreaterThan(0);
+    expect(view.awaiting.length).toBeGreaterThan(0);
+    // The fixture is generated with assisted drafting on, so at least one
+    // waiting thread carries an unresolved draft — the state the approve /
+    // modify / reject controls render against.
+    const withDraft = view.awaiting.find((t) => t.draft !== null);
+    expect(withDraft).toBeDefined();
+    expect(withDraft!.draft!.outcome).toBeNull();
+    expect(withDraft!.lastMessage.length).toBeGreaterThan(0);
+    expect(view.outcomes.uneditedRate).toBeNull();
+  });
+
   it("parses a draft and a deletion report", () => {
     const draft = Draft.parse(read(contractFixture("draft.json")));
     expect(draft.promptHash).toBeTruthy();
@@ -82,12 +98,12 @@ describe("the import fixture is the format the docs describe", () => {
     expect(Channel.parse(exported.channel)).toBe("chat");
     expect(exported.conversations.length).toBeGreaterThan(1);
     const messages = exported.conversations.flatMap((c: { messages: unknown[] }) => c.messages);
-    expect(messages.length).toBe(45);
+    expect(messages.length).toBe(46);
     const identifiable = messages.filter(
       (m: { from: Record<string, unknown> }) =>
         m.from.email || m.from.phone || m.from.handle || m.from.accountId,
     );
-    expect(identifiable.length).toBe(44);
+    expect(identifiable.length).toBe(45);
   });
 });
 
@@ -263,6 +279,28 @@ describe("onboarding cannot dead-end", () => {
   });
 });
 
+describe("the dashboard does not pretend to be an inbox", () => {
+  const base = Dashboard.parse(read(contractFixture("dashboard.json")));
+
+  it("says plainly that nothing has been imported yet", () => {
+    const line = describeFeed({ ...base, lastImportAt: null });
+    expect(line).toContain("not connected to a mailbox");
+  });
+
+  it("counts the threads it has rather than the ones it is showing", () => {
+    const shown = base.awaiting.slice(0, 1);
+    const line = describeFeed({ ...base, awaitingTotal: 9, awaiting: shown });
+    expect(line).toContain("9 threads");
+    expect(line).toContain(`Showing the ${shown.length} most recent`);
+  });
+
+  it("says when nothing is waiting instead of showing an empty list", () => {
+    expect(describeFeed({ ...base, awaitingTotal: 0, awaiting: [] })).toContain(
+      "Nothing is waiting",
+    );
+  });
+});
+
 describe("compose readiness explains itself", () => {
   const layer = (stale: boolean) => ({
     layer: "global",
@@ -351,6 +389,7 @@ describe("settings and updater contracts", () => {
       "generation.localUrl": "http://127.0.0.1:11434/v1",
       "generation.localModel": "llama3.1:8b",
       "generation.anthropicModel": "claude-sonnet-4-5",
+      "assist.autoDraft": false,
       "onboarding.completed": false,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();

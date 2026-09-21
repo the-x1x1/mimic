@@ -2,6 +2,28 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.8.0-alpha.1] — 2026-09-20
+
+A home screen. Mimic opens on what is waiting for a reply, with the draft it has written for each one, and approve / modify / reject on every draft. Compose is folded into it rather than being a screen of its own.
+
+### Added
+
+- **Dashboard**, the new home screen. Threads whose last message came from someone else and was never answered, newest first, each with the message in full, who it is from, whether a draft would be shaped by how you write _to them_ or only in general, and any draft Mimic already has. Counts of what has been imported, and when the last import ran.
+- **Approve, modify, reject.** Approving copies the reply and records it as sent unedited; modifying records what you changed, which is the only thing the learning loop can learn from; rejecting discards it. "Tell Mimic why" records a stated preference, which outweighs anything inferred from an edit. None of these send: Mimic has no send path, and adding one stays a separate decision.
+- **Assisted drafting** (`assist.autoDraft`, off by default): with it on, Mimic drafts a reply for each waiting thread after every import or analysis, and the dashboard shows them waiting for approval. Bounded to ten threads per run, never a thread that already has an unresolved draft, cancellable between threads, and it never runs while the setting is off — a disabled run reaches no provider at all. The Settings copy says plainly that this sends incoming messages to the configured model without being asked each time, and names whether that model is local.
+- `threads_awaiting_reply` and its count: a conversation is waiting because its last message has `direction = 'other'`, not because anything inferred urgency. Messages whose direction could not be established never make a thread look answered either way.
+- `fixtures/contracts/dashboard.json`, written by the Rust end-to-end test and parsed by the zod suite, including a thread carrying a prepared draft.
+
+### Changed
+
+- Navigation is Dashboard / People / Voice / Sources / Settings. The Compose screen is now the "Write something new" panel on the dashboard; the intent field is still the largest input on it.
+- The dashboard describes itself honestly: nothing arrives on its own, every message on it came from an import, and with nothing imported it says so rather than showing an empty feed.
+- `fixtures/import/sample_export.json` gained a trailing inbound message so the corpus actually contains a thread awaiting a reply (46 messages, 45 attributable).
+
+### Not in this release
+
+A send path. Mimic drafts; you send. Everything here is built so that turning that on later is one deliberate change rather than a slide.
+
 ## [0.7.0-alpha.1] — 2026-09-20
 
 The first run works. 0.6.0 built the pipeline and could be walked through by someone who knew where the walls were; this release is about a person installing Mimic, opening it, and getting to a draft without being stranded or misled.

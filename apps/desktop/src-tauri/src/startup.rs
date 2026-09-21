@@ -43,7 +43,8 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     }
 
     let secrets = std::sync::Arc::new(FileSecretStore::open(&paths.credentials_dir())?);
-    let providers = RwLock::new(ProviderRegistry::new(crate::providers_config::build(&db, secrets.as_ref())));
+    let providers =
+        std::sync::Arc::new(RwLock::new(ProviderRegistry::new(crate::providers_config::build(&db, secrets.as_ref()))));
 
     let repo_root = if resource_dir.as_ref().is_some_and(|r| {
         r.join("engine").join("mimic-engine.exe").is_file() || r.join("engine").join("mimic-engine").is_file()
@@ -69,9 +70,22 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         }
     };
 
+    // The assist executor resolves its provider per run rather than holding
+    // one, because the user can change provider in Settings between runs.
+    let provider_registry = providers.clone();
+    let provider_db = db.clone();
+    let resolve_provider: std::sync::Arc<
+        dyn Fn() -> Option<std::sync::Arc<dyn mimic_core::providers::ModelProvider>> + Send + Sync,
+    > = std::sync::Arc::new(move || {
+        let registry = provider_registry.read().unwrap_or_else(|p| p.into_inner());
+        let chosen = provider_db.get_setting::<String>("generation.provider").ok().flatten();
+        let id = chosen.or_else(|| registry.default_id())?;
+        registry.get(&id).ok()
+    });
     let executor = std::sync::Arc::new(mimic_core::jobs::CompositeExecutor::new(vec![
         mimic_core::import::ImportExecutor::shared(),
         mimic_core::voice::AnalyzeExecutor::shared(),
+        mimic_core::assist::AssistExecutor::shared(resolve_provider),
     ]));
     let jobs = JobRunner::new(db.clone(), executor);
     let (interrupted, requeued) = jobs.recover()?;
@@ -162,11 +176,27 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
         tauri::async_runtime::spawn(async move { runner.run_loop().await });
         let mut rx = state.jobs.subscribe();
         let app2 = app.clone();
+        let st = state.clone();
         tauri::async_runtime::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(ev) => {
                         let _ = app2.emit("jobs://event", &ev);
+                        // New messages or a new profile change what a prepared
+                        // reply would say, so a finished import or analysis is
+                        // the moment to prepare them — but only if the user
+                        // asked for that, and never off the back of an assist
+                        // run itself.
+                        let follows_work = ev.status == "completed"
+                            && (ev.kind == mimic_core::import::JOB_KIND || ev.kind == mimic_core::voice::JOB_KIND);
+                        if follows_work && mimic_core::assist::is_enabled(&st.db).unwrap_or(false) {
+                            match st.jobs.enqueue(mimic_core::assist::JOB_KIND, json!({})) {
+                                Ok(job) => tracing::info!(target: "assist", job = %job.id, "queued assisted drafting"),
+                                Err(e) => {
+                                    tracing::warn!(target: "assist", error = %e, "could not queue assisted drafting")
+                                }
+                            }
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,

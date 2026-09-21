@@ -46,9 +46,13 @@ Make the model of the person better, not the prompt longer.
 - Multiple drafts side by side.
 - Per-situation templates derived from the user's own patterns.
 
-## Phase 6 — Assisted automation (ASSISTED mode)
+## Phase 6 — Assisted automation (ASSISTED mode) · PARTIAL (0.8.0-alpha.1)
 
-Mimic watches a connected inbox, notices what it could answer, and prepares drafts in advance. The user still sends every one.
+Mimic notices what it could answer and prepares drafts in advance. The user still sends every one.
+
+Done: the dashboard of threads awaiting a reply; background drafting for them behind `assist.autoDraft`, off by default, bounded per run and cancellable; approve / modify / reject recording real outcomes.
+
+Not done: watching a _connected_ inbox, which needs Phase 4 — nothing arrives on its own yet, so "in advance" currently means "after an import". Nothing decides that a thread does not need a reply; every unanswered thread is shown.
 
 ## Phase 7 — Trusted mode
 
