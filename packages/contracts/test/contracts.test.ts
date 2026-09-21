@@ -23,7 +23,7 @@ import {
   canLeaveOnboarding,
   composeReadiness,
   describeDeletion,
-  describeFeed,
+  describeWaiting,
   describeImport,
   describeMetric,
   formatDuration,
@@ -296,25 +296,48 @@ describe("onboarding cannot dead-end", () => {
   });
 });
 
-describe("the dashboard does not pretend to be an inbox", () => {
+describe("the home screen speaks for itself, and does not pretend to be an inbox", () => {
   const base = Dashboard.parse(read(contractFixture("dashboard.json")));
 
-  it("says plainly that nothing has been imported yet", () => {
-    const line = describeFeed({ ...base, lastImportAt: null });
-    expect(line).toContain("not connected to a mailbox");
+  it("says nothing has been read yet, and that nothing arrives on its own", () => {
+    const line = describeWaiting({ ...base, lastImportAt: null });
+    expect(line).toContain("haven't read any of your mail");
+    expect(line).toContain("Point me at it");
   });
 
-  it("counts the threads it has rather than the ones it is showing", () => {
+  it("counts what is waiting, not what fits on the screen", () => {
     const shown = base.awaiting.slice(0, 1);
-    const line = describeFeed({ ...base, awaitingTotal: 9, awaiting: shown });
-    expect(line).toContain("9 threads");
-    expect(line).toContain(`Showing the ${shown.length} most recent`);
+    const line = describeWaiting({ ...base, awaitingTotal: 9, awaiting: shown });
+    expect(line).toContain("9 ");
+    expect(line).toContain(`Here are the ${shown.length} most recent`);
   });
 
   it("says when nothing is waiting instead of showing an empty list", () => {
-    expect(describeFeed({ ...base, awaitingTotal: 0, awaiting: [] })).toContain(
-      "Nothing is waiting",
+    expect(describeWaiting({ ...base, awaitingTotal: 0, awaiting: [] })).toContain("all caught up");
+  });
+
+  it("counts people only when every waiting thread really is one person", () => {
+    const person = base.awaiting.find((t) => t.participant !== null && !t.isGroup);
+    expect(person, "the fixture should contain an attributed one-to-one thread").toBeDefined();
+    expect(describeWaiting({ ...base, awaitingTotal: 1, awaiting: [person!] })).toBe(
+      "One person is waiting on you.",
     );
+    // A group is not a person, and an unattributed thread is nobody: the
+    // sentence steps back to "conversation" rather than guessing.
+    expect(
+      describeWaiting({
+        ...base,
+        awaitingTotal: 1,
+        awaiting: [{ ...person!, isGroup: true }],
+      }),
+    ).toBe("One conversation is waiting on you.");
+    expect(
+      describeWaiting({
+        ...base,
+        awaitingTotal: 2,
+        awaiting: [person!, { ...person!, participant: null }],
+      }),
+    ).toBe("2 conversations are waiting on you.");
   });
 });
 

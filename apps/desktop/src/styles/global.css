@@ -92,103 +92,73 @@ p {
   margin-top: var(--space-4);
 }
 
-/* Shell */
-/* The shell is exactly the window and never taller. Without the explicit row
-   and the min-height:0 below, a long page grows .main past the grid row, the
-   whole shell scrolls, and the first things to leave the screen are the
-   sidebar's nav and the top bar — the two things that are supposed to stay
-   put. Only .content scrolls. */
-.shell {
+/* ------------------------------------------------------------- shell ----- */
+
+/* One screen, a bar above it, and a drawer over the top for everything else.
+   The app is exactly the window and never taller: without min-height:0 on the
+   scrolling child, a long page grows the layout past the window and the bar is
+   the first thing to leave the screen. */
+.app {
   display: grid;
-  grid-template-columns: 220px 1fr;
-  grid-template-rows: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-  background: var(--surface-1);
-  border-right: 1px solid var(--border);
-  padding: var(--space-4) var(--space-3);
-  gap: var(--space-4);
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-.brand--large {
-  justify-content: center;
-  font-size: var(--text-title);
-  margin-bottom: var(--space-4);
-}
-.brand__mark {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-  box-shadow: inset 0 0 0 2px var(--surface-1);
-}
-.brand--large .brand__mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-}
-.nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.nav__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 9px var(--space-3);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-weight: 500;
-  transition:
-    background var(--motion-fast) var(--ease),
-    color var(--motion-fast) var(--ease);
-}
-.nav__item:hover {
-  background: var(--surface-2);
-  color: var(--text-primary);
-  text-decoration: none;
-}
-.nav__item--active {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-}
-.sidebar__footer {
-  margin-top: auto;
-}
-.main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
+
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-2) var(--space-5);
+  gap: var(--space-4);
+  padding: 0 var(--space-5);
+  min-height: 56px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-1);
-  min-height: 44px;
 }
-.topbar__status,
+.topbar__brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.topbar__name {
+  font-size: var(--text-title-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.topbar__tag {
+  font-size: var(--text-body-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .topbar__right {
   display: flex;
-  gap: var(--space-2);
   align-items: center;
+  gap: var(--space-3);
+}
+.topbar__settings {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  font: inherit;
+  font-size: var(--text-body-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.topbar__settings:hover {
+  background: var(--surface-3);
+}
+.brand__mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent);
+  align-self: center;
 }
 .badge-button {
   background: none;
@@ -197,18 +167,204 @@ p {
   cursor: pointer;
 }
 .content {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6) var(--space-5) var(--space-7);
+}
+/* One measure for the page, so nothing floats at a width of its own. */
+.content__inner {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+/* ------------------------------------------------------------ drawer ----- */
+
+.drawer__scrim {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-3);
+}
+.drawer__close {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin: var(--space-4) var(--space-5) 0;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  font: inherit;
+  font-size: var(--text-body-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.drawer__close:hover {
+  background: var(--surface-3);
+}
+.drawer__body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-5) var(--space-6) var(--space-7);
+  padding: var(--space-4) var(--space-5) var(--space-7);
 }
 
-/* One measure for every page. On a wide monitor an unconstrained page puts a
-   two-column form under a centred card and nothing shares an edge; this gives
-   them all the same left and right. */
-.content__inner {
-  max-width: 1160px;
-  margin: 0 auto;
+/* ------------------------------------------------------------ replies ---- */
+
+.replies {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.replies__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.replies__title {
+  font-size: var(--text-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+[data-theme="paper"] .replies__title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+}
+.replies__lede {
+  font-size: var(--text-body);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.replies__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.replies__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+/* A note is an empty state that belongs to the page rather than floating on
+   it: no dashed box, no centring, the same left edge as everything else. */
+.note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 62ch;
+}
+.note__title {
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.note__body {
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.note__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--card-padding);
+  border: var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+[data-theme="paper"] .thread {
+  background: transparent;
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.thread__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.thread__who {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.thread__name {
+  font-size: var(--text-title-sm);
+  font-weight: 600;
+}
+[data-theme="paper"] .thread__name {
+  font-family: var(--font-serif);
+  font-weight: 400;
+}
+.thread__address,
+.thread__when {
+  font-size: var(--text-body-sm);
+  color: var(--text-muted);
+}
+.thread__when {
+  white-space: nowrap;
+}
+.thread__subject {
+  font-size: var(--text-body-sm);
+  color: var(--text-secondary);
+  margin-top: calc(-1 * var(--space-3));
+}
+.thread__part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.thread__part--ruled {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.thread__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+.spacer {
+  flex-grow: 1;
+}
+.linkish {
+  font: inherit;
+  font-size: var(--text-body-sm);
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .page-header {

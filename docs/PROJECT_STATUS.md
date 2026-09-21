@@ -1,4 +1,4 @@
-# Project status — 0.9.0-alpha.1
+# Project status — 0.9.0-alpha.2
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -129,6 +129,8 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 | Evidence panel with measured habits and examples                                   | IMPLEMENTED | `EvidencePanel.test.tsx` (5 tests)                                                             |
 | The provider's locality is shown in the top bar                                    | IMPLEMENTED | `StatusBadges.test.tsx`                                                                        |
 | The window does not scroll; only the content pane does                             | IMPLEMENTED | `layout.test.ts` "the shell is the window, and only the content scrolls"                       |
+| There is one screen; everything else opens in a drawer over it                     | IMPLEMENTED | `layout.test.ts` "the app is the window, and only the content scrolls"; `AppShell.tsx`         |
+| The home screen counts people only when every waiting thread is one person         | IMPLEMENTED | `contracts.test.ts` "counts people only when every waiting thread really is one person"        |
 | No control falls back to the system's own styling                                  | IMPLEMENTED | `layout.test.ts` "no control falls back to the system's own styling"                           |
 | Anything that is writing is set as a letter, in every theme                        | IMPLEMENTED | `tokens.test.ts` "the serif carries the writing"                                               |
 | Three themes come from one token set, with no component branching on the name      | IMPLEMENTED | `tokens.test.ts` "every theme defines every token the others do"                               |
