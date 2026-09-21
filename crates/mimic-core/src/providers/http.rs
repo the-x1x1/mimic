@@ -250,6 +250,21 @@ mod tests {
         assert!(!p.info().local, "a hosted provider must never report itself as local");
     }
 
+    /// The first-run state on most machines: the default endpoint is right and
+    /// nothing is listening on it. The UI shows a badge and disables the draft
+    /// button on the strength of this answer, so it has to be an error rather
+    /// than an optimistic success.
+    #[test]
+    fn a_local_endpoint_with_nothing_listening_is_unreachable() {
+        // Port 1 needs privileges to bind, so nothing of the user's is there.
+        let p = LocalHttpProvider { base_url: "http://127.0.0.1:1/v1".into(), ..Default::default() };
+        let err = p.health().unwrap_err();
+        assert!(matches!(err, ProviderError::Unreachable(_)), "{err}");
+        let message = err.to_string();
+        assert_eq!(message.lines().count(), 1, "one line: {message}");
+        assert!(p.info().local, "an unreachable local endpoint is still a local one");
+    }
+
     #[test]
     fn provider_errors_stay_one_line_and_carry_no_body() {
         let long = "a".repeat(400);

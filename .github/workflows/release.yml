@@ -68,8 +68,10 @@ jobs:
         run: |
           pnpm typecheck
           pnpm test
+          cd engine; uv sync --all-extras --dev; uv run pytest; cd ..
+          # After the engine environment exists, so the four engine-protocol
+          # tests run against a real child process instead of skipping.
           cargo test --workspace
-          cd engine; uv sync --all-extras --dev; uv run pytest
       - name: Package engine
         shell: pwsh
         run: pwsh -NoProfile -File scripts/package-engine.ps1
@@ -81,6 +83,14 @@ jobs:
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "TAURI_SIGNING_PRIVATE_KEY secret is not set; refusing to publish an unsignable release" }
           pnpm --filter @mimic/desktop tauri build --ci
+      - name: The installer actually contains the engine
+        shell: pwsh
+        run: |
+          $engine = Get-ChildItem apps/desktop/src-tauri/resources/engine -Filter "mimic-engine.exe" -Recurse | Select-Object -First 1
+          if (-not $engine) { throw "the bundle was built without a packaged engine" }
+          $nsis = Get-ChildItem target/release/bundle/nsis -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $nsis) { throw "no installer was produced" }
+          if ($nsis.Length -lt 20MB) { throw "installer is $([int]($nsis.Length/1MB)) MB; too small to contain the engine" }
       - name: Collect artifacts + latest.json + checksums
         shell: pwsh
         run: |

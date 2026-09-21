@@ -24,6 +24,7 @@ export const qk = {
   drafts: ["drafts"] as const,
   draftOutcomes: ["draftOutcomes"] as const,
   providers: ["providers"] as const,
+  providerHealth: (id: string) => ["providerHealth", id] as const,
   jobs: ["jobs"] as const,
   diagnostics: ["diagnostics"] as const,
   events: ["events"] as const,

@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Badge, Button, Card, EmptyState } from "@mimic/ui";
-import { CHANNEL_LABELS, SUGGESTED_RELATIONSHIPS, type Channel } from "@mimic/contracts";
+import {
+  CHANNEL_LABELS,
+  MIN_SAMPLE,
+  SUGGESTED_RELATIONSHIPS,
+  type Channel,
+} from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
 import { usePeople, useSetRelationship } from "@/hooks/usePeople";
 import { DeletePersonDialog } from "./DeletePersonDialog";
@@ -77,9 +82,9 @@ export function PeoplePage() {
                   ) : (
                     <Badge
                       tone="neutral"
-                      title="A profile needs at least 20 messages you wrote to them."
+                      title={`A profile needs at least ${MIN_SAMPLE} messages you wrote to them.`}
                     >
-                      {countOf(Math.max(0, 20 - p.sentByUser), "more")} needed
+                      {countOf(Math.max(0, MIN_SAMPLE - p.sentByUser), "more")} needed
                     </Badge>
                   )}
                 </td>

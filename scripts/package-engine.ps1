@@ -14,6 +14,9 @@ uv run pyinstaller --noconfirm --clean --name mimic-engine --onedir --console `
   --specpath (Join-Path $repo "engine\build") `
   (Join-Path $repo "engine\src\mimic_engine\__main__.py")
 Copy-Item (Join-Path $repo "engine\dist\mimic-engine\*") $out -Recurse -Force
+# The directory is emptied above; its one tracked file is written back so a
+# developer who packages locally does not show up with a deleted README.
+Set-Content -Path (Join-Path $out "README.txt") -Value "Packaged engine lands here (scripts/package-engine.ps1). Not committed."
 $exe = Join-Path $out "mimic-engine.exe"
 if (-not (Test-Path $exe)) { $exe = Join-Path $out "mimic-engine" }
 & $exe --version

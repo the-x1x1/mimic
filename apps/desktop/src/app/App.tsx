@@ -11,7 +11,7 @@ import { VoicePage } from "@/features/voice/VoicePage";
 import { SourcesPage } from "@/features/sources/SourcesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { OnboardingFlow } from "@/features/onboarding/OnboardingFlow";
-import { useOnboardingState, useSettings } from "@/hooks/useSystem";
+import { useNativeEventBridge, useOnboardingState, useSettings } from "@/hooks/useSystem";
 import { useUpdater } from "@/features/updater/useUpdater";
 import { isTauri } from "@/lib/tauri";
 
@@ -20,6 +20,17 @@ function ThemeSync() {
   useEffect(() => {
     document.documentElement.dataset.theme = settings.data?.["general.theme"] ?? "dark";
   }, [settings.data]);
+  return null;
+}
+
+/**
+ * Native events are subscribed above the gate, not inside AppShell: onboarding
+ * runs outside the shell, and it is the screen that most needs to know when an
+ * import or an analysis has finished. Mounted here it used to sit on
+ * "Importing…" until the app was restarted.
+ */
+function NativeEvents() {
+  useNativeEventBridge();
   return null;
 }
 
@@ -89,6 +100,7 @@ export function App() {
       <ErrorBoundary>
         <HashRouter>
           <ThemeSync />
+          <NativeEvents />
           <BackgroundUpdater />
           <Gate />
         </HashRouter>

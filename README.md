@@ -10,9 +10,9 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.6.0-alpha.2`
+## Current status — `0.7.0-alpha.1`
 
-This release is the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product. See [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted.
+0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
 | Area                                                                                                 | Status                                                                                  |
 | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -28,6 +28,8 @@ This release is the migration from what Mimic used to be (a Lightroom Classic ed
 | Deletion that actually deletes, with a preview that cannot understate it                             | Implemented and tested                                                                  |
 | Learning loop: draft → sent → diff → weighted feedback                                               | Recorded; nothing changes a profile from it yet (Phase 3)                               |
 | Held-out evaluation harness                                                                          | Implemented; not yet run over a real corpus, so **no accuracy figure appears anywhere** |
+| First run: onboarding that reacts to finished jobs and recovers from a bad import                    | Implemented and tested                                                                  |
+| Model reachability: the badge and the draft button follow a real check                               | Implemented and tested                                                                  |
 | Windows installer and signed updater                                                                 | Plumbing unchanged from 0.5.0 and never observed producing a build end to end           |
 
 The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). If this README and that file disagree, PROJECT_STATUS wins, and the source code wins over both.

@@ -18,12 +18,14 @@ import {
   MIN_SAMPLE,
   Settings,
   VoiceOverview,
+  canFinishOnboarding,
   composeReadiness,
   describeDeletion,
   describeImport,
   describeMetric,
   formatDuration,
   formatRate,
+  importStepState,
   nextCheckDelayMs,
   nextOnboardingStep,
 } from "../src";
@@ -233,6 +235,34 @@ describe("onboarding advances on facts", () => {
   });
 });
 
+describe("onboarding cannot dead-end", () => {
+  const base = {
+    completed: false,
+    hasIdentity: true,
+    hasSource: true,
+    hasOwnMessages: true,
+    hasVoiceProfile: false,
+  };
+
+  it("lets someone with messages of their own leave before a profile exists", () => {
+    // Under twenty own messages there will never be a measurable profile, and
+    // refusing to let them in would be permanent.
+    expect(canFinishOnboarding(base)).toBe(true);
+    expect(nextOnboardingStep(base)).toBe("analyze");
+    expect(canFinishOnboarding({ ...base, hasOwnMessages: false })).toBe(false);
+    expect(canFinishOnboarding({ ...base, hasSource: false })).toBe(false);
+  });
+
+  it("names the state where an import read a file and found nothing of yours", () => {
+    expect(importStepState([])).toBe("no-source");
+    expect(importStepState([{ status: "new", messageCount: 0 }])).toBe("not-started");
+    expect(importStepState([{ status: "importing", messageCount: 0 }])).toBe("running");
+    expect(importStepState([{ status: "failed", messageCount: 0 }])).toBe("failed");
+    // The file was read; those messages are simply all from other people.
+    expect(importStepState([{ status: "imported", messageCount: 4000 }])).toBe("none-of-yours");
+  });
+});
+
 describe("compose readiness explains itself", () => {
   const layer = (stale: boolean) => ({
     layer: "global",
@@ -267,6 +297,28 @@ describe("compose readiness explains itself", () => {
 
   it("says nothing when there is nothing to say", () => {
     expect(composeReadiness(context(true, false)).reason).toBeNull();
+  });
+
+  it("refuses the draft outright when the model is not answering", () => {
+    const unreachable = composeReadiness(context(true, false), {
+      displayName: "Local model",
+      local: true,
+      reachable: false,
+      error: "connection refused",
+    });
+    expect(unreachable.ready).toBe(false);
+    expect(unreachable.reason).toContain("not answering");
+    expect(unreachable.reason).toContain("connection refused");
+  });
+
+  it("does not assume a model answers before it has been checked", () => {
+    const unknown = composeReadiness(context(true, false), {
+      displayName: "Local model",
+      local: true,
+      reachable: null,
+    });
+    expect(unknown.ready).toBe(true);
+    expect(unknown.reason).toBeNull();
   });
 });
 

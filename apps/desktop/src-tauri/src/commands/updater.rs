@@ -79,7 +79,7 @@ pub struct InstallGuard {
     pub active_jobs: usize,
 }
 
-/// Installing must never interrupt ingest, training, prediction or a Lightroom apply.
+/// Installing must never interrupt an import or a voice analysis.
 #[tauri::command]
 pub async fn can_install_update_now(state: State<'_, SharedState>) -> CommandResult<InstallGuard> {
     let active = state.db.list_jobs(50, true)?;

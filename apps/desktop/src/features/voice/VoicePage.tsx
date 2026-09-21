@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import { Badge, Button, Card, EmptyState, Metric } from "@mimic/ui";
 import { MIN_SAMPLE, describeMetric, formatDuration, formatRate } from "@mimic/contracts";
@@ -33,7 +34,12 @@ export function VoicePage() {
     return (
       <EmptyState
         title="Mimic has not read anything you wrote"
-        body="It learns only from messages you sent, not ones you received. Import a source and make sure the addresses you write from are listed under Settings."
+        body="It learns only from messages you sent, not ones you received. Import a source, and make sure every address you write from is listed under Settings — a missing one makes your own messages look like someone else's."
+        primary={
+          <Link to="/sources" className="ui-button ui-button--primary">
+            Add a source
+          </Link>
+        }
       />
     );
   }
