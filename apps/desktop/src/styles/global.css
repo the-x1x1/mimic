@@ -919,29 +919,7 @@ select option {
   cursor: pointer;
 }
 
-/* Onboarding + fatal + splash */
-.onboarding {
-  height: 100%;
-  overflow: auto;
-  display: grid;
-  place-items: center;
-  padding: var(--space-6);
-}
-.onboarding__card {
-  width: min(720px, 100%);
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-  box-shadow: var(--shadow-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.onboarding h1 {
-  font-size: var(--text-display);
-  letter-spacing: -0.01em;
-}
+/* Fatal + splash */
 .choice-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -1188,11 +1166,19 @@ select option {
 
 /* -------------------------------------------------------- onboarding ----- */
 
+/* Setup is the whole window and it scrolls, which it did not: `body` has
+   overflow hidden, so a page taller than the viewport had no scrollbar and
+   everything below the fold was simply unreachable — buttons included. It is
+   also aligned to the top rather than centred, because centring a tall page
+   pushes its first step off the top of the screen. */
 .onboarding {
-  min-height: 100vh;
+  height: 100%;
+  overflow-y: auto;
   display: grid;
-  place-items: center;
-  padding: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  align-content: start;
+  padding: var(--space-6) var(--space-4) var(--space-7);
 }
 
 .onboarding__inner {
