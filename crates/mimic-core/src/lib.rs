@@ -27,6 +27,7 @@ pub mod generation;
 pub mod ids;
 pub mod import;
 pub mod jobs;
+pub mod learning;
 pub mod localmodel;
 pub mod paths;
 pub mod privacy;

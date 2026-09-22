@@ -50,20 +50,27 @@ pub async fn resolve_draft(
     Ok(draft)
 }
 
-/// An explicit correction the user typed, which outweighs anything inferred
-/// from an edit.
+/// An explicit correction the user typed about one draft. It is recorded
+/// against the draft, and remembered as a note about whoever the draft was to
+/// (or everyone, when it was to nobody in particular), so the next draft
+/// actually reads it.
 #[tauri::command]
 pub async fn add_draft_preference(
     state: State<'_, SharedState>,
     draft_id: String,
     note: String,
 ) -> CommandResult<mimic_core::db::DraftFeedback> {
+    let draft = state
+        .db
+        .get_draft(&draft_id)?
+        .ok_or_else(|| crate::error::CommandError::new("not_found", "That draft no longer exists."))?;
+    mimic_core::learning::remember_note(&state.db, draft.participant_id.as_deref(), &note)?;
     Ok(state.db.add_draft_feedback(
         &draft_id,
         "preference",
         mimic_core::generation::feedback::PREFERENCE_WEIGHT,
         &serde_json::json!({ "note": note }),
-        Some(&note),
+        Some(note.trim()),
     )?)
 }
 

@@ -45,6 +45,8 @@ export function useResolveDraft() {
       qc.invalidateQueries({ queryKey: qk.drafts });
       qc.invalidateQueries({ queryKey: qk.draftOutcomes });
       qc.invalidateQueries({ queryKey: qk.dashboard });
+      // A sent draft is evidence for the learning loop.
+      qc.invalidateQueries({ queryKey: qk.learning });
     },
   });
 }

@@ -93,6 +93,47 @@ export const SituationSummary = z.object({
 });
 export type SituationSummary = z.infer<typeof SituationSummary>;
 
+export const Habit = z.enum(["greeting", "signOff", "emoji", "terminalPeriod", "length"]);
+export type Habit = z.infer<typeof Habit>;
+
+/**
+ * A habit the user pushed one way in drafts they sent. `holds` is whether it
+ * passed the threshold (three agreeing drafts carrying most of the weight)
+ * and so changes the next draft; the rest are still forming. `summary` is
+ * written for a person and shown verbatim.
+ */
+export const LearnedPattern = z.object({
+  habit: Habit,
+  direction: z.enum(["less", "more"]),
+  participantId: z.string().nullable(),
+  participantName: z.string().nullable(),
+  agreeing: z.number(),
+  observations: z.number(),
+  share: z.number(),
+  holds: z.boolean(),
+  meanChange: z.number().nullable(),
+  summary: z.string(),
+});
+export type LearnedPattern = z.infer<typeof LearnedPattern>;
+
+/** Something the user told Mimic, in their words, and who it is about. */
+export const StatedNote = z.object({
+  id: z.string(),
+  text: z.string(),
+  participantId: z.string().nullable(),
+  participantName: z.string().nullable(),
+  updatedAt: z.string(),
+});
+export type StatedNote = z.infer<typeof StatedNote>;
+
+export const LearningOverview = z.object({
+  draftsConsidered: z.number(),
+  patterns: z.array(LearnedPattern),
+  minAgreeing: z.number(),
+  notes: z.array(StatedNote),
+});
+export type LearningOverview = z.infer<typeof LearningOverview>;
+
 /** Below this many of the user's own messages nothing is measured. */
 export const MIN_SAMPLE = 20;
 

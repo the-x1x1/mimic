@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Participant } from "./identity";
-import { ResolvedLayer, VoiceMetrics } from "./voice";
+import { LearnedPattern, ResolvedLayer, VoiceMetrics } from "./voice";
 
 export const Adjustment = z.enum(["shorter", "longer", "moreCasual", "moreProfessional"]);
 export type Adjustment = z.infer<typeof Adjustment>;
@@ -107,6 +107,7 @@ export const GenerationContext = z.object({
   examples: z.array(RetrievedExchange),
   transcript: z.array(Message),
   situation: SituationChoice.nullable(),
+  learned: z.array(LearnedPattern),
   evidence: z.array(z.string()),
 });
 export type GenerationContext = z.infer<typeof GenerationContext>;

@@ -355,6 +355,12 @@ p {
   gap: var(--space-1);
   max-width: 28rem;
 }
+.thread__tell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 36rem;
+}
 .thread__actions {
   display: flex;
   align-items: center;
@@ -1252,4 +1258,26 @@ select option {
   width: 48px;
   height: 3px;
   border-radius: 2px;
+}
+
+/* "Things you've told me": each note reads as the user's own words, with who
+   it is about and a way to take it back on the same line. */
+.card-subhead {
+  font-size: var(--text-body);
+  font-weight: 600;
+  margin-top: var(--space-4);
+}
+.notes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.notes__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }

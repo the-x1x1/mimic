@@ -114,4 +114,16 @@ Draft → what was actually sent → diff → weighted feedback.
 
 Weights encode one rule: **what the user said explicitly outranks what Mimic inferred from watching them.** A typed correction is 3.0; an inferred edit is 1.0.
 
-What the loop deliberately does not do yet is change a profile. That is Phase 3, and the discipline it will inherit is the one the corrections system earned in the previous product: a pattern counts only when at least three observations agree on a direction and account for the majority of the magnitude. One person deleting one greeting does not mean they never greet.
+### Closing it
+
+`learning::patterns` re-reads every draft the user sent — edited or not — and asks, for five habits (greeting, sign-off, emoji, a full stop at the end, length), which way the user pushed it. An edit that took the greeting out is a vote for fewer greetings; a draft sent unedited _with_ its greeting is a vote against. Both count, because a loop that only listens to edits concludes that every habit is wrong.
+
+A pattern **holds** when at least `MIN_AGREEING = 3` drafts moved the habit the same way **and** they carry more than half of the weight, counting the drafts that went the other way or left it alone. Binary habits weigh one per draft; length weighs by how much the draft changed (a draft cut by 40% weighs 0.4), and a draft sent at the same length weighs the dead band, 0.1. This is the discipline the previous product's corrections system earned: one deleted greeting is an anecdote, and three deletions against four greetings left in place is still an anecdote.
+
+Patterns are computed for everyone and per person. A person's pattern replaces the global one on the same habit, so learning that Ada gets no greeting does not stop Mimic greeting anyone else, and learning that Ada _does_ get one overrides a global habit of leaving them out.
+
+A pattern that holds reaches the prompt as one instruction ("Do not open with a greeting.", "Write about 40% shorter than the measurements alone would suggest.") in its own section after the measurements, and the draft's evidence names it. Nothing is stored: the patterns are a pure function of the drafts table, so deleting a person takes their drafts' patterns with them.
+
+**Notes.** "Tell me what to do differently" under a draft, and the field under "How you write", store what the user typed as a manual preference — about the draft's recipient, or about everyone — under a `said:` key. The prompt quotes it in the user's words, last, under "Things they have told Mimic directly, which override everything above". Every note is listed with a way to take it back.
+
+What the loop still does not do is change a measured metric. `voice_profiles` remain pure measurement of what the user wrote; what they changed in Mimic's drafts is kept separate, as instructions, so the two can always be told apart.

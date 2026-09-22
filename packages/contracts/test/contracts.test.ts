@@ -16,6 +16,7 @@ import {
   JOB_LABELS,
   LatestJson,
   MIN_SAMPLE,
+  LearningOverview,
   Settings,
   SituationSummary,
   VoiceOverview,
@@ -96,6 +97,18 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     // No situation is a real, common state and must parse too.
     const plain = GenerationContext.parse(read(contractFixture("generation_context.json")));
     expect(plain.situation).toBeNull();
+  });
+
+  it("parses what was learned from sent drafts, holding and forming apart", () => {
+    const o = LearningOverview.parse(read(contractFixture("learning.json")));
+    expect(o.draftsConsidered).toBeGreaterThan(0);
+    expect(o.minAgreeing).toBe(3);
+    const holding = o.patterns.filter((p) => p.holds);
+    expect(holding.length).toBeGreaterThan(0);
+    expect(holding.every((p) => p.agreeing >= o.minAgreeing && p.share > 0.5)).toBe(true);
+    expect(o.patterns.every((p) => p.summary.length > 0)).toBe(true);
+    expect(o.notes.length).toBeGreaterThan(0);
+    expect(o.notes.every((n) => !n.text.startsWith("said:"))).toBe(true);
   });
 
   it("parses a draft and a deletion report", () => {

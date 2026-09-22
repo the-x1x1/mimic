@@ -32,6 +32,25 @@ pub async fn list_situations(
     Ok(mimic_core::situations::overview(&state.db)?)
 }
 
+/// What Mimic has learned from the drafts the user sent, and what they have
+/// told it directly.
+#[tauri::command]
+pub async fn get_learning_overview(
+    state: State<'_, SharedState>,
+) -> CommandResult<mimic_core::learning::LearningOverview> {
+    Ok(mimic_core::learning::overview(&state.db)?)
+}
+
+/// Remember something the user typed, about one person or everyone.
+#[tauri::command]
+pub async fn add_voice_note(
+    state: State<'_, SharedState>,
+    participant_id: Option<String>,
+    note: String,
+) -> CommandResult<mimic_core::db::VoicePreference> {
+    Ok(mimic_core::learning::remember_note(&state.db, participant_id.as_deref(), &note)?)
+}
+
 #[tauri::command]
 pub async fn get_voice_profile(
     state: State<'_, SharedState>,

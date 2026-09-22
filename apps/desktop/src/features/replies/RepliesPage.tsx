@@ -233,6 +233,9 @@ export function DraftReview({ draft, onDone }: { draft: Draft; onDone: () => voi
   const resolve = useResolveDraft();
   const [text, setText] = useState(draft.generatedText);
   const [editing, setEditing] = useState(false);
+  const [telling, setTelling] = useState(false);
+  const [note, setNote] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const edited = text !== draft.generatedText;
   const situation = SituationChoice.safeParse(draft.context["situation"]);
   const situationLine = describeSituation(situation.success ? situation.data : null);
@@ -288,19 +291,53 @@ export function DraftReview({ draft, onDone }: { draft: Draft; onDone: () => voi
           Not this one
         </Button>
         <span className="spacer" />
-        <button
-          type="button"
-          className="linkish"
-          onClick={async () => {
-            const note = window.prompt("What should I do differently next time?");
-            if (!note?.trim()) return;
-            await ipc.addDraftPreference(draft.id, note.trim());
-            toast.success("Noted.", "What you tell me outweighs anything I guessed from an edit.");
-          }}
-        >
-          Why I wrote it this way
+        <button type="button" className="linkish" onClick={() => setTelling((v) => !v)}>
+          {telling ? "Never mind" : "Tell me what to do differently"}
         </button>
       </div>
+      {telling ? (
+        <form
+          className="thread__tell"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!note.trim()) return;
+            setSavingNote(true);
+            try {
+              await ipc.addDraftPreference(draft.id, note.trim());
+              toast.success(
+                "I'll remember that.",
+                "What you tell me outranks anything I worked out for myself. You can take it back under How you write.",
+              );
+              setNote("");
+              setTelling(false);
+            } catch (err) {
+              toast.danger("I couldn't keep that", (err as Error).message);
+            } finally {
+              setSavingNote(false);
+            }
+          }}
+        >
+          <label htmlFor={`tell-${draft.id}`} className="muted small">
+            {draft.participantId
+              ? "I'll remember this for everything I write to them."
+              : "I'll remember this for everything I write."}
+          </label>
+          <input
+            id={`tell-${draft.id}`}
+            type="text"
+            maxLength={500}
+            placeholder="never sign off with 'best'"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            autoFocus
+          />
+          <div className="row gap-3">
+            <Button size="sm" type="submit" disabled={savingNote || !note.trim()}>
+              {savingNote ? "Keeping it…" : "Remember this"}
+            </Button>
+          </div>
+        </form>
+      ) : null}
       <p className="muted small">
         {situationLine ? `${situationLine} ` : null}
         {draft.intent

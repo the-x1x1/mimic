@@ -19,6 +19,7 @@ import {
   GenerationContext,
   InstallGuard,
   Job,
+  LearningOverview,
   LocalModelStatus,
   OnboardingState,
   Participant,
@@ -134,6 +135,9 @@ export const ipc = {
 
   voiceOverview: () => call("get_voice_overview", VoiceOverview),
   situations: () => call("list_situations", SituationSummary.array()),
+  learning: () => call("get_learning_overview", LearningOverview),
+  addVoiceNote: (participantId: string | null, note: string) =>
+    call("add_voice_note", VoicePreference, { participantId, note }),
   startVoiceAnalysis: () => call("start_voice_analysis", Job),
   voiceExamples: (layer: string, scopeKey: string, limit = 10) =>
     call("list_voice_examples", RepresentativeExample.array(), { layer, scopeKey, limit }),
