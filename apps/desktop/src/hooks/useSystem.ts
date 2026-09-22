@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { JOB_LABELS } from "@mimic/contracts";
+import { JOB_KINDS, JOB_LABELS } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { events } from "@/lib/events";
 import { qk } from "@/app/queryClient";
@@ -42,6 +42,10 @@ export function useNativeEventBridge() {
             qc.invalidateQueries({ queryKey: key });
           }
           const label = JOB_LABELS[ev.type] ?? ev.type;
+          // A mailbox is checked every few minutes; a toast each time would be
+          // noise, and a failure is shown where it matters — on the home
+          // screen and against the mailbox under Your mail.
+          if (ev.type === JOB_KINDS.checkMailbox) return;
           if (ev.status === "completed") toast.success(`${label} finished`);
           else if (ev.status === "failed") toast.danger(`${label} failed`, ev.message ?? undefined);
           else toast.info(`${label} canceled`);

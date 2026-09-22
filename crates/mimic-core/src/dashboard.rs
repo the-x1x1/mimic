@@ -5,9 +5,11 @@
 //! than five commands so the screen cannot show a half-consistent picture —
 //! threads from one moment and drafts from another.
 //!
-//! Two honesty rules shape it. Nothing here is a live inbox: every message it
-//! reports came from an import, and `last_import_at` says when, so the screen
-//! can say so rather than implying mail is arriving. And a thread is "awaiting
+//! Two honesty rules shape it. Nothing here is a live inbox unless a mailbox is
+//! connected: every message it reports came from an import or a mailbox check,
+//! `last_import_at` says when, and `mail_checking` says whether anything
+//! arrives by itself, so the screen never implies mail is arriving when it is
+//! not. And a thread is "awaiting
 //! a reply" only because the last message in it came from someone else and was
 //! never answered — no heuristic about urgency, no inferred intent.
 
@@ -60,6 +62,10 @@ pub struct Dashboard {
     /// Whether Mimic is allowed to draft replies without being asked each
     /// time. Off unless the user turned it on.
     pub auto_draft: bool,
+    /// Whether mail arrives by itself: `None` unless a mailbox is connected,
+    /// so the screen can keep saying "nothing arrives on its own" until that
+    /// stops being true.
+    pub mail_checking: Option<crate::sources::imap::MailChecking>,
 }
 
 pub fn dashboard(db: &Db, limit: usize, auto_draft: bool) -> Result<Dashboard, DbError> {
@@ -100,6 +106,7 @@ pub fn dashboard(db: &Db, limit: usize, auto_draft: bool) -> Result<Dashboard, D
         outcomes: db.measured_draft_outcomes()?,
         last_import_at: db.last_import_at()?,
         auto_draft,
+        mail_checking: crate::sources::imap::checking(db)?,
     })
 }
 

@@ -15,6 +15,7 @@ import {
   useSetIdentity,
 } from "@/hooks/usePeople";
 import { useProviderState } from "@/hooks/useCompose";
+import { useSources } from "@/hooks/useSources";
 import { useUpdater } from "@/features/updater/useUpdater";
 import { ipc } from "@/lib/ipc";
 import { toast } from "@/state/toast";
@@ -32,6 +33,7 @@ export function SettingsPage() {
       <WritingEngineSection />
       <ProviderSection />
       <AssistSection />
+      <MailSection />
       <EngineSection />
       <PrivacySection />
       <UpdatesSection />
@@ -524,6 +526,40 @@ function AboutSection() {
       <Button size="sm" variant="ghost" onClick={() => ipc.openLogsFolder()}>
         Open logs folder
       </Button>
+    </Card>
+  );
+}
+
+/**
+ * How often a connected mailbox is checked. Only shown once one is
+ * connected: until then there is nothing to check, and a setting for it
+ * would suggest mail arrives on its own when it does not.
+ */
+function MailSection() {
+  const settings = useSettings();
+  const sources = useSources();
+  const boxes = (sources.data ?? []).filter((s) => s.connector === "imap");
+  if (boxes.length === 0) return null;
+  const every = settings.data?.["mail.checkEveryMinutes"] ?? 15;
+  return (
+    <Card title="Checking your mail">
+      <p className="neutral">
+        I look for new mail in {boxes.length === 1 ? "your mailbox" : "your mailboxes"} on a
+        schedule, read-only: nothing is marked as read, moved or deleted, and nothing is sent.
+      </p>
+      <label className="row gap-2">
+        <span>Check</span>
+        <select
+          value={every}
+          onChange={(e) => ipc.setSetting("mail.checkEveryMinutes", Number(e.target.value))}
+        >
+          <option value={0}>only when I ask</option>
+          <option value={5}>every 5 minutes</option>
+          <option value={15}>every 15 minutes</option>
+          <option value={30}>every 30 minutes</option>
+          <option value={60}>every hour</option>
+        </select>
+      </label>
     </Card>
   );
 }

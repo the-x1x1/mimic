@@ -26,6 +26,7 @@ import {
   composeReadiness,
   describeDeletion,
   describeWaiting,
+  describeMailChecking,
   describeImport,
   describeMetric,
   describeSituation,
@@ -469,6 +470,7 @@ describe("settings and updater contracts", () => {
       "generation.localModel": "llama3.2:3b",
       "generation.anthropicModel": "claude-sonnet-4-5",
       "assist.autoDraft": false,
+      "mail.checkEveryMinutes": 15,
       "onboarding.completed": false,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();
@@ -528,5 +530,50 @@ describe("describeSituation words a reading as a reading", () => {
     })!;
     expect(read).toMatch(/^Your note read like saying no/);
     expect(read).not.toMatch(/you said/);
+  });
+});
+
+describe("the home screen says whether mail arrives by itself, and only when it does", () => {
+  const base = Dashboard.parse(read(contractFixture("dashboard.json")));
+  it("says nothing about checking when no mailbox is connected", () => {
+    expect(base.mailChecking).toBeNull();
+    expect(describeMailChecking(base)).toBeNull();
+  });
+  it("names the interval, or that checking is off", () => {
+    const on = {
+      ...base,
+      mailChecking: { mailboxes: 1, everyMinutes: 15, lastCheckedAt: null, failing: null },
+    };
+    expect(describeMailChecking(on)).toBe("I check your mailbox every 15 minutes.");
+    const off = {
+      ...base,
+      mailChecking: { mailboxes: 2, everyMinutes: 0, lastCheckedAt: null, failing: null },
+    };
+    expect(describeMailChecking(off)).toMatch(/^Checking your mailboxes is turned off/);
+  });
+  it("reads a first check as a first check, not as nothing imported", () => {
+    const first = {
+      ...base,
+      lastImportAt: null,
+      mailChecking: { mailboxes: 1, everyMinutes: 15, lastCheckedAt: null, failing: null },
+    };
+    expect(describeWaiting(first)).toMatch(/first time/);
+    const broken = { ...first, mailChecking: { ...first.mailChecking, failing: "wrong password" } };
+    expect(describeWaiting(broken)).not.toMatch(/first time/);
+    expect(describeMailChecking(broken)).toBe(
+      "The last check of your mailbox failed: wrong password",
+    );
+  });
+});
+
+describe("connecting a mailbox", () => {
+  it("guesses the server for the common providers and nothing for the rest", async () => {
+    const { guessMailHost } = await import("../src");
+    expect(guessMailHost("c@gmail.com")?.host).toBe("imap.gmail.com");
+    expect(guessMailHost("c@icloud.com")?.port).toBe(993);
+    // Outlook.com is known, and known not to work with a password.
+    expect(guessMailHost("C@Outlook.com")?.supported).toBe(false);
+    expect(guessMailHost("c@formicaria.us")).toBeNull();
+    expect(guessMailHost("not an address")).toBeNull();
   });
 });

@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.10.0-alpha.2`
+## Current status — `0.10.0-alpha.3`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -21,7 +21,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | Assisted drafting in the background, off by default                                                   | Implemented and tested; needs a connector before it is "in advance" rather than "after an import" |
 | Sending a reply                                                                                       | Deliberately not built                                                                            |
 | SQLite schema v7, migrations, backup before upgrade, resumable jobs                                   | Implemented and tested                                                                            |
-| Source connectors: standard `.mbox`, and Mimic's own JSON export format                               | Implemented and tested                                                                            |
+| Source connectors: standard `.mbox` (now decoding MIME), Mimic's own JSON format, and IMAP            | Implemented and tested; IMAP only against a scripted server — no real provider exercised yet      |
 | Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume             | Implemented and tested                                                                            |
 | Voice engine: deterministic metrics, global / channel / relationship layers, representative examples  | Implemented and tested                                                                            |
 | Situational voice layer: six situations, your own messages filed by rule, a layer per situation       | Implemented and tested; rules rather than a model                                                 |

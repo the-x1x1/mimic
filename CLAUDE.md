@@ -25,6 +25,7 @@ Documentation follows reality. Never let a doc lead the code.
 - **Never** put a credential in the database or in settings. Providers read them through `SecretStore`.
 - **Never** claim a provider is local. Compute it from the endpoint (`LocalHttpProvider::is_loopback`) and let the answer be what it is.
 - **Never** add a send path. Mimic drafts; the user sends. Trusted Mode is designed and deliberately unbuilt.
+- **Never** write to a mailbox. The IMAP client reads with `EXAMINE` and `BODY.PEEK[]` and has no command that changes anything; the tests fail if one is sent.
 - **Never** delete a person without removing what was derived from them and invalidating what was computed over them. The preview must be produced by the same code path as the deletion.
 - **Never** drop the user's own words during normalization when a line's role is ambiguous. Keeping a stray quoted line is a smaller error than deleting a real one.
 - **Always** add a new numbered migration for a schema change (`crates/mimic-core/src/db/migrations/`), never edit a shipped one, and extend the migration test.
@@ -37,7 +38,7 @@ Documentation follows reality. Never let a doc lead the code.
 
 ```
 apps/desktop/            Tauri 2 shell (src-tauri/, Rust) + React/TS frontend (src/); one screen (features/replies) with a drawer over it
-crates/mimic-core/       db, sources, import, voice, retrieval, generation, providers, privacy, jobs, assist, dashboard, localmodel, engine client
+crates/mimic-core/       db, sources (mbox, mime, imap, mimic_json), import, voice, situations, learning, retrieval, generation, providers, privacy, jobs, assist, dashboard, localmodel, engine client
 engine/                  Python sidecar (uv): NDJSON protocol, text embeddings, similarity, evaluation
 packages/contracts/      zod contracts mirroring every IPC payload
 packages/ui/             design tokens + primitives
@@ -67,9 +68,11 @@ Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`
 
 Regenerating the contract fixtures after a deliberate shape change: `MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e`.
 
-## What is implemented (0.10.0-alpha.2)
+## What is implemented (0.10.0-alpha.3)
 
 Phase 0 (migration) is complete; Phase 1 (Mimic Core) is partial. Working end to end: schema v7 with a clean upgrade from the photography schema; the `CommunicationSource` contract with `mbox` and `mimic_json` connectors; streaming import with identity-based direction, dedupe, cancellation and free resume; the layered voice engine (global, channel, relationship, situational) with deterministic metrics, a 20-message floor and deterministic representative examples; metadata-filtered lexical retrieval; the generation context builder and pure prompt assembler; the model-provider abstraction with a local endpoint and Anthropic; real cascading deletion with an honest preview; the one-screen interface, with People / How you write / Your mail / Settings in a drawer over it; and the learning loop, from what was sent to what the next draft does differently. As of 0.7.0 the first run is the part that has had attention: onboarding subscribes to native job events above the gate, names the state where an import matched none of the user's addresses, and lets someone with fewer than twenty own messages leave anyway; the provider badge and the Compose button follow a real reachability check instead of assuming the local endpoint is up.
+
+0.10.0-alpha.3 is real mail. `sources/mime.rs` decodes MIME (multipart, base64, quoted-printable, the four charsets that cover nearly all mail, encoded-word headers, HTML-only mail) — before it, mbox bodies were stored raw. `sources/imap.rs` connects a mailbox read-only over TLS (plain only to loopback), reads the inbox and sent folder with a per-folder `UIDVALIDITY`/UID watermark, and feeds `import::Importer`; later replies join the thread they reference and the thread is renumbered by time. Checks run on `mail.checkEveryMinutes` and are followed by assisted drafting when that is on. The app password lives in the secret store under `imap:<source id>`.
 
 0.10.0-alpha.2 closes the learning loop: `learning.rs` reads every sent draft (edited or not) and a habit — greeting, sign-off, emoji, closing full stop, length — changes the next draft once three drafts agree and outweigh the ones that did not, globally or per person. Patterns are recomputed on every call, never stored, and reach the prompt as instructions beside the measurements rather than altering them. Notes the user types are manual preferences under a `said:` key, quoted in their words and forgettable.
 
@@ -87,7 +90,7 @@ Phase 0 (migration) is complete; Phase 1 (Mimic Core) is partial. Working end to
 
 0.8.0 adds the home screen: threads whose last message came from someone else and was never answered, the draft Mimic has for each, and approve / modify / reject that records a real outcome. Assisted drafting (`assist.autoDraft`) prepares those drafts in the background after an import — off by default, bounded per run, and it never reaches a provider while off.
 
-Not implemented, deliberately: any send path; model-backed situation classification; embedding-backed retrieval; learning that alters a measured metric; the evaluation loop over a real corpus; any accuracy figure in the UI; the inbox connector ASSISTED mode needs to be more than post-import drafting; TRUSTED mode. See `docs/PROJECT_STATUS.md` for the row-by-row picture and `docs/ROADMAP.md` for where each lands.
+Not implemented, deliberately: any send path; model-backed situation classification; embedding-backed retrieval; learning that alters a measured metric; the evaluation loop over a real corpus; any accuracy figure in the UI; IMAP OAuth; TRUSTED mode. See `docs/PROJECT_STATUS.md` for the row-by-row picture and `docs/ROADMAP.md` for where each lands.
 
 ## How to update PROJECT_STATUS
 

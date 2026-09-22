@@ -297,14 +297,63 @@ pub fn classify(body: &str) -> Vec<Classification> {
 /// message cues plus the instruction-shaped ones, and does not strip a closing
 /// line, because a note has none. Returns the single strongest situation.
 pub fn classify_note(note: &str) -> Option<Classification> {
+    let words: Vec<String> = normalize(note).split_whitespace().map(str::to_string).collect();
+    // A note that accepts anything is not a refusal, however it opens: "no,
+    // that works", "no worries, yes please", "say no problem and that friday
+    // works".
+    let accepts = ACCEPTING.iter().any(|a| {
+        let a_words: Vec<&str> = a.split(' ').collect();
+        words.windows(a_words.len()).any(|w| w.iter().map(String::as_str).eq(a_words.iter().copied()))
+    });
     let mut all = score(note, true);
-    // "no, busy that week" — a note that opens with a bare "no" is a no.
-    let first = normalize(note).split_whitespace().next().map(str::to_string);
-    if first.as_deref() == Some("no") && !all.iter().any(|c| c.situation_id == "declining") {
+    if accepts {
+        all.retain(|c| c.situation_id != "declining");
+    }
+    // "no, busy that week" — a note that opens with a bare "no" is a no, but
+    // not "no rush", "no worries" or "no problem".
+    let bare_no = words.first().map(String::as_str) == Some("no")
+        && !words.get(1).is_some_and(|w| NOT_A_REFUSAL.contains(&w.as_str()))
+        && !accepts;
+    if bare_no && !all.iter().any(|c| c.situation_id == "declining") {
         all.push(Classification { situation_id: "declining".into(), confidence: 0.7, cue: "no".into() });
         sort(&mut all);
     }
     all.into_iter().next()
+}
+
+/// Words that follow "no" without refusing anything.
+const NOT_A_REFUSAL: [&str; 14] = [
+    "rush", "worries", "worry", "problem", "problems", "need", "hurry", "pressure", "doubt", "question", "issue",
+    "stress", "bother", "thanks",
+];
+
+/// Phrases in a note that accept something. A note containing one is not read
+/// as a refusal.
+const ACCEPTING: [&str; 14] = [
+    "yes",
+    "yeah",
+    "yep",
+    "sure",
+    "ok",
+    "okay",
+    "works",
+    "fine",
+    "sounds good",
+    "happy to",
+    "confirm",
+    "accept",
+    "go ahead",
+    "that's great",
+];
+
+/// Whether the words just before a cue negate it: "don't decline", "don't
+/// say sorry", "never push back". Checked in notes only — in a message,
+/// "don't agree" is itself the cue.
+fn negated(hay: &str, phrase: &str) -> bool {
+    let Some(at) = hay.find(&format!(" {phrase} ")) else { return false };
+    let before: Vec<&str> = hay[..at].split_whitespace().rev().take(2).collect();
+    before.iter().any(|w| matches!(*w, "don't" | "dont" | "not" | "never" | "without"))
+        || (before.first() == Some(&"to") && before.get(1) == Some(&"need"))
 }
 
 fn score(text: &str, is_note: bool) -> Vec<Classification> {
@@ -320,7 +369,9 @@ fn score(text: &str, is_note: bool) -> Vec<Classification> {
         let mut best: Option<(&str, f64)> = None;
         let extra: &[Cue] = if is_note { note_cues(b.id) } else { &[] };
         for cue in message_cues(b.id).iter().chain(extra.iter()) {
-            if hay.contains(&format!(" {} ", cue.phrase)) {
+            // In a note every cue can be negated ("don't say sorry"); in a
+            // message the negation is part of the cue ("don't agree").
+            if hay.contains(&format!(" {} ", cue.phrase)) && !(is_note && negated(&hay, cue.phrase)) {
                 total += cue.weight;
                 if cue.weight > 0.0 && best.is_none_or(|(_, w)| cue.weight > w) {
                     best = Some((cue.phrase, cue.weight));
@@ -621,5 +672,34 @@ mod tests {
         assert_eq!(classify_note("propose a time next week").map(|c| c.situation_id), Some("scheduling".into()));
         assert_eq!(classify_note("yes, happy to, same as last year"), None);
         assert_eq!(classify_note(""), None);
+    }
+
+    /// Notes that start with "no" or name a situation but mean the opposite.
+    #[test]
+    fn a_note_that_only_sounds_like_a_refusal_is_not_read_as_one() {
+        for note in [
+            "no rush, tell her tuesday works",
+            "No, that's fine - tell him yes",
+            "no worries, yes please",
+            "don't decline, say yes",
+            "no problem at all",
+        ] {
+            let got = classify_note(note).map(|c| c.situation_id);
+            assert_ne!(got.as_deref(), Some("declining"), "{note:?} was read as a refusal");
+        }
+        for note in [
+            "no, that works",
+            "no that's fine, friday works",
+            "no issue, happy to",
+            "no stress, go ahead",
+            "say no problem and that friday works",
+            "no thanks needed, just confirm friday",
+        ] {
+            let got = classify_note(note).map(|c| c.situation_id);
+            assert_ne!(got.as_deref(), Some("declining"), "{note:?} was read as a refusal");
+        }
+        assert_ne!(classify_note("don't say sorry").map(|c| c.situation_id).as_deref(), Some("apologising"));
+        assert_eq!(classify_note("no way, too busy").map(|c| c.situation_id), Some("declining".into()));
+        assert_eq!(classify_note("say no, we're away").map(|c| c.situation_id), Some("declining".into()));
     }
 }

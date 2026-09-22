@@ -171,7 +171,14 @@ impl Db {
         let conn_counts = {
             let conn = self.conn();
             DeletionReport {
-                conversations: count(&conn, "SELECT COUNT(*) FROM conversations WHERE source_id = ?1", source_id)?,
+                // Threads that also hold another source's mail are handed to
+                // that source rather than removed, so they are not counted.
+                conversations: count(
+                    &conn,
+                    "SELECT COUNT(*) FROM conversations c WHERE c.source_id = ?1
+                     AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.source_id <> ?1)",
+                    source_id,
+                )?,
                 messages: count(&conn, "SELECT COUNT(*) FROM messages WHERE source_id = ?1", source_id)?,
                 own_messages: count(
                     &conn,
@@ -191,7 +198,54 @@ impl Db {
                 ..Default::default()
             }
         };
+        // A thread can hold mail from more than one source: an mbox export
+        // and the connected mailbox it came from join by Message-ID. Removing
+        // one source removes its messages — and only its messages. A thread
+        // this source owns but which also holds another source's mail is
+        // handed to that source first, so deleting the conversation row does
+        // not cascade into mail the user did not ask to remove; and a thread
+        // this source only contributed to is tidied once its messages go.
+        let affected: Vec<String> = {
+            let conn = self.conn();
+            conn.execute(
+                "UPDATE OR IGNORE conversations SET source_id = (
+                     SELECT m.source_id FROM messages m
+                     WHERE m.conversation_id = conversations.id AND m.source_id <> ?1
+                     ORDER BY m.sent_at, m.id LIMIT 1)
+                 WHERE source_id = ?1
+                   AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id AND m.source_id <> ?1)",
+                [source_id],
+            )?;
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT conversation_id FROM messages WHERE source_id = ?1
+                 AND conversation_id IN (SELECT id FROM conversations WHERE source_id <> ?1)",
+            )?;
+            let ids = stmt.query_map([source_id], |r| r.get::<_, String>(0))?;
+            ids.collect::<Result<_, _>>()?
+        };
+        self.conn().execute("DELETE FROM messages WHERE source_id = ?1", [source_id])?;
         self.delete_source(source_id)?;
+        for conversation_id in &affected {
+            {
+                let conn = self.conn();
+                // Someone who only wrote in the removed messages is no longer
+                // part of this thread.
+                conn.execute(
+                    "DELETE FROM conversation_participants WHERE conversation_id = ?1
+                     AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = ?1
+                                     AND m.participant_id = conversation_participants.participant_id)",
+                    [conversation_id],
+                )?;
+                conn.execute(
+                    "DELETE FROM conversations WHERE id = ?1
+                     AND NOT EXISTS (SELECT 1 FROM messages WHERE conversation_id = ?1)",
+                    [conversation_id],
+                )?;
+            }
+            if self.get_conversation(conversation_id)?.is_some() {
+                self.resequence_by_time(conversation_id)?;
+            }
+        }
         self.mark_profiles_stale(None)?;
         // A person Mimic only ever saw through this source is now a name with
         // no messages behind it; remove them rather than leaving an empty card
@@ -500,5 +554,149 @@ mod tests {
         let w = world();
         assert!(w.db.delete_participant("nobody").is_err());
         assert!(w.db.preview_participant_deletion("nobody").is_err());
+    }
+
+    /// Two sources sharing a thread (an export and the mailbox it came from):
+    /// removing either takes exactly its own messages, the report says so,
+    /// and the other source's mail — and the thread — survive.
+    #[test]
+    fn removing_one_of_two_sources_in_a_thread_takes_only_its_own_mail() {
+        use crate::db::{IdentifierKind, NewMessage, NewSource};
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
+        let mk = |connector: &str| {
+            db.create_source(&NewSource {
+                connector: connector.into(),
+                name: connector.into(),
+                channel: "email".into(),
+                location: None,
+                config: serde_json::json!({}),
+            })
+            .unwrap()
+            .id
+        };
+        let export = mk("mbox");
+        let mailbox = mk("imap");
+        let ada = db
+            .resolve_participant(
+                "Ada",
+                &[crate::db::IdentifierInput::new(IdentifierKind::Email, "ada@example.com")],
+                false,
+            )
+            .unwrap();
+        let bob = db
+            .resolve_participant(
+                "Bob",
+                &[crate::db::IdentifierInput::new(IdentifierKind::Email, "bob@example.com")],
+                false,
+            )
+            .unwrap();
+        // The export owns the thread; the mailbox added Bob's later message to it.
+        let convo = db.upsert_conversation(&export, "q@x", "email", Some("Offsite")).unwrap();
+        db.link_conversation_participant(&convo, &ada).unwrap();
+        db.link_conversation_participant(&convo, &bob).unwrap();
+        let msg = |source: &str, id: &str, who: Option<&str>, dir: &str, at: &str| NewMessage {
+            conversation_id: convo.clone(),
+            source_id: source.to_string(),
+            participant_id: who.map(str::to_string),
+            external_id: id.into(),
+            direction: dir.into(),
+            channel: "email".into(),
+            sent_at: Some(at.into()),
+            sequence_index: 0,
+            body: format!("body of {id}"),
+            reply_to_external_id: None,
+            metadata: serde_json::Value::Null,
+        };
+        db.insert_messages(&[
+            msg(&export, "q@x", Some(&ada), "other", "2026-03-01T09:00:00Z"),
+            msg(&export, "r@x", None, "self", "2026-03-01T10:00:00Z"),
+            msg(&mailbox, "b@x", Some(&bob), "other", "2026-03-02T09:00:00Z"),
+        ])
+        .unwrap();
+        db.resequence_by_time(&convo).unwrap();
+
+        // Remove the export: its two messages go, Bob's stays, in a thread
+        // the mailbox now owns, and the report counts exactly what went.
+        let report = db.delete_source_and_contents(&export).unwrap();
+        assert_eq!(report.messages, 2);
+        assert_eq!(report.conversations, 0, "the thread was handed on, not removed");
+        assert_eq!(db.count_messages().unwrap(), 1, "the mailbox's message survived");
+        let c = db.get_conversation(&convo).unwrap().expect("the thread survives with the mail that is left");
+        assert_eq!(c.source_id, mailbox);
+        assert_eq!(c.message_count, 1);
+        assert!(db.get_participant(&ada).unwrap().is_none(), "Ada was only in the export");
+        assert!(db.get_participant(&bob).unwrap().is_some());
+
+        // Remove the mailbox too: now nothing is left, and no empty thread.
+        db.delete_source_and_contents(&mailbox).unwrap();
+        assert_eq!(db.count_messages().unwrap(), 0);
+        assert_eq!(db.count_conversations().unwrap(), 0);
+    }
+
+    #[test]
+    fn removing_a_source_that_only_joined_a_thread_tidies_the_thread() {
+        use crate::db::{IdentifierKind, NewMessage, NewSource};
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
+        let mk = |connector: &str| {
+            db.create_source(&NewSource {
+                connector: connector.into(),
+                name: connector.into(),
+                channel: "email".into(),
+                location: None,
+                config: serde_json::json!({}),
+            })
+            .unwrap()
+            .id
+        };
+        let export = mk("mbox");
+        let mailbox = mk("imap");
+        let ada = db
+            .resolve_participant(
+                "Ada",
+                &[crate::db::IdentifierInput::new(IdentifierKind::Email, "ada@example.com")],
+                false,
+            )
+            .unwrap();
+        let bob = db
+            .resolve_participant(
+                "Bob",
+                &[crate::db::IdentifierInput::new(IdentifierKind::Email, "bob@example.com")],
+                false,
+            )
+            .unwrap();
+        let convo = db.upsert_conversation(&export, "q@x", "email", None).unwrap();
+        db.link_conversation_participant(&convo, &ada).unwrap();
+        db.link_conversation_participant(&convo, &bob).unwrap();
+        let msg = |source: &str, id: &str, who: &str, at: &str| NewMessage {
+            conversation_id: convo.clone(),
+            source_id: source.to_string(),
+            participant_id: Some(who.to_string()),
+            external_id: id.into(),
+            direction: "other".into(),
+            channel: "email".into(),
+            sent_at: Some(at.into()),
+            sequence_index: 0,
+            body: format!("body of {id}"),
+            reply_to_external_id: None,
+            metadata: serde_json::Value::Null,
+        };
+        db.insert_messages(&[
+            msg(&export, "q@x", &ada, "2026-03-01T09:00:00Z"),
+            msg(&mailbox, "b@x", &bob, "2026-03-02T09:00:00Z"),
+        ])
+        .unwrap();
+        db.resequence_by_time(&convo).unwrap();
+
+        let report = db.delete_source_and_contents(&mailbox).unwrap();
+        assert_eq!(report.messages, 1);
+        let c = db.get_conversation(&convo).unwrap().unwrap();
+        assert_eq!((c.source_id.as_str(), c.message_count), (export.as_str(), 1), "stats refreshed");
+        assert!(db.get_participant(&bob).unwrap().is_none(), "Bob was only in the mailbox's message");
+        let waiting = db.threads_awaiting_reply(10).unwrap();
+        assert_eq!(waiting[0].last_message, "body of q@x", "the thread's last message is the one that is left");
     }
 }

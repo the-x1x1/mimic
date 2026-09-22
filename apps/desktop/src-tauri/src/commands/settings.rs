@@ -21,6 +21,12 @@ pub fn defaults() -> Map<String, Value> {
     // Off by design: with it on, a model sees incoming messages the user did
     // not personally hand it. See `mimic_core::assist`.
     m.insert(mimic_core::assist::SETTING.into(), json!(false));
+    // How often connected mailboxes are checked, in minutes; 0 is off. Only
+    // matters once a mailbox is connected.
+    m.insert(
+        mimic_core::sources::imap::INTERVAL_SETTING.into(),
+        json!(mimic_core::sources::imap::DEFAULT_INTERVAL_MINUTES),
+    );
     m.insert("onboarding.completed".into(), json!(false));
     m
 }

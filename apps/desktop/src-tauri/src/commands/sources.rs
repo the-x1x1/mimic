@@ -87,10 +87,88 @@ pub async fn start_source_import(
             "Tell Mimic which addresses are yours first — otherwise every message imports as 'unknown' and none of it can teach it how you write.",
         ));
     }
-    if state.db.get_source(&source_id)?.is_none() {
+    let Some(source) = state.db.get_source(&source_id)? else {
         return Err(CommandError::new("not_found", "That source no longer exists."));
+    };
+    // A connected mailbox is not read from a file; "import again" means
+    // "check it now".
+    if source.connector == mimic_core::sources::imap::CONNECTOR {
+        return Ok(state.jobs.enqueue(mimic_core::sources::imap::JOB_KIND, json!({ "sourceId": source_id }))?);
     }
     Ok(state.jobs.enqueue(mimic_core::import::JOB_KIND, json!({ "sourceId": source_id }))?)
+}
+
+fn mailbox_error(e: mimic_core::sources::imap::ImapError) -> CommandError {
+    CommandError::new("mailbox", e.to_string())
+}
+
+/// Log in and look around without importing anything: which folders would
+/// be read, how much is in them, and anything worth knowing first (no sent
+/// folder, a mailbox bigger than the first check reads).
+#[tauri::command]
+pub async fn probe_mailbox(
+    account: mimic_core::sources::imap::ImapAccount,
+    password: String,
+) -> CommandResult<mimic_core::sources::imap::ImapProbe> {
+    tauri::async_runtime::spawn_blocking(move || mimic_core::sources::imap::probe(&account, &password))
+        .await
+        .map_err(|e| CommandError::new("internal", e.to_string()))?
+        .map_err(mailbox_error)
+}
+
+/// Connect a mailbox: check the login works, store the password in the
+/// secret store (never the database), create the source, and start the
+/// first check.
+#[tauri::command]
+pub async fn connect_mailbox(
+    state: State<'_, SharedState>,
+    account: mimic_core::sources::imap::ImapAccount,
+    password: String,
+    is_mine: bool,
+) -> CommandResult<mimic_core::db::Source> {
+    if state.db.user_identifier_set()?.is_empty() {
+        return Err(CommandError::new(
+            "no_identity",
+            "Tell me which addresses are yours first, so I can tell your mail from everyone else's.",
+        ));
+    }
+    let probe_account = account.clone();
+    let probe_password = password.clone();
+    let probe =
+        tauri::async_runtime::spawn_blocking(move || mimic_core::sources::imap::probe(&probe_account, &probe_password))
+            .await
+            .map_err(|e| CommandError::new("internal", e.to_string()))?
+            .map_err(mailbox_error)?;
+    // Only after the login worked, and only when the user said this mailbox
+    // is theirs rather than shared: its address becomes one of theirs, so
+    // what is in Sent is read as their writing. A shared mailbox (team@,
+    // support@) is left alone — what colleagues sent from it is not the user's.
+    if is_mine && account.username.contains('@') {
+        state.db.add_user_identifier(mimic_core::db::IdentifierKind::Email, account.username.trim())?;
+    }
+    let config = mimic_core::sources::imap::ImapSourceConfig {
+        account: account.clone(),
+        folders: probe.folders,
+        sent_folder: probe.sent_folder,
+        marks: Default::default(),
+        last_checked_at: None,
+    };
+    let source = state.db.create_source(&mimic_core::db::NewSource {
+        connector: mimic_core::sources::imap::CONNECTOR.into(),
+        name: account.username.clone(),
+        channel: "email".into(),
+        location: None,
+        config: serde_json::to_value(&config).map_err(|e| CommandError::new("internal", e.to_string()))?,
+    })?;
+    if let Err(e) = state.secrets.set(&mimic_core::sources::imap::secret_key(&source.id), &password) {
+        // Without the password the mailbox can never be checked; do not leave
+        // a source behind that looks connected and is not.
+        let _ = state.db.delete_source_and_contents(&source.id);
+        return Err(CommandError::new("secrets", format!("I couldn't store the password: {e}")));
+    }
+    state.db.set_source_status(&source.id, "ready", None)?;
+    state.jobs.enqueue(mimic_core::sources::imap::JOB_KIND, json!({ "sourceId": source.id }))?;
+    Ok(state.db.get_source(&source.id)?.unwrap_or(source))
 }
 
 /// Remove a source and everything imported through it.
@@ -99,7 +177,10 @@ pub async fn delete_source(
     state: State<'_, SharedState>,
     source_id: String,
 ) -> CommandResult<mimic_core::privacy::DeletionReport> {
-    Ok(state.db.delete_source_and_contents(&source_id)?)
+    let report = state.db.delete_source_and_contents(&source_id)?;
+    // A disconnected mailbox's password goes with it.
+    let _ = state.secrets.remove(&mimic_core::sources::imap::secret_key(&source_id));
+    Ok(report)
 }
 
 #[tauri::command]

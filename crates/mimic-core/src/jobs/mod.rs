@@ -275,8 +275,22 @@ impl JobRunner {
                 let _ = hb_db.heartbeat_job(&hb_id);
             }
         });
+        // Each job runs in its own task, so a panic inside one — a bug, or
+        // input nobody anticipated — fails that job instead of ending the loop
+        // that runs every job after it.
         let outcome = if self.executor.kinds().contains(&job.kind.as_str()) {
-            self.executor.execute(ctx).await
+            match tokio::spawn(self.executor.execute(ctx)).await {
+                Ok(outcome) => outcome,
+                Err(_) => {
+                    // Not the panic's own message: it can quote the text being
+                    // processed, and message content never reaches a log.
+                    tracing::error!(job = %job.id, kind = %job.kind, "job panicked");
+                    Err(JobError::Failed(
+                        "Something went wrong inside Mimic and this stopped. It has been logged; trying again may work."
+                            .into(),
+                    ))
+                }
+            }
         } else {
             Err(JobError::Failed(format!("no executor for job kind {}", job.kind)))
         };
@@ -317,7 +331,7 @@ mod tests {
 
     impl JobExecutor for TestExecutor {
         fn kinds(&self) -> &'static [&'static str] {
-            &["count", "explode", "slow"]
+            &["count", "explode", "slow", "panic"]
         }
         fn resumable(&self, kind: &str) -> bool {
             kind == "count"
@@ -341,6 +355,7 @@ mod tests {
                         }
                         Ok(json!({}))
                     }
+                    "panic" => panic!("an executor bug"),
                     _ => Err(JobError::Failed("boom".into())),
                 }
             })
@@ -389,5 +404,21 @@ mod tests {
         let job = db.get_job(&job.id).unwrap().unwrap();
         assert_eq!(job.status, "canceled");
         assert!(job.progress_current < 50);
+    }
+
+    /// A panic inside one job fails that job and leaves the runner able to
+    /// run the next one.
+    #[tokio::test]
+    async fn a_panicking_job_fails_alone() {
+        let db = Db::open_in_memory().unwrap();
+        let runner = JobRunner::new(db.clone(), Arc::new(TestExecutor));
+        let bad = runner.enqueue("panic", json!({})).unwrap();
+        let next = runner.enqueue("count", json!({"n": 1})).unwrap();
+        runner.run_one(bad.clone()).await;
+        runner.run_one(next.clone()).await;
+        let bad = db.get_job(&bad.id).unwrap().unwrap();
+        assert_eq!(bad.status, "failed");
+        assert!(bad.error.unwrap()["message"].as_str().unwrap().contains("went wrong inside Mimic"));
+        assert_eq!(db.get_job(&next.id).unwrap().unwrap().status, "completed");
     }
 }

@@ -21,6 +21,8 @@ export const Settings = z.object({
   "generation.anthropicModel": z.string(),
   /** Prepare replies without being asked. Off unless the user turns it on. */
   "assist.autoDraft": z.boolean(),
+  /** Minutes between checks of a connected mailbox; 0 is off. */
+  "mail.checkEveryMinutes": z.number(),
   "onboarding.completed": z.boolean(),
 });
 export type Settings = z.infer<typeof Settings>;

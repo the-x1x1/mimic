@@ -335,6 +335,78 @@ impl Db {
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
+    /// Renumber a conversation's messages by time — timestamp, then the order
+    /// they were given in, then id — and re-derive reply links and latency
+    /// from the new order. Used when messages arrive in more than one batch.
+    pub fn resequence_by_time(&self, conversation_id: &str) -> DbResult<()> {
+        self.conn().execute(
+            "WITH ordered AS (
+               SELECT id, ROW_NUMBER() OVER (ORDER BY COALESCE(sent_at, ''), sequence_index, id) - 1 AS rn
+               FROM messages WHERE conversation_id = ?1
+             )
+             UPDATE messages SET
+               sequence_index = (SELECT rn FROM ordered WHERE ordered.id = messages.id),
+               reply_to_message_id = NULL,
+               response_latency_seconds = NULL
+             WHERE conversation_id = ?1",
+            [conversation_id],
+        )?;
+        self.link_replies(conversation_id)?;
+        self.refresh_conversation_stats(conversation_id)
+    }
+
+    /// The email conversation, in any source, that already holds any of
+    /// these messages (by Message-ID). The earliest-started wins, so the
+    /// answer is the same however many sources overlap.
+    pub fn email_conversation_holding(&self, message_ids: &[String]) -> DbResult<Option<String>> {
+        if message_ids.is_empty() {
+            return Ok(None);
+        }
+        // Content-derived ids ("sha-…", made up for mail with no Message-ID)
+        // identify a body, not a message, and are not matched across threads.
+        let ids: Vec<&String> = message_ids.iter().filter(|id| !id.starts_with("sha-")).collect();
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT c.id FROM messages m
+             JOIN conversations c ON c.id = m.conversation_id
+             JOIN sources s ON s.id = m.source_id
+             WHERE m.channel = 'email' AND s.connector IN ('mbox','imap') AND m.external_id IN ({placeholders})
+             ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1"
+        );
+        let conn = self.conn();
+        Ok(conn.query_row(&sql, rusqlite::params_from_iter(ids), |r| r.get(0)).optional()?)
+    }
+
+    /// Which of these Message-IDs are already stored through a different
+    /// source.
+    pub fn email_ids_in_other_sources(
+        &self,
+        source_id: &str,
+        message_ids: &[String],
+    ) -> DbResult<std::collections::HashSet<String>> {
+        if message_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let ids: Vec<&String> = message_ids.iter().filter(|id| !id.starts_with("sha-")).collect();
+        if ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT DISTINCT m.external_id FROM messages m JOIN sources s ON s.id = m.source_id
+             WHERE m.channel = 'email' AND s.connector IN ('mbox','imap') AND m.source_id <> ?
+               AND m.external_id IN ({placeholders})"
+        );
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&sql)?;
+        let args = std::iter::once(source_id.to_string()).chain(ids.into_iter().cloned());
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// The last `limit` messages of a conversation, oldest first — the
     /// transcript the Compose screen shows and the prompt includes.
     pub fn conversation_tail(&self, conversation_id: &str, limit: usize) -> DbResult<Vec<Message>> {
@@ -612,5 +684,51 @@ mod tests {
         assert_eq!(db.count_self_messages(None, Some(&ada)).unwrap(), 1);
         assert_eq!(db.count_self_messages(None, Some("nobody")).unwrap(), 0);
         assert_eq!(db.self_message_channels().unwrap(), vec![("chat".to_string(), 1)]);
+    }
+
+    /// Only real Message-IDs from mail sources join threads across sources:
+    /// a generic export's "a1" and a content hash mean nothing outside their
+    /// own file.
+    #[test]
+    fn only_real_message_ids_join_across_sources() {
+        let db = Db::open_in_memory().unwrap();
+        let mk = |connector: &str| {
+            db.create_source(&crate::db::NewSource {
+                connector: connector.into(),
+                name: connector.into(),
+                channel: "email".into(),
+                location: None,
+                config: serde_json::json!({}),
+            })
+            .unwrap()
+            .id
+        };
+        let generic = mk("mimic_json");
+        let mbox = mk("mbox");
+        for (source, ext) in [(&generic, "a1"), (&mbox, "real@example.com"), (&mbox, "sha-0123abcd")] {
+            let c = db.upsert_conversation(source, ext, "email", None).unwrap();
+            db.insert_messages(&[NewMessage {
+                conversation_id: c,
+                source_id: source.clone(),
+                participant_id: None,
+                external_id: ext.into(),
+                direction: "other".into(),
+                channel: "email".into(),
+                sent_at: Some("2026-03-01T09:00:00Z".into()),
+                sequence_index: 0,
+                body: "x".into(),
+                reply_to_external_id: None,
+                metadata: serde_json::Value::Null,
+            }])
+            .unwrap();
+        }
+        assert!(db.email_conversation_holding(&["a1".into()]).unwrap().is_none());
+        assert!(db.email_conversation_holding(&["sha-0123abcd".into()]).unwrap().is_none());
+        assert!(db.email_conversation_holding(&["real@example.com".into()]).unwrap().is_some());
+        let other = mk("imap");
+        let dup = db
+            .email_ids_in_other_sources(&other, &["a1".into(), "real@example.com".into(), "sha-0123abcd".into()])
+            .unwrap();
+        assert_eq!(dup.into_iter().collect::<Vec<_>>(), vec!["real@example.com".to_string()]);
     }
 }

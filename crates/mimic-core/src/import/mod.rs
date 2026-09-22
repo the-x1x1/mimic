@@ -69,6 +69,7 @@ pub fn import_source(
         db,
         source_id: source_id.to_string(),
         default_channel: source.channel.clone(),
+        joins_by_message_id: joins_by_message_id(&source.connector),
         user_ids,
         participants: HashMap::new(),
         summary: ImportSummary::default(),
@@ -106,10 +107,78 @@ pub fn import_source(
     Ok(state.summary)
 }
 
+/// An import in progress, for sources that are not a file a connector walks —
+/// a mailbox on a server hands conversations over a few at a time, and each
+/// goes through exactly the same attribution, dedupe and threading as a file
+/// import does.
+pub struct Importer<'a> {
+    state: ImportState<'a>,
+}
+
+impl<'a> Importer<'a> {
+    /// Start importing into an existing source. Refuses, like a file import,
+    /// when no identity has been declared, because direction would be
+    /// undecidable.
+    pub fn begin(db: &'a Db, source_id: &str) -> Result<Self, ImportError> {
+        let source = db.get_source(source_id)?.ok_or_else(|| ImportError::NoSuchSource(source_id.into()))?;
+        let user_ids = db.user_identifier_set()?;
+        if user_ids.is_empty() {
+            return Err(ImportError::NoIdentity);
+        }
+        Ok(Self {
+            state: ImportState {
+                db,
+                source_id: source_id.to_string(),
+                default_channel: source.channel.clone(),
+                joins_by_message_id: joins_by_message_id(&source.connector),
+                user_ids,
+                participants: HashMap::new(),
+                summary: ImportSummary::default(),
+                messages_done: 0,
+            },
+        })
+    }
+
+    /// Import one conversation — new, or more messages for one that already
+    /// exists, which is joined exactly as a file import would join it.
+    pub fn take(&mut self, convo: DiscoveredConversation) -> Result<(), ImportError> {
+        self.state.take(convo)
+    }
+
+    pub fn summary(&self) -> &ImportSummary {
+        &self.state.summary
+    }
+
+    /// Recount the source and mark anything derived from messages stale, as
+    /// a finished file import does. Only when something was inserted: a check
+    /// that found nothing new invalidates nothing.
+    pub fn finish(self) -> Result<ImportSummary, ImportError> {
+        let db = self.state.db;
+        if self.state.summary.inserted > 0 {
+            // "Last import" is when mail last came in, so a check that found
+            // nothing new does not move it.
+            db.refresh_source_counts(&self.state.source_id)?;
+            db.mark_profiles_stale(None)?;
+        }
+        Ok(self.state.summary)
+    }
+}
+
+/// Sources whose message ids are real RFC 5322 Message-IDs, unique across
+/// every mailbox in the world, and so safe to join threads and drop
+/// duplicates by across sources. A `mimic_json` export may say `email` and
+/// number its messages "a1", "a2"; those ids mean nothing outside the file.
+pub const MESSAGE_ID_CONNECTORS: [&str; 2] = ["mbox", "imap"];
+
+fn joins_by_message_id(connector: &str) -> bool {
+    MESSAGE_ID_CONNECTORS.contains(&connector)
+}
+
 struct ImportState<'a> {
     db: &'a Db,
     source_id: String,
     default_channel: String,
+    joins_by_message_id: bool,
     user_ids: HashSet<String>,
     /// Author identity key -> participant id (or `None` for the user).
     participants: HashMap<String, Option<String>>,
@@ -124,12 +193,44 @@ impl ImportState<'_> {
         } else {
             self.default_channel.clone()
         };
-        let conversation_id =
-            self.db.upsert_conversation(&self.source_id, &convo.external_id, &channel, convo.subject.as_deref())?;
+        // Email carries a Message-ID that is unique across every mailbox in
+        // the world, so a thread is joined wherever it already is: an earlier
+        // check of the same mailbox, or an export imported as another source.
+        // Without this a reply arriving separately from what it answers
+        // starts a conversation of its own, and the one it answered looks
+        // unanswered forever.
+        let is_email = channel == "email" && self.joins_by_message_id;
+        let ids: Vec<String> = convo.messages.iter().map(|m| m.external_id.clone()).collect();
+        let joined = if is_email {
+            let mut wanted = ids.clone();
+            for m in &convo.messages {
+                if let Some(refs) = m.metadata.get("refs").and_then(|r| r.as_array()) {
+                    wanted.extend(refs.iter().filter_map(|r| r.as_str().map(str::to_string)));
+                }
+            }
+            self.db.email_conversation_holding(&wanted)?
+        } else {
+            None
+        };
+        let conversation_id = match &joined {
+            Some(id) => id.clone(),
+            None => {
+                self.db.upsert_conversation(&self.source_id, &convo.external_id, &channel, convo.subject.as_deref())?
+            }
+        };
+        // The same message imported through another source (an export and
+        // the connected mailbox it came from) is one message, not two: two
+        // copies would count the user's own writing twice.
+        let elsewhere =
+            if is_email { self.db.email_ids_in_other_sources(&self.source_id, &ids)? } else { HashSet::new() };
 
         let mut batch: Vec<NewMessage> = Vec::with_capacity(convo.messages.len().min(BATCH));
         let mut counts = ImportCounts::default();
         for (i, raw) in convo.messages.iter().enumerate() {
+            if elsewhere.contains(&raw.external_id) {
+                counts.duplicates += 1;
+                continue;
+            }
             let (direction, participant_id) = self.attribute(&raw.author)?;
             if let Some(pid) = &participant_id {
                 self.db.link_conversation_participant(&conversation_id, pid)?;
@@ -160,8 +261,16 @@ impl ImportState<'_> {
         if !batch.is_empty() {
             counts = add(counts, self.db.insert_messages(&batch)?);
         }
-        self.db.link_replies(&conversation_id)?;
-        self.db.refresh_conversation_stats(&conversation_id)?;
+        if joined.is_some() && counts.inserted > 0 {
+            // Messages numbered from zero have just joined a conversation that
+            // already had some; put it back in time order, because "who spoke
+            // last" is read from that order. A re-import that added nothing
+            // leaves the order alone.
+            self.db.resequence_by_time(&conversation_id)?;
+        } else if joined.is_none() {
+            self.db.link_replies(&conversation_id)?;
+            self.db.refresh_conversation_stats(&conversation_id)?;
+        }
 
         self.summary.conversations += 1;
         self.summary.inserted += counts.inserted;

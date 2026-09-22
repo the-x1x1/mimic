@@ -18,6 +18,7 @@ import {
   EventRow,
   GenerationContext,
   InstallGuard,
+  ImapProbe,
   Job,
   LearningOverview,
   LocalModelStatus,
@@ -37,8 +38,10 @@ import {
   VoicePreference,
   CommandError,
   type ComposeRequest,
+  type ImapAccount,
 } from "@mimic/contracts";
 import { isTauri } from "./tauri";
+import { qk, queryClient } from "@/app/queryClient";
 
 export class IpcError extends Error {
   code: string;
@@ -96,8 +99,20 @@ export const ipc = {
   completeOnboarding: () => call("complete_onboarding", z_void),
 
   settings: () => call("get_settings", Settings),
-  setSetting: (key: keyof Settings, value: unknown) =>
-    call("set_setting", Settings, { key, value }),
+  /**
+   * Save one setting and put the answer straight into the cache. Every control
+   * on the Settings screen reads from that cache, so without this a checkbox
+   * or a theme swatch snapped back to its old value until something happened
+   * to refetch — the save had worked and the screen said it had not.
+   */
+  setSetting: async (key: keyof Settings, value: unknown) => {
+    const next = await call("set_setting", Settings, { key, value });
+    queryClient.setQueryData(qk.settings, next);
+    // The home screen reads some settings too (whether replies are prepared
+    // in advance, how often mail is checked).
+    void queryClient.invalidateQueries({ queryKey: qk.dashboard });
+    return next;
+  },
 
   connectors: () => call("list_connectors", ConnectorInfo.array()),
   sources: () => call("list_sources", Source.array()),
@@ -110,6 +125,10 @@ export const ipc = {
     location: string | null;
   }) => call("create_source", Source, args),
   startSourceImport: (sourceId: string) => call("start_source_import", Job, { sourceId }),
+  probeMailbox: (account: ImapAccount, password: string) =>
+    call("probe_mailbox", ImapProbe, { account, password }),
+  connectMailbox: (account: ImapAccount, password: string, isMine: boolean) =>
+    call("connect_mailbox", Source, { account, password, isMine }),
   deleteSource: (sourceId: string) => call("delete_source", DeletionReport, { sourceId }),
   pickSourceFile: (title: string, extensions: string[]) =>
     call("pick_source_file", z_string.nullable(), { title, extensions }),

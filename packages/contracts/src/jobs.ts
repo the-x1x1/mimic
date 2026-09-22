@@ -47,6 +47,7 @@ export const JOB_KINDS = {
   analyzeVoice: "analyze_voice",
   assistDrafts: "assist_drafts",
   pullModel: "pull_model",
+  checkMailbox: "check_mailbox",
 } as const;
 
 export const JOB_LABELS: Record<string, string> = {
@@ -54,4 +55,5 @@ export const JOB_LABELS: Record<string, string> = {
   analyze_voice: "Working out how you write",
   assist_drafts: "Writing replies",
   pull_model: "Downloading the writing engine",
+  check_mailbox: "Checking your mail",
 };

@@ -15,7 +15,9 @@ use serde_json::Value;
 
 use crate::db::repo_people::IdentifierInput;
 
+pub mod imap;
 pub mod mbox;
+pub mod mime;
 pub mod mimic_json;
 pub mod normalize;
 

@@ -24,6 +24,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 5, name: "communication", sql: include_str!("migrations/0005_communication.sql") },
     Migration { version: 6, name: "themes", sql: include_str!("migrations/0006_themes.sql") },
     Migration { version: 7, name: "situations", sql: include_str!("migrations/0007_situations.sql") },
+    Migration { version: 8, name: "message_ids", sql: include_str!("migrations/0008_message_ids.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -78,7 +79,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 7);
+        assert_eq!(latest_version(), 8);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -172,7 +173,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6, 7]);
+        assert_eq!(applied, vec![5, 6, 7, 8]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
 
         let tables = table_names(&conn);
