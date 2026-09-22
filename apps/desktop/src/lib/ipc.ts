@@ -26,6 +26,7 @@ import {
   ProviderState,
   RepresentativeExample,
   Settings,
+  SituationSummary,
   Source,
   SystemStatus,
   UpdateState,
@@ -132,6 +133,7 @@ export const ipc = {
   deleteAllCommunicationData: () => call("delete_all_communication_data", DeletionReport),
 
   voiceOverview: () => call("get_voice_overview", VoiceOverview),
+  situations: () => call("list_situations", SituationSummary.array()),
   startVoiceAnalysis: () => call("start_voice_analysis", Job),
   voiceExamples: (layer: string, scopeKey: string, limit = 10) =>
     call("list_voice_examples", RepresentativeExample.array(), { layer, scopeKey, limit }),

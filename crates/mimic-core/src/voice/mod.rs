@@ -23,7 +23,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::db::{Db, DbError, Message, VoiceLayer};
+use crate::db::{Db, DbError, Message, SelfScope, VoiceLayer};
 use crate::jobs::{JobContext, JobError, JobExecutor, JobFuture};
 use crate::version::ANALYSIS_VERSION;
 use metrics::{Sample, VoiceMetrics, MIN_SAMPLE};
@@ -41,6 +41,8 @@ const EXAMPLES: usize = 6;
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisSummary {
     pub messages_considered: usize,
+    /// Of the user's own messages, how many were filed under a situation.
+    pub messages_classified: usize,
     pub profiles_written: usize,
     /// Scopes that were skipped for having fewer than `MIN_SAMPLE` messages.
     pub scopes_below_threshold: usize,
@@ -75,16 +77,22 @@ pub fn analyze(db: &Db, on_progress: &mut dyn FnMut(&str, usize)) -> Result<Anal
     let run_id = db.start_analysis_run("voice", ANALYSIS_VERSION, &json!({}))?;
     let mut summary = AnalysisSummary::default();
 
+    // Situations first: the situational layers below are computed over what
+    // this pass files, and a stale filing would describe last week's corpus.
+    on_progress("what each message is doing", 0);
+    let classified = crate::situations::classify_corpus(db, &mut |_| {})?;
+    summary.messages_classified = classified.messages_classified;
+
     // Global.
     on_progress("global", 0);
-    let global = collect(db, None, None)?;
+    let global = collect(db, SelfScope::default())?;
     summary.messages_considered += global.len();
     write_scope(db, VoiceLayer::Global, "", None, "Everything you write", &global, &mut summary)?;
 
     // Per channel.
     for (channel, _) in db.self_message_channels()? {
         on_progress(&channel, summary.messages_considered);
-        let msgs = collect(db, Some(&channel), None)?;
+        let msgs = collect(db, SelfScope { channel: Some(&channel), ..Default::default() })?;
         let label = format!("What you write over {channel}");
         write_scope(db, VoiceLayer::Channel, &channel, None, &label, &msgs, &mut summary)?;
     }
@@ -97,9 +105,23 @@ pub fn analyze(db: &Db, on_progress: &mut dyn FnMut(&str, usize)) -> Result<Anal
         }
         let id = person.participant.id.clone();
         on_progress(&person.participant.display_name, summary.messages_considered);
-        let msgs = collect(db, None, Some(&id))?;
+        let msgs = collect(db, SelfScope { participant_id: Some(&id), ..Default::default() })?;
         let label = format!("What you write to {}", person.participant.display_name);
         write_scope(db, VoiceLayer::Relationship, &id, Some(&id), &label, &msgs, &mut summary)?;
+    }
+
+    // Per situation. A situation with nothing filed under it writes nothing;
+    // one with a few messages writes its sample size and no metrics, like any
+    // other scope below the floor, so the screen can say how far off it is.
+    for (situation_id, n) in &classified.per_situation {
+        if *n == 0 {
+            db.delete_situational_layer(situation_id)?;
+            continue;
+        }
+        let Some(b) = crate::situations::builtin(situation_id) else { continue };
+        on_progress(b.label, summary.messages_considered);
+        let msgs = collect(db, SelfScope { situation_id: Some(situation_id), ..Default::default() })?;
+        write_scope(db, VoiceLayer::Situational, situation_id, None, b.layer_label, &msgs, &mut summary)?;
     }
 
     db.finish_analysis_run(
@@ -112,16 +134,11 @@ pub fn analyze(db: &Db, on_progress: &mut dyn FnMut(&str, usize)) -> Result<Anal
     Ok(summary)
 }
 
-fn collect(db: &Db, channel: Option<&str>, participant_id: Option<&str>) -> Result<Vec<Message>, DbError> {
+fn collect(db: &Db, scope: SelfScope<'_>) -> Result<Vec<Message>, DbError> {
     let mut out = Vec::new();
     let mut cursor: Option<(String, String)> = None;
     loop {
-        let page = db.page_self_messages(
-            channel,
-            participant_id,
-            cursor.as_ref().map(|(a, b)| (a.as_str(), b.as_str())),
-            PAGE,
-        )?;
+        let page = db.page_self_messages_in(&scope, cursor.as_ref().map(|(a, b)| (a.as_str(), b.as_str())), PAGE)?;
         if page.is_empty() {
             break;
         }
@@ -242,7 +259,17 @@ fn normalize_for_dedupe(body: &str) -> String {
 }
 
 /// Assemble the voice that applies to one generation.
-pub fn resolve(db: &Db, channel: &str, participant_id: Option<&str>) -> Result<ResolvedVoice, DbError> {
+///
+/// `situation_id` is what the reply is doing, when that is known — chosen by
+/// the user or read from their note. Its layer sits inside the relationship
+/// layer, and its examples go first, because six times the user said no are
+/// a better guide to saying no than six typical messages.
+pub fn resolve(
+    db: &Db,
+    channel: &str,
+    participant_id: Option<&str>,
+    situation_id: Option<&str>,
+) -> Result<ResolvedVoice, DbError> {
     let mut layers = Vec::new();
     let mut scopes: Vec<(VoiceLayer, String)> = vec![(VoiceLayer::Global, String::new())];
     if let Some(row) = db.get_voice_profile(VoiceLayer::Global, "", ANALYSIS_VERSION)? {
@@ -263,6 +290,27 @@ pub fn resolve(db: &Db, channel: &str, participant_id: Option<&str>) -> Result<R
         let theirs = db.representative_examples(VoiceLayer::Relationship, pid, EXAMPLES)?;
         if !theirs.is_empty() {
             examples = theirs;
+        }
+    }
+    if let Some(sid) = situation_id {
+        if let Some(row) = db.get_voice_profile(VoiceLayer::Situational, sid, ANALYSIS_VERSION)? {
+            layers.push(to_layer(row));
+            scopes.push((VoiceLayer::Situational, sid.to_string()));
+        }
+        // Half the set from the situation, the rest from whatever was chosen
+        // above, without repeating a message.
+        let situational = db.representative_examples(VoiceLayer::Situational, sid, EXAMPLES / 2)?;
+        if !situational.is_empty() {
+            let mut merged = situational;
+            for e in examples {
+                if merged.len() == EXAMPLES {
+                    break;
+                }
+                if !merged.iter().any(|m| m.message_id == e.message_id) {
+                    merged.push(e);
+                }
+            }
+            examples = merged;
         }
     }
     let overrides = db.voice_preferences_for(&scopes)?.into_iter().map(|p| (p.key, p.value)).collect::<Vec<_>>();
@@ -483,7 +531,7 @@ mod tests {
         db.set_voice_preference(VoiceLayer::Global, "", "signOff", &json!("— C"), None).unwrap();
         db.set_voice_preference(VoiceLayer::Relationship, &ada, "signOff", &json!("c"), None).unwrap();
 
-        let v = resolve(&db, "chat", Some(&ada)).unwrap();
+        let v = resolve(&db, "chat", Some(&ada), None).unwrap();
         assert_eq!(v.layers.len(), 3);
         assert_eq!(v.layers[0].layer, "global");
         assert_eq!(v.layers[2].layer, "relationship");
@@ -491,7 +539,7 @@ mod tests {
         assert!(!v.examples.is_empty());
 
         // A channel the user has never used contributes no layer.
-        let email = resolve(&db, "email", None).unwrap();
+        let email = resolve(&db, "email", None, None).unwrap();
         assert_eq!(email.layers.len(), 1);
     }
 
@@ -510,7 +558,7 @@ mod tests {
             ANALYSIS_VERSION,
         )
         .unwrap();
-        let v = resolve(&db, "chat", Some(&ada)).unwrap();
+        let v = resolve(&db, "chat", Some(&ada), None).unwrap();
         let eff = effective_metrics(&v);
         assert_eq!(eff.avg_words_per_message, Some(3.0), "the relationship layer overrides the global one");
         // A metric the inner layer does not carry still comes from outside it.
@@ -589,5 +637,85 @@ mod tests {
         assert!(!o.stale);
         assert_eq!(o.people_with_profiles, 1);
         assert!(o.last_analyzed_at.is_some());
+    }
+
+    fn add_self_messages(db: &Db, prefix: &str, bodies: &[String]) {
+        let source = db.list_sources().unwrap()[0].id.clone();
+        let convo = db.upsert_conversation(&source, prefix, "chat", None).unwrap();
+        let batch: Vec<NewMessage> = bodies
+            .iter()
+            .enumerate()
+            .map(|(i, body)| NewMessage {
+                conversation_id: convo.clone(),
+                source_id: source.clone(),
+                participant_id: None,
+                external_id: format!("{prefix}{i}"),
+                direction: "self".into(),
+                channel: "chat".into(),
+                sent_at: Some(format!("2026-03-{:02}T10:00:00Z", (i % 27) + 1)),
+                sequence_index: i as i64,
+                body: body.clone(),
+                reply_to_external_id: None,
+                metadata: serde_json::Value::Null,
+            })
+            .collect();
+        db.insert_messages(&batch).unwrap();
+    }
+
+    #[test]
+    fn analysis_files_messages_by_situation_and_measures_each_one() {
+        let (db, _) = seeded("chat", 30);
+        let refusals: Vec<String> = (0..22).map(|i| format!("sorry, can't make it {i}")).collect();
+        let thanks: Vec<String> = (0..4).map(|i| format!("thank you so much for this {i}")).collect();
+        add_self_messages(&db, "no", &refusals);
+        add_self_messages(&db, "ty", &thanks);
+        let summary = analyze(&db, &mut |_, _| {}).unwrap();
+        assert_eq!(summary.messages_classified, 26);
+
+        let declining = db.get_voice_profile(VoiceLayer::Situational, "declining", ANALYSIS_VERSION).unwrap().unwrap();
+        assert_eq!(declining.sample_size, 22);
+        assert_eq!(declining.qualitative["label"], "When you say no");
+        assert!(!db.representative_examples(VoiceLayer::Situational, "declining", 10).unwrap().is_empty());
+
+        // Four thank-yous is a layer with a sample size and nothing measured.
+        let thanking = db.get_voice_profile(VoiceLayer::Situational, "thanking", ANALYSIS_VERSION).unwrap().unwrap();
+        assert_eq!(thanking.sample_size, 4);
+        assert_eq!(thanking.metrics["measurable"], false);
+        assert!(db.representative_examples(VoiceLayer::Situational, "thanking", 10).unwrap().is_empty());
+
+        // A situation nothing was filed under has no layer at all.
+        assert!(db.get_voice_profile(VoiceLayer::Situational, "disagreeing", ANALYSIS_VERSION).unwrap().is_none());
+
+        // Resolution with a situation stacks it innermost and leads with its examples.
+        let v = resolve(&db, "chat", None, Some("declining")).unwrap();
+        assert_eq!(v.layers.last().unwrap().layer, "situational");
+        assert!(v.examples[0].body.starts_with("sorry, can't make it"));
+        assert!(v.examples.len() <= EXAMPLES);
+        let eff = effective_metrics(&v);
+        assert_eq!(eff.sample_size, 22, "the innermost measurable layer is the situation");
+    }
+
+    #[test]
+    fn received_messages_are_never_filed_under_a_situation() {
+        let (db, _) = seeded("chat", 30);
+        // Ada's side of the seeded conversation says "any thoughts?"; make it
+        // an apology instead and check it still does not count.
+        db.conn().execute("UPDATE messages SET body = 'so sorry, my fault' WHERE direction = 'other'", []).unwrap();
+        let summary = analyze(&db, &mut |_, _| {}).unwrap();
+        assert_eq!(summary.messages_classified, 0);
+        assert!(db.self_situation_counts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_situation_that_empties_loses_its_layer_on_the_next_analysis() {
+        let (db, _) = seeded("chat", 30);
+        let refusals: Vec<String> = (0..22).map(|i| format!("can't make it {i}")).collect();
+        add_self_messages(&db, "no", &refusals);
+        analyze(&db, &mut |_, _| {}).unwrap();
+        assert!(db.get_voice_profile(VoiceLayer::Situational, "declining", ANALYSIS_VERSION).unwrap().is_some());
+        db.conn().execute("UPDATE messages SET body = 'fine by me' WHERE external_id LIKE 'no%'", []).unwrap();
+        analyze(&db, &mut |_, _| {}).unwrap();
+        assert!(db.get_voice_profile(VoiceLayer::Situational, "declining", ANALYSIS_VERSION).unwrap().is_none());
+        assert!(db.representative_examples(VoiceLayer::Situational, "declining", 10).unwrap().is_empty());
     }
 }

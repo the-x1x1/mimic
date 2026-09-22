@@ -41,7 +41,9 @@ Two decisions worth stating. An identifier already owned by someone else is **no
 
 ## Situations
 
-**`situations`** and **`message_situations`** exist and are indexed; nothing classifies into them yet. Situational voice is Phase 2. The tables are here because adding them later would mean a migration that touches the hottest table in the schema.
+**`situations`** holds the vocabulary: six built-in rows (`is_builtin = 1`) seeded by migration 0007 — `declining`, `scheduling`, `apologising`, `thanking`, `explaining`, `disagreeing`. Their ids are stable, because they are also the situational layer's `scope_key` and the value of `drafts.situation_id`.
+
+**`message_situations`** files messages under situations: `(message_id, situation_id)` with a `confidence` and a `classified_by` of `rule`, `model` or `user`. Only the user's own messages are filed. Rule rows are replaced on every analysis; user rows are never touched by it. Deleting a message cascades here; "delete everything" empties it and keeps the vocabulary.
 
 ## Voice
 

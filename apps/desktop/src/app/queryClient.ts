@@ -20,6 +20,9 @@ export const qk = {
   people: ["people"] as const,
   person: (id: string) => ["person", id] as const,
   voice: ["voice"] as const,
+  // Under "voice" so that anything refreshing the voice overview after an
+  // analysis refreshes the situation counts with it.
+  situations: ["voice", "situations"] as const,
   voiceExamples: (layer: string, scope: string) => ["voiceExamples", layer, scope] as const,
   voicePreferences: (layer: string, scope: string) => ["voicePrefs", layer, scope] as const,
   generationContext: (key: string) => ["generationContext", key] as const,

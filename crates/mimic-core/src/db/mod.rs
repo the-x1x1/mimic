@@ -12,6 +12,7 @@ mod repo_identity;
 mod repo_jobs;
 mod repo_messages;
 pub mod repo_people;
+mod repo_situations;
 mod repo_sources;
 mod repo_voice;
 
@@ -25,7 +26,7 @@ use crate::ids::now_rfc3339;
 
 pub use models::*;
 pub use repo_drafts::{DraftOutcomes, NewDraft};
-pub use repo_messages::{word_count, AwaitingReply, ImportCounts, NewMessage};
+pub use repo_messages::{word_count, AwaitingReply, ImportCounts, NewMessage, SelfScope};
 pub use repo_people::IdentifierInput;
 pub use repo_sources::channel_is_known;
 

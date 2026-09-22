@@ -32,6 +32,7 @@ pub mod paths;
 pub mod privacy;
 pub mod providers;
 pub mod retrieval;
+pub mod situations;
 pub mod sources;
 pub mod version;
 pub mod voice;

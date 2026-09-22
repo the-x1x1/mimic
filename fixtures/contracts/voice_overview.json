@@ -109,7 +109,7 @@
     },
     {
       "layer": "relationship",
-      "scopeKey": "a389f05c-2823-4dad-92f4-48168ad4dd55",
+      "scopeKey": "d85d9996-ad5b-442e-a006-dc80769e81e3",
       "label": "What you write to Ada Lovelace",
       "sampleSize": 20,
       "measurable": true,
@@ -141,10 +141,72 @@
         "medianResponseSeconds": 239
       },
       "stale": false
+    },
+    {
+      "layer": "situational",
+      "scopeKey": "scheduling",
+      "label": "When you set up a time",
+      "sampleSize": 1,
+      "measurable": false,
+      "metrics": {
+        "sampleSize": 1,
+        "measurable": false,
+        "avgWordsPerMessage": null,
+        "medianWordsPerMessage": null,
+        "p90WordsPerMessage": null,
+        "avgSentencesPerMessage": null,
+        "multiParagraphRate": null,
+        "terminalPeriodRate": null,
+        "questionRate": null,
+        "exclamationRate": null,
+        "ellipsisRate": null,
+        "emojiRate": null,
+        "lowercaseStartRate": null,
+        "allLowercaseRate": null,
+        "contractionsPer100Words": null,
+        "greetingRate": null,
+        "signOffRate": null,
+        "topGreetings": [],
+        "topSignOffs": [],
+        "topPhrases": [],
+        "medianResponseSeconds": null
+      },
+      "stale": false
+    },
+    {
+      "layer": "situational",
+      "scopeKey": "thanking",
+      "label": "When you thank someone",
+      "sampleSize": 1,
+      "measurable": false,
+      "metrics": {
+        "sampleSize": 1,
+        "measurable": false,
+        "avgWordsPerMessage": null,
+        "medianWordsPerMessage": null,
+        "p90WordsPerMessage": null,
+        "avgSentencesPerMessage": null,
+        "multiParagraphRate": null,
+        "terminalPeriodRate": null,
+        "questionRate": null,
+        "exclamationRate": null,
+        "ellipsisRate": null,
+        "emojiRate": null,
+        "lowercaseStartRate": null,
+        "allLowercaseRate": null,
+        "contractionsPer100Words": null,
+        "greetingRate": null,
+        "signOffRate": null,
+        "topGreetings": [],
+        "topSignOffs": [],
+        "topPhrases": [],
+        "medianResponseSeconds": null
+      },
+      "stale": false
     }
   ],
   "peopleWithProfiles": 1,
   "stale": false,
-  "lastAnalyzedAt": "2026-09-21T02:06:03.121Z",
+  "lastAnalyzedAt": "2026-09-22T21:04:16.307Z",
   "messagesUntilMeasurable": 0
 }

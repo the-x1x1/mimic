@@ -346,6 +346,15 @@ p {
   padding-top: var(--space-4);
   border-top: 1px solid var(--border);
 }
+/* "What kind of reply": a quiet second control under the note, sized to its
+   options rather than the full measure, because it is optional and most
+   people will leave it on its default. */
+.thread__kind {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 28rem;
+}
 .thread__actions {
   display: flex;
   align-items: center;

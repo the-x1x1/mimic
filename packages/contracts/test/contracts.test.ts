@@ -17,6 +17,7 @@ import {
   LatestJson,
   MIN_SAMPLE,
   Settings,
+  SituationSummary,
   VoiceOverview,
   Dashboard,
   canFinishOnboarding,
@@ -26,6 +27,7 @@ import {
   describeWaiting,
   describeImport,
   describeMetric,
+  describeSituation,
   formatDuration,
   formatRate,
   importStepState,
@@ -70,6 +72,30 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(withDraft!.draft!.outcome).toBeNull();
     expect(withDraft!.lastMessage.length).toBeGreaterThan(0);
     expect(view.outcomes.uneditedRate).toBeNull();
+  });
+
+  it("parses the situation vocabulary, all six, with counts rather than scores", () => {
+    const list = SituationSummary.array().parse(read(contractFixture("situations.json")));
+    expect(list.map((s) => s.id)).toEqual([
+      "declining",
+      "scheduling",
+      "apologising",
+      "thanking",
+      "explaining",
+      "disagreeing",
+    ]);
+    expect(list.every((s) => s.measurable === s.ownMessages >= MIN_SAMPLE)).toBe(true);
+  });
+
+  it("parses a generation context written for a situation read from a note", () => {
+    const ctx = GenerationContext.parse(read(contractFixture("generation_context_situation.json")));
+    expect(ctx.situation).not.toBeNull();
+    expect(ctx.situation!.id).toBe("declining");
+    expect(ctx.situation!.source).toBe("fromNote");
+    expect(ctx.situation!.cue).toBeTruthy();
+    // No situation is a real, common state and must parse too.
+    const plain = GenerationContext.parse(read(contractFixture("generation_context.json")));
+    expect(plain.situation).toBeNull();
   });
 
   it("parses a draft and a deletion report", () => {
@@ -469,5 +495,25 @@ describe("draft outcomes", () => {
     });
     expect(o.uneditedRate).toBeNull();
     expect(formatRate(o.uneditedRate)).toBe("not measured yet");
+  });
+});
+
+describe("describeSituation words a reading as a reading", () => {
+  it("says nothing when there is no situation", () => {
+    expect(describeSituation(null)).toBeNull();
+    expect(describeSituation(undefined)).toBeNull();
+  });
+  it("credits the user only when they chose it", () => {
+    expect(
+      describeSituation({ id: "declining", label: "Saying no", source: "chosen", cue: null }),
+    ).toBe("Written as saying no, because you said so.");
+    const read = describeSituation({
+      id: "declining",
+      label: "Saying no",
+      source: "fromNote",
+      cue: "say no",
+    })!;
+    expect(read).toMatch(/^Your note read like saying no/);
+    expect(read).not.toMatch(/you said/);
   });
 });

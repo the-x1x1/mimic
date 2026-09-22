@@ -79,6 +79,20 @@ export const VoicePreference = z.object({
 });
 export type VoicePreference = z.infer<typeof VoicePreference>;
 
+/**
+ * One situation in the vocabulary — what a reply is doing — with how many of
+ * the user's own messages are filed under it. The six ids are fixed; they are
+ * seeded by migration 0007 and named in `crates/mimic-core/src/situations.rs`.
+ */
+export const SituationSummary = z.object({
+  id: z.string(),
+  label: z.string(),
+  layerLabel: z.string(),
+  ownMessages: z.number(),
+  measurable: z.boolean(),
+});
+export type SituationSummary = z.infer<typeof SituationSummary>;
+
 /** Below this many of the user's own messages nothing is measured. */
 export const MIN_SAMPLE = 20;
 
