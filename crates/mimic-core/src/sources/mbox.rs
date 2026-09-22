@@ -26,16 +26,17 @@ use crate::ids::sha256_hex;
 
 pub struct MboxSource;
 
-/// One parsed mail, before threading.
+/// One parsed mail, before threading. Shared with the IMAP connector, which
+/// receives the same RFC 5322 text over the network instead of from a file.
 #[derive(Debug, Clone)]
-struct Mail {
-    message_id: String,
-    in_reply_to: Option<String>,
-    references: Vec<String>,
-    subject: Option<String>,
-    from: AuthorRef,
-    date: Option<String>,
-    body: String,
+pub(crate) struct Mail {
+    pub(crate) message_id: String,
+    pub(crate) in_reply_to: Option<String>,
+    pub(crate) references: Vec<String>,
+    pub(crate) subject: Option<String>,
+    pub(crate) from: AuthorRef,
+    pub(crate) date: Option<String>,
+    pub(crate) body: String,
 }
 
 impl CommunicationSource for MboxSource {
@@ -101,11 +102,21 @@ impl CommunicationSource for MboxSource {
 }
 
 fn read_mbox(path: &Path, out: &mut Vec<Mail>) -> SourceResult<()> {
-    let reader = BufReader::new(File::open(path)?);
-    let mut current: Vec<String> = Vec::new();
-    for line in reader.lines() {
-        let line = line?;
-        if is_separator(&line) {
+    // Bytes, line by line: a mailbox is not UTF-8, it is whatever each
+    // message's charset says, and reading it as text would fail the whole
+    // import on the first Latin-1 byte.
+    let mut reader = BufReader::new(File::open(path)?);
+    let mut current: Vec<Vec<u8>> = Vec::new();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        while matches!(line.last(), Some(b'\n') | Some(b'\r')) {
+            line.pop();
+        }
+        if is_separator(&String::from_utf8_lossy(&line)) {
             if !current.is_empty() {
                 if let Some(m) = parse_mail(&current) {
                     out.push(m);
@@ -114,7 +125,7 @@ fn read_mbox(path: &Path, out: &mut Vec<Mail>) -> SourceResult<()> {
             }
             continue;
         }
-        current.push(line);
+        current.push(line.clone());
     }
     if let Some(m) = parse_mail(&current) {
         out.push(m);
@@ -138,40 +149,29 @@ fn is_separator(line: &str) -> bool {
     looks_like_sender && parts.count() >= 3
 }
 
-fn parse_mail(lines: &[String]) -> Option<Mail> {
+/// One message from an mbox, as the lines between two separators.
+fn parse_mail(lines: &[Vec<u8>]) -> Option<Mail> {
     if lines.is_empty() {
         return None;
     }
-    let mut headers: Vec<(String, String)> = Vec::new();
-    let mut body_start = lines.len();
-    for (i, line) in lines.iter().enumerate() {
-        if line.trim().is_empty() {
-            body_start = i + 1;
-            break;
-        }
-        // A continuation line begins with whitespace and extends the previous
-        // header. Long Subject and References headers are routinely folded.
-        if line.starts_with(' ') || line.starts_with('\t') {
-            if let Some(last) = headers.last_mut() {
-                last.1.push(' ');
-                last.1.push_str(line.trim());
-            }
-            continue;
-        }
-        match line.split_once(':') {
-            Some((k, v)) => headers.push((k.trim().to_lowercase(), v.trim().to_string())),
-            None => continue,
-        }
-    }
-    let get = |name: &str| headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-    let raw_body = lines.get(body_start..).map(|l| l.join("\n")).unwrap_or_default();
-    let body = clean_body(&raw_body);
+    parse_raw(&lines.join(&b'\n'))
+}
+
+/// One RFC 5322 message, MIME and all. The body is the text part the person
+/// wrote — decoded from base64 or quoted-printable, from its charset, and out
+/// of HTML when there is no plain part — with quoted replies and signatures
+/// removed. A message with no text in it is `None`.
+pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
+    let (headers, raw_body) = super::mime::split_message(raw);
+    let get = |name: &str| super::mime::header(&headers, name).map(str::to_string);
+    let text = super::mime::body_text(&headers, &raw_body)?;
+    let body = clean_body(&text);
     if body.trim().is_empty() {
         return None;
     }
-    let from = parse_address(get("from").as_deref().unwrap_or_default());
+    let from = parse_address(&super::mime::decode_header(get("from").as_deref().unwrap_or_default()));
     let message_id = get("message-id")
-        .map(|s| s.trim_matches(['<', '>']).to_string())
+        .map(|s| s.trim().trim_matches(['<', '>']).to_string())
         .filter(|s| !s.is_empty())
         // No Message-ID: derive one from the content so a re-import of the
         // same file produces the same id rather than a second copy.
@@ -184,9 +184,12 @@ fn parse_mail(lines: &[String]) -> Option<Mail> {
         .collect();
     Some(Mail {
         message_id,
-        in_reply_to: get("in-reply-to").map(|s| s.trim_matches(['<', '>']).to_string()).filter(|s| !s.is_empty()),
+        in_reply_to: get("in-reply-to")
+            .and_then(|s| s.split_whitespace().next().map(str::to_string))
+            .map(|s| s.trim_matches(['<', '>']).to_string())
+            .filter(|s| !s.is_empty()),
         references,
-        subject: get("subject").filter(|s| !s.trim().is_empty()),
+        subject: get("subject").map(|s| super::mime::decode_header(&s)).filter(|s| !s.trim().is_empty()),
         from,
         date: get("date").and_then(|d| parse_date(&d)),
         body,
@@ -234,7 +237,7 @@ fn normalized_subject(subject: &str) -> String {
 
 /// Group mails into conversations: by reference chain first, then by
 /// (normalized subject + a shared participant).
-fn thread(mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
+pub(crate) fn thread(mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
     // Union-find over message ids.
     let mut parent: HashMap<String, String> = HashMap::new();
     fn find(parent: &mut HashMap<String, String>, x: &str) -> String {
@@ -305,9 +308,19 @@ fn thread(mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
                     author: m.from,
                     sent_at: m.date,
                     body: m.body,
-                    metadata: match &m.subject {
-                        Some(s) => json!({ "subject": s }),
-                        None => json!({}),
+                    // What this message answers, by Message-ID. The importer
+                    // uses it to join a conversation that already holds one
+                    // of them — from an earlier check, or another source.
+                    metadata: {
+                        let refs: Vec<&String> = m.in_reply_to.iter().chain(m.references.iter()).collect();
+                        let mut meta = serde_json::Map::new();
+                        if let Some(s) = &m.subject {
+                            meta.insert("subject".into(), json!(s));
+                        }
+                        if !refs.is_empty() {
+                            meta.insert("refs".into(), json!(refs));
+                        }
+                        serde_json::Value::Object(meta)
                     },
                 })
                 .collect();
@@ -487,5 +500,63 @@ mod tests {
         assert!(r.ok);
         assert_eq!((r.conversations, r.messages), (8, 8));
         assert!(r.warnings.iter().any(|w| w.contains("thread of its own")), "{:?}", r.warnings);
+    }
+
+    /// What a Gmail Takeout export actually contains: multipart mail with a
+    /// base64 HTML part, a quoted-printable plain part, and an encoded-word
+    /// subject. The body stored is what the person typed, not the MIME.
+    #[test]
+    fn mime_mail_imports_as_the_words_not_the_encoding() {
+        let mbox = concat!(
+            "From c@example.com Tue Feb 03 09:20:00 2026\n",
+            "From: =?UTF-8?Q?C=C3=A9line?= <c@example.com>\n",
+            "Subject: =?UTF-8?B?UmU6IE9mZnNpdGU=?=\n",
+            "Date: Tue, 3 Feb 2026 09:20:00 +0000\n",
+            "Message-ID: <m1@example.com>\n",
+            "MIME-Version: 1.0\n",
+            "Content-Type: multipart/alternative; boundary=\"0000abc\"\n",
+            "\n",
+            "--0000abc\n",
+            "Content-Type: text/plain; charset=\"UTF-8\"\n",
+            "Content-Transfer-Encoding: quoted-printable\n",
+            "\n",
+            "can=E2=80=99t make it, sorry =E2=80=94 next time\n",
+            "\n",
+            "On Tue, 3 Feb 2026 at 09:14, Ada <ada@example.com> wrote:\n",
+            "> are you coming?\n",
+            "--0000abc\n",
+            "Content-Type: text/html; charset=\"UTF-8\"\n",
+            "Content-Transfer-Encoding: base64\n",
+            "\n",
+            "PGRpdj5jYW7igJl0IG1ha2UgaXQ8L2Rpdj4=\n",
+            "--0000abc--\n",
+        );
+        let (_dir, path) = write(mbox);
+        let convos = import(&path);
+        let m = &convos[0].messages[0];
+        assert_eq!(m.body, "can’t make it, sorry — next time");
+        assert_eq!(m.author.display_name, "Céline");
+        assert_eq!(convos[0].subject.as_deref(), Some("Re: Offsite"));
+        assert!(!m.body.contains("--0000abc") && !m.body.contains("Content-Type"));
+    }
+
+    #[test]
+    fn a_latin1_message_does_not_fail_the_import_or_lose_its_accents() {
+        let mut raw = b"From c@example.com Tue Feb 03 09:20:00 2026\nFrom: c@example.com\nMessage-ID: <l1@x>\nContent-Type: text/plain; charset=iso-8859-1\n\nJ'arrive ".to_vec();
+        raw.push(0xE0);
+        raw.extend_from_slice(b" midi\n");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("latin1.mbox");
+        std::fs::write(&path, &raw).unwrap();
+        let convos = import(&path);
+        assert_eq!(convos[0].messages[0].body, "J'arrive \u{e0} midi");
+    }
+
+    #[test]
+    fn a_reply_records_what_it_answers() {
+        let (_dir, path) = write(MBOX);
+        let convos = import(&path);
+        let reply = convos.iter().flat_map(|c| &c.messages).find(|m| m.external_id == "a2@example.com").unwrap();
+        assert_eq!(reply.metadata["refs"], serde_json::json!(["a1@example.com"]));
     }
 }

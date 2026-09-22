@@ -2,6 +2,34 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.3] — 2026-09-22
+
+Real mail. Connect a mailbox, and read MIME properly wherever mail comes from.
+
+### Added
+
+- **Connect a mailbox.** Your email address and an app password, and I read your inbox and your sent mail — the sent folder matters most, because it is the only place your own writing is. I log in and look first, and tell you what I found before anything is read, including when there is no sent folder. Then I check every 15 minutes (5, 30, an hour, or only when you ask — in Settings), and with replies prepared in advance turned on, a reply is waiting before you open the app.
+- **Read-only, and only ever read.** Folders are opened with `EXAMINE` and messages fetched with `BODY.PEEK[]`, so nothing is marked as read, moved or deleted; there is no command in the client that could, and the tests fail if one is ever sent. TLS always, against the bundled root certificates; an unencrypted connection is refused before connecting unless it is to this computer (for local bridges).
+- **Only new mail, every time.** Each folder remembers where it was left, and moves on only once what it read is in: a check that is canceled or loses its connection imports nothing and loses nothing. A server that renumbers a folder gets it read again, with nothing doubled. A message over 25 MB is skipped without being downloaded, so one enormous attachment cannot stall every check. The first check reads the newest 2,000 messages per folder; older mail can come in from an export.
+- **Threads stay threads — across checks, folders and sources.** Your message in Sent and the reply to it in the inbox are one conversation whichever folder is read first. A reply that arrives in a later check joins the conversation it answers. Mail that came in through an export and through the mailbox is stored once, in one thread, so your own writing is not counted twice.
+- **A failing mailbox says so, quietly.** The home screen says the last check failed and why; the next try waits an hour rather than a few minutes; routine checks never pop up a notice.
+- The password lives with the other credentials, never in the database, and goes when the mailbox is removed.
+- Its address becomes one of yours once the login works — unless you untick "this is my own address" for a mailbox you share, so what colleagues sent from it isn't taken as your writing.
+- Removing one of two sources that share a thread (an export and the mailbox it came from) removes exactly that source's mail; the other's stays, in its thread, and the confirmation counts only what goes.
+
+### Fixed
+
+- **Mail was stored as MIME.** Almost every real message is multipart, base64 or quoted-printable, and the mbox reader took the raw text as the message — so a Gmail export's "writing" was boundary lines and base64, and the measurements were measurements of that. Mail is now decoded: the plain-text part (or the HTML one, converted), in its charset, with encoded-word subjects and names. **An mbox imported with an earlier version should be removed and imported again.**
+- **Settings did not show what you had just set.** Every control on the Settings screen saved correctly and then kept showing the old value — a theme swatch did nothing visible, a checkbox sprang back — until something reloaded the screen. The saved settings now go straight to it.
+- The home screen, the mail screen and the caught-up message said "nothing arrives on its own" unconditionally. With a mailbox connected they now say how often it is checked; without one they still say nothing arrives.
+- **A guess about a note was told to the model as a fact** (0.10.0-alpha.1). "In this reply they are saying no" was written the same way whether you chose that or I read it from your note; now only your choice is stated, and a reading is passed on as a reading, with your note in charge. "No rush, tell her tuesday works", "no worries, yes please" and "don't decline, say yes" are no longer read as refusals.
+- **An mbox with Latin-1 in it failed the whole import** at its first accented byte, and an 8-bit Latin-1 body lost its accents. Mail is now read as bytes and decoded from the charset it declares.
+- **One bad job could stop every job after it.** A panic inside a job — for instance on HTML containing certain non-English capital letters, which is also fixed — ended the loop that runs jobs, so nothing ran again until a restart, and the same job re-ran and panicked on every launch. Each job now runs on its own, and a panic fails only that job.
+
+### Not in this release
+
+OAuth. Gmail, iCloud, Fastmail and Yahoo accept an app password. **Outlook.com and Hotmail do not** — Microsoft stopped accepting passwords for IMAP on personal accounts in September 2024 — and neither does a work or school account that allows only single sign-on; the dialog says so and points to an export instead. The IMAP code has been tested against a scripted server on this machine, not against any real provider.
+
 ## [0.10.0-alpha.2] — 2026-09-22
 
 The learning loop closes. What you change three times, I start doing myself.

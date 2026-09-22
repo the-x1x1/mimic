@@ -35,6 +35,22 @@ Two details that matter more than they look:
 
 Unparseable dates become `None` rather than a guess. A wrong timestamp is worse than no timestamp, because response latency is computed from them.
 
+- **MIME.** Almost all real mail is MIME, and until 0.10.0-alpha.3 the connector stored it raw — boundary lines, base64 and all — as if it were the person's writing. `sources::mime` now walks multipart structure and takes the first `text/plain` part that is not an attachment, or failing that the first `text/html` part converted to text; decodes base64 and quoted-printable; decodes UTF-8, US-ASCII, ISO-8859-1 and Windows-1252 (anything else as UTF-8 with replacement characters rather than refused); and decodes RFC 2047 encoded words in `Subject` and `From`. A message with no text part — a picture, a calendar invite — is skipped rather than stored empty. Any mbox imported with an earlier version should be removed and imported again.
+
+### `imap` — a connected mailbox
+
+Not a file connector: it has no `location`, and does not implement `CommunicationSource`. `sources::imap::sync` logs in, re-reads the folder list (so a renamed or localized sent folder is found again), and reads the inbox and the sent folder (the RFC 6154 `\Sent` attribute, then the names the common servers use).
+
+- **Fetch everything, then import.** Every folder's new mail is fetched and parsed first, then threaded together and handed to `import::Importer`, which runs exactly the attribution, dedupe and threading a file import does. So the order folders are read in cannot split a thread, and a check that is canceled or drops its connection imports nothing and loses nothing.
+- **Position.** Per folder, the server's `UIDVALIDITY` and the highest UID read, moved only after the import finishes. A changed `UIDVALIDITY` re-reads the folder; `Message-ID` dedupe means nothing is doubled. An empty folder is not searched (some servers answer that search with an error).
+- **Size.** Sizes are asked for first (`RFC822.SIZE`); a message over 25 MiB is skipped unfetched and the position moves past it, so one enormous attachment cannot stall every check. Fetches are batched by count (50) and by bytes (20 MiB), and one command's reply is capped at 64 MiB.
+- **First check.** At most the newest 2,000 messages per folder. Older mail comes in from an export; a message in both is stored once.
+- **Schedule.** `mail.checkEveryMinutes`, default 15, minimum 5, 0 for only-when-asked. Every attempt is recorded, successful or not; a failing mailbox waits four intervals (at most six hours) before the next attempt; "being checked" is decided by the job queue, so a status left behind by a crash cannot stop checking. A finished check is followed by assisted drafting when that is on, as an import is.
+
+## Email threads across checks and sources
+
+Any conversation on the email channel from a source whose ids are real Message-IDs (`mbox` and `imap`; `import::MESSAGE_ID_CONNECTORS`) is joined wherever it already is, by `Message-ID` — never by a generic export's own ids ("a1") or by the content hash made up for mail with no Message-ID (`sha-…`): `ImportState` looks for a conversation, in any source, holding one of the new messages or one of the messages they reference (`metadata.refs`, from `In-Reply-To` and `References`), and adds to it, putting it back in time order (`Db::resequence_by_time`). A message whose `Message-ID` is already stored through another source is counted as a duplicate rather than stored twice. This is what keeps an mbox export and the connected mailbox it came from from double-counting the user's writing or splitting a thread, and what lets a reply that arrives in a later check join the thread it answers. Migration 0008 indexes `messages.external_id` for the lookup.
+
 ### `mimic_json` — everything else
 
 The documented generic format. Anything without a dedicated connector can be converted into it.

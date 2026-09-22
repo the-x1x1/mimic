@@ -70,6 +70,18 @@ impl Db {
         Ok(())
     }
 
+    /// Replace a source's configuration. The IMAP connector keeps its sync
+    /// position here (never a credential: those live in the secret store).
+    pub fn set_source_config(&self, id: &str, config: &Value) -> DbResult<()> {
+        let n = self
+            .conn()
+            .execute("UPDATE sources SET config_json = ?1 WHERE id = ?2", params![config.to_string(), id])?;
+        if n == 0 {
+            return Err(DbError::NotFound(id.into()));
+        }
+        Ok(())
+    }
+
     /// Recount from `messages` rather than incrementing, so a re-import or a
     /// deletion can never leave the displayed count lying.
     pub fn refresh_source_counts(&self, id: &str) -> DbResult<i64> {

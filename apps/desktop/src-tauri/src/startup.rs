@@ -86,6 +86,15 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         mimic_core::import::ImportExecutor::shared(),
         mimic_core::voice::AnalyzeExecutor::shared(),
         mimic_core::assist::AssistExecutor::shared(resolve_provider),
+        // A mailbox's password is read from the secret store per run, so a
+        // password changed or removed since the check was queued is honoured.
+        mimic_core::sources::imap::CheckMailboxExecutor::shared({
+            let secrets = secrets.clone();
+            std::sync::Arc::new(move |key: &str| {
+                use mimic_core::providers::SecretStore;
+                secrets.get(key)
+            })
+        }),
         // The endpoint and model are read per run for the same reason: a
         // download queued before the user changed either should use what is
         // configured when it starts, not when it was asked for.
@@ -96,6 +105,11 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     ]));
     let jobs = JobRunner::new(db.clone(), executor);
     let (interrupted, requeued) = jobs.recover()?;
+    // A mailbox left "importing" by a check that never finished is ready
+    // again, so it is neither stuck nor shown as busy.
+    if let Err(e) = mimic_core::sources::imap::recover(&db) {
+        tracing::warn!(target: "mail", error = %e, "could not reset interrupted mailbox checks");
+    }
     if interrupted > 0 {
         tracing::warn!(target: "jobs", interrupted, requeued, "recovered interrupted jobs");
     }
@@ -195,7 +209,9 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                         // asked for that, and never off the back of an assist
                         // run itself.
                         let follows_work = ev.status == "completed"
-                            && (ev.kind == mimic_core::import::JOB_KIND || ev.kind == mimic_core::voice::JOB_KIND);
+                            && (ev.kind == mimic_core::import::JOB_KIND
+                                || ev.kind == mimic_core::voice::JOB_KIND
+                                || ev.kind == mimic_core::sources::imap::JOB_KIND);
                         if follows_work && mimic_core::assist::is_enabled(&st.db).unwrap_or(false) {
                             match st.jobs.enqueue(mimic_core::assist::JOB_KIND, json!({})) {
                                 Ok(job) => tracing::info!(target: "assist", job = %job.id, "queued assisted drafting"),
@@ -207,6 +223,30 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,
+                }
+            }
+        });
+    }
+    // Connected mailboxes: once a minute, queue a check for any that are due.
+    // The interval is read each time, so turning checking off in Settings
+    // takes effect without a restart, and a mailbox already being checked is
+    // never queued twice.
+    {
+        let st = state.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                match mimic_core::sources::imap::due_now(&st.db) {
+                    Ok(ids) => {
+                        for id in ids {
+                            if let Err(e) =
+                                st.jobs.enqueue(mimic_core::sources::imap::JOB_KIND, json!({ "sourceId": id }))
+                            {
+                                tracing::warn!(target: "mail", error = %e, "could not queue a mailbox check");
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!(target: "mail", error = %e, "could not work out which mailboxes are due"),
                 }
             }
         });

@@ -198,8 +198,32 @@ export const Dashboard = z.object({
   lastImportAt: z.string().nullable(),
   /** Whether Mimic prepares replies without being asked. Off by default. */
   autoDraft: z.boolean(),
+  /** Null unless a mailbox is connected. `everyMinutes` 0 means checking is off. */
+  mailChecking: z
+    .object({
+      mailboxes: z.number(),
+      everyMinutes: z.number(),
+      lastCheckedAt: z.string().nullable(),
+      /** Why the last check failed, when it did. */
+      failing: z.string().nullable(),
+    })
+    .nullable(),
 });
 export type Dashboard = z.infer<typeof Dashboard>;
+
+/** Whether mail comes in by itself, in one sentence, or null when it does not. */
+export function describeMailChecking(d: Dashboard): string | null {
+  const m = d.mailChecking;
+  if (!m) return null;
+  const which = m.mailboxes === 1 ? "your mailbox" : "your mailboxes";
+  if (m.failing) {
+    return `The last check of ${which} failed: ${m.failing}`;
+  }
+  if (m.everyMinutes === 0) {
+    return `Checking ${which} is turned off, so nothing new comes in until you ask.`;
+  }
+  return `I check ${which} every ${m.everyMinutes} minutes.`;
+}
 
 export const AssistSummary = z.object({
   considered: z.number(),
@@ -215,8 +239,8 @@ export type AssistSummary = z.infer<typeof AssistSummary>;
  * Mimic speaks in the first person here and everywhere else a person reads it,
  * because "Mimic reads exports you point it at" is a sentence about a program
  * and "I haven't read any of your mail yet" is a sentence to a person. What it
- * must not do is imply that mail arrives on its own: nothing does until there
- * is a connector, and the first branch below says so plainly.
+ * must not do is imply that mail arrives on its own when no mailbox is
+ * connected; `describeMailChecking` is the only thing that may say it does.
  *
  * Whether it counts people or conversations is decided by what is actually
  * waiting rather than by which word sounds friendlier — a group thread is not
@@ -224,7 +248,9 @@ export type AssistSummary = z.infer<typeof AssistSummary>;
  */
 export function describeWaiting(d: Dashboard): string {
   if (d.lastImportAt === null) {
-    return "I haven't read any of your mail yet, so there's nothing here. Point me at it and this fills up.";
+    return d.mailChecking && !d.mailChecking.failing
+      ? "I'm reading your mail for the first time. This fills up as I go."
+      : "I haven't read any of your mail yet, so there's nothing here. Point me at it and this fills up.";
   }
   if (d.awaitingTotal === 0) {
     return "You're all caught up. Nobody is waiting on a reply.";

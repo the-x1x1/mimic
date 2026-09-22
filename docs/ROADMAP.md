@@ -35,9 +35,9 @@ Make the model of the person better, not the prompt longer.
 
 ## Phase 4 — Connectors
 
-- IMAP, so mail arrives without an export.
+- Done in 0.10.0-alpha.3: IMAP, read-only, inbox and sent, with a per-folder watermark and a schedule. Still open: OAuth (XOAUTH2), which Outlook.com and Hotmail now require and single-sign-on work accounts always did, and a first real connection to each major provider.
 - Platform exports: iMessage, WhatsApp, Signal, Slack, Discord.
-- Incremental sync with a watermark, rather than a full re-read.
+- Incremental sync for file sources (IMAP has it).
 
 ## Phase 5 — Reply assistant
 
@@ -51,7 +51,7 @@ Mimic notices what it could answer and prepares drafts in advance. The user stil
 
 Done: the dashboard of threads awaiting a reply; background drafting for them behind `assist.autoDraft`, off by default, bounded per run and cancellable; approve / modify / reject recording real outcomes.
 
-Not done: watching a _connected_ inbox, which needs Phase 4 — nothing arrives on its own yet, so "in advance" currently means "after an import". Nothing decides that a thread does not need a reply; every unanswered thread is shown.
+Done in 0.10.0-alpha.3: with a mailbox connected, each check is followed by assisted drafting when that is on, so replies are prepared as mail arrives. Not done: nothing decides that a thread does not need a reply; every unanswered thread is shown, newsletters included.
 
 ## Phase 7 — Trusted mode
 

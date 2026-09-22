@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/mimic-core", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.10.0-alpha.2"
+version = "0.10.0-alpha.3"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
@@ -25,6 +25,9 @@ rand = "0.9"
 sha2 = "0.10"
 hex = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+# The IMAP connector's TLS: the same rustls and root store reqwest already uses.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 tempfile = "3"
 mimic-core = { path = "crates/mimic-core" }
 

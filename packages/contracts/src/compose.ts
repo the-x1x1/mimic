@@ -92,7 +92,7 @@ export function describeSituation(s: SituationChoice | null | undefined): string
   const what = s.label.toLowerCase();
   return s.source === "chosen"
     ? `Written as ${what}, because you said so.`
-    : `Your note read like ${what}, so I wrote it the way you usually do that.`;
+    : `Your note read like ${what} to me, so I leaned on the times you've done that. Your note still decides.`;
 }
 
 /**

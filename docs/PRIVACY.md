@@ -10,9 +10,11 @@ The original files the user imported from are never modified and never moved.
 
 ## What leaves the computer
 
-Three things, all of them the user's choice and all of them visible in the interface.
+Four things, all of them the user's choice and all of them visible in the interface.
 
 **Drafting.** The provider selected in Settings receives the assembled prompt: the message being replied to, the intent the user typed, a handful of their own past messages, the recipient's display name and relationship, and the measured description of how they write. When that provider is the local one, this does not leave the machine at all, and the top bar says "Local model". When it is a hosted provider, the top bar says "Sends to Claude" and the Settings description spells out exactly what is transmitted.
+
+**A connected mailbox.** When the user connects one, Mimic logs in to _their_ mail server over TLS with the app password they gave it, and reads — the inbox and the sent folder, with `EXAMINE` and `BODY.PEEK[]`, so nothing is marked as read, moved or deleted. What travels is the login and the requests for mail; what comes back stays on this computer. It checks on the schedule in Settings (every 15 minutes by default, or only when asked), and the home screen says that it does. Until a mailbox is connected, nothing arrives on its own, and the screens say that instead.
 
 **Update checks.** A request to the GitHub releases endpoint carrying the current version. Switched off with `updates.automatic`.
 
@@ -36,7 +38,9 @@ The dialog says all of this before it happens, in sentences rather than a table 
 
 The preview is produced by the same code path as the deletion with the writes skipped, so it cannot understate the consequences. Tested in `privacy::tests::a_preview_changes_nothing_and_matches_what_deletion_does`.
 
-**Deleting a source** removes everything imported through it, and any person Mimic only ever saw through it.
+**Deleting a source** removes everything imported through it, and any person Mimic only ever saw through it. For a connected mailbox it also removes the stored app password, and stops the checking. A thread can hold mail from two sources — an export and the mailbox it came from join by Message-ID — and deleting one of them removes exactly that source's messages: a thread it owned that also holds the other's mail is handed to the other source rather than removed, and the report counts only what actually went.
+
+**Connecting a mailbox** adds its address to the user's own addresses only after the login works, and only when the user ticks that it is theirs — a shared mailbox (team@, support@) is left out, so what colleagues sent from it is not read as the user's writing.
 
 **Deleting everything** empties every communication table and keeps settings, identity and provider configuration. It requires typing a phrase.
 
@@ -44,7 +48,7 @@ None of these are recoverable. `Db::open` writes a database backup before a sche
 
 ## Credentials
 
-Provider API keys are stored in `credentials/credentials.json` with owner-only permissions, not in the OS credential store. This is a known limitation with a name and a place on the roadmap; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth.
+Provider API keys and mailbox app passwords (under `imap:<source id>`) are stored in `credentials/credentials.json` with owner-only permissions, not in the OS credential store. This is a known limitation with a name and a place on the roadmap; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth.
 
 ## What Mimic will not do
 

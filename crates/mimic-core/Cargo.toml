@@ -26,6 +26,8 @@ rand.workspace = true
 sha2.workspace = true
 hex.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

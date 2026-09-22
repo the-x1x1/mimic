@@ -321,8 +321,16 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         system.push_str(&format!("\nThe channel is {}.\n", ctx.channel));
     }
 
-    if let Some(b) = ctx.situation.as_ref().and_then(|s| crate::situations::builtin(&s.id)) {
-        system.push_str(&format!("\nIn this reply they are {}.", b.doing));
+    if let Some((s, b)) = ctx.situation.as_ref().and_then(|s| crate::situations::builtin(&s.id).map(|b| (s, b))) {
+        // Only something the user chose is stated as a fact. A reading of
+        // their note is passed on as a reading, with the note itself in charge.
+        match s.source {
+            SituationSource::Chosen => system.push_str(&format!("\nIn this reply they are {}.", b.doing)),
+            SituationSource::FromNote => system.push_str(&format!(
+                "\nTheir note reads as though they are {} here. Follow the note itself if it says otherwise.",
+                b.doing
+            )),
+        }
         let measured = ctx.voice.layers.iter().any(|l| l.layer == "situational" && l.measurable);
         if measured {
             system.push_str(" The measurements above already reflect how they write when they do that.");
@@ -792,7 +800,8 @@ mod tests {
             ctx.evidence
         );
         let prompt = assemble(&ctx, &req);
-        assert!(prompt.system.contains("In this reply they are saying no to something."));
+        assert!(prompt.system.contains("Their note reads as though they are saying no to something here."));
+        assert!(!prompt.system.contains("In this reply they are"), "a reading is not stated as a fact");
     }
 
     #[test]
@@ -802,6 +811,7 @@ mod tests {
         let ctx = build_context(&db, &req).unwrap();
         assert_eq!(ctx.situation.as_ref().unwrap().source, SituationSource::Chosen);
         assert!(ctx.evidence.iter().any(|e| e.starts_with("You said this reply is saying no")), "{:?}", ctx.evidence);
+        assert!(assemble(&ctx, &req).system.contains("In this reply they are saying no to something."));
     }
 
     #[test]

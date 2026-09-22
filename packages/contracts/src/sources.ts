@@ -75,3 +75,77 @@ export function describeImport(s: ImportSummary): string {
   if (s.empty > 0) parts.push(`${s.empty} with no text`);
   return parts.join(", ");
 }
+
+/** How to reach a mailbox. The password is sent separately and never stored here. */
+export const ImapAccount = z.object({
+  host: z.string(),
+  port: z.number(),
+  username: z.string(),
+  security: z.enum(["tls", "plain"]),
+});
+export type ImapAccount = z.infer<typeof ImapAccount>;
+
+/** What connecting found, before anything is read. */
+export const ImapProbe = z.object({
+  folders: z.array(z.string()),
+  sentFolder: z.string().nullable(),
+  counts: z.array(z.tuple([z.string(), z.number()])),
+  warnings: z.array(z.string()),
+});
+export type ImapProbe = z.infer<typeof ImapProbe>;
+
+/**
+ * Server settings for the providers most people use. Every one of them wants
+ * an app password for IMAP, not the account password; the dialog says so.
+ */
+const MICROSOFT =
+  "Outlook.com and Hotmail no longer let apps like this sign in with a password, and Mimic can't use Microsoft's sign-in yet. For now, bring your mail in as an .mbox file: add the account to Thunderbird, then export the inbox and sent folders as mbox.";
+
+export const KNOWN_MAIL_HOSTS: Record<
+  string,
+  { host: string; port: number; help: string; supported?: boolean }
+> = {
+  "gmail.com": {
+    host: "imap.gmail.com",
+    port: 993,
+    help: "Google Account → Security → 2-Step Verification → App passwords.",
+  },
+  "googlemail.com": {
+    host: "imap.gmail.com",
+    port: 993,
+    help: "Google Account → Security → 2-Step Verification → App passwords.",
+  },
+  // Microsoft stopped accepting passwords of any kind for IMAP on personal
+  // accounts in September 2024; only a sign-in method Mimic does not have yet
+  // works there. Listed so the dialog can say so instead of failing.
+  "outlook.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, supported: false },
+  "hotmail.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, supported: false },
+  "live.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, supported: false },
+  "msn.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, supported: false },
+  "icloud.com": {
+    host: "imap.mail.me.com",
+    port: 993,
+    help: "appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
+  },
+  "me.com": {
+    host: "imap.mail.me.com",
+    port: 993,
+    help: "appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
+  },
+  "fastmail.com": {
+    host: "imap.fastmail.com",
+    port: 993,
+    help: "Fastmail → Settings → Privacy & Security → App passwords.",
+  },
+  "yahoo.com": {
+    host: "imap.mail.yahoo.com",
+    port: 993,
+    help: "Yahoo Account security → Generate app password.",
+  },
+};
+
+/** Server settings guessed from an address, or null when the domain is unknown. */
+export function guessMailHost(address: string) {
+  const domain = address.split("@")[1]?.trim().toLowerCase();
+  return domain ? (KNOWN_MAIL_HOSTS[domain] ?? null) : null;
+}

@@ -6,6 +6,7 @@ import {
   type DashboardThread,
   type Draft,
   SituationChoice,
+  describeMailChecking,
   describeSituation,
   describeWaiting,
 } from "@mimic/contracts";
@@ -49,8 +50,8 @@ export function RepliesPage() {
         ) : null}
       </div>
 
-      {data.messages === 0 ? <NothingYet /> : null}
-      {data.messages > 0 && data.awaiting.length === 0 ? <CaughtUp /> : null}
+      {data.messages === 0 ? <NothingYet data={data} /> : null}
+      {data.messages > 0 && data.awaiting.length === 0 ? <CaughtUp data={data} /> : null}
 
       <div className="replies__list">
         {data.awaiting.map((t) => (
@@ -63,14 +64,38 @@ export function RepliesPage() {
   );
 }
 
-function NothingYet() {
+function NothingYet({ data }: { data: Dashboard }) {
+  if (data.mailChecking?.failing) {
+    return (
+      <section className="note">
+        <h2 className="note__title">I couldn&rsquo;t read your mail.</h2>
+        <p className="note__body">{describeMailChecking(data)}</p>
+        <div className="note__actions">
+          <Link to="/sources">
+            <Button variant="primary">See your mail</Button>
+          </Link>
+        </div>
+      </section>
+    );
+  }
+  if (data.mailChecking) {
+    return (
+      <section className="note">
+        <h2 className="note__title">I&rsquo;m reading your mail.</h2>
+        <p className="note__body">
+          This fills up as I go. Nothing in your mailbox changes, and nothing leaves this computer
+          except what goes to the writing model you chose.
+        </p>
+      </section>
+    );
+  }
   return (
     <section className="note">
       <h2 className="note__title">There&rsquo;s nothing here yet.</h2>
       <p className="note__body">
         I haven&rsquo;t read any of your mail, so I don&rsquo;t know how you write or who you write
-        to. Point me at a copy of your old mail and this fills up. Nothing leaves this computer, and
-        nothing arrives on its own &mdash; I only read what you hand me.
+        to. Connect your mailbox, or point me at a copy of your old mail, and this fills up. Nothing
+        leaves this computer, and nothing arrives on its own &mdash; I only read what you hand me.
       </p>
       <div className="note__actions">
         <Link to="/sources">
@@ -84,13 +109,18 @@ function NothingYet() {
   );
 }
 
-function CaughtUp() {
+function CaughtUp({ data }: { data: Dashboard }) {
+  const checking = describeMailChecking(data);
   return (
     <section className="note">
       <h2 className="note__title">You&rsquo;re all caught up.</h2>
       <p className="note__body">
-        Nothing in the mail I&rsquo;ve read ends with someone else waiting on you. Bring in newer
-        mail and I&rsquo;ll have replies ready for anything new.
+        Nothing in the mail I&rsquo;ve read ends with someone else waiting on you.{" "}
+        {checking && data.mailChecking?.failing
+          ? checking
+          : checking && data.mailChecking?.everyMinutes
+            ? `${checking} Anything new that needs an answer will show up here.`
+            : "Bring in newer mail and I'll have replies ready for anything new."}
       </p>
       <div className="note__actions">
         <Link to="/sources">
@@ -110,8 +140,9 @@ function Footer({ data }: { data: Dashboard }) {
   return (
     <div className="replies__foot">
       <p className="muted small">
+        {describeMailChecking(data) ? `${describeMailChecking(data)} ` : null}
         {data.autoDraft
-          ? "I write these by myself after each import. If you would rather I asked first, turn that off in Settings."
+          ? `I write these by myself after each ${data.mailChecking ? "check" : "import"}. If you would rather I asked first, turn that off in Settings.`
           : "I only write when you ask. I can have them ready in advance instead — that is in Settings."}{" "}
         I have read {data.messages.toLocaleString()} of your emails,{" "}
         {data.ownMessages.toLocaleString()} of them written by you. Last one came in{" "}
