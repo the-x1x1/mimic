@@ -22,6 +22,16 @@ pub async fn start_voice_analysis(state: State<'_, SharedState>) -> CommandResul
     Ok(state.jobs.enqueue(mimic_core::voice::JOB_KIND, json!({}))?)
 }
 
+/// The situation vocabulary, with how many of the user's own messages are
+/// filed under each. Always all six, so the screen can show what has nothing
+/// filed yet rather than hiding it.
+#[tauri::command]
+pub async fn list_situations(
+    state: State<'_, SharedState>,
+) -> CommandResult<Vec<mimic_core::situations::SituationSummary>> {
+    Ok(mimic_core::situations::overview(&state.db)?)
+}
+
 #[tauri::command]
 pub async fn get_voice_profile(
     state: State<'_, SharedState>,

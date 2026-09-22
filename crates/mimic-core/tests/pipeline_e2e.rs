@@ -382,3 +382,32 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert_eq!(later.pending_drafts.len(), summary.drafted - 1);
     assert_eq!(later.outcomes.resolved, 1);
 }
+
+/// Situations over a real import: what the classifier filed, the situation a
+/// note is read as, and the fixtures the zod suite parses for both.
+#[test]
+fn situations_are_filed_from_the_users_own_messages_and_read_from_a_note() {
+    let (db, source_id) = setup();
+    run_import(&db, &source_id);
+    let summary = voice::analyze(&db, &mut |_, _| {}).unwrap();
+    assert!(summary.messages_classified > 0, "the sample export has scheduling and thanks in it");
+
+    let situations = mimic_core::situations::overview(&db).unwrap();
+    assert_eq!(situations.len(), 6, "the whole vocabulary, including what has nothing filed yet");
+    let scheduling = situations.iter().find(|s| s.id == "scheduling").unwrap();
+    assert!(scheduling.own_messages >= 1, "\"tuesday works, 2pm suits me\" is setting a time");
+    assert!(!scheduling.measurable, "and one or two messages is not a layer anyone should trust");
+    check_fixture("situations.json", &serde_json::to_value(&situations).unwrap());
+
+    let request = ComposeRequest {
+        channel: "chat".into(),
+        incoming_message: Some("can you make the offsite on the 14th?".into()),
+        intent: Some("no, can't make it that week".into()),
+        ..Default::default()
+    };
+    let ctx = mimic_core::generation::build_context(&db, &request).unwrap();
+    let sit = ctx.situation.as_ref().expect("the note reads like a no");
+    assert_eq!(sit.id, "declining");
+    assert!(ctx.evidence.iter().any(|e| e.starts_with("Your note reads like saying no")), "{:?}", ctx.evidence);
+    check_fixture("generation_context_situation.json", &serde_json::to_value(&ctx).unwrap());
+}

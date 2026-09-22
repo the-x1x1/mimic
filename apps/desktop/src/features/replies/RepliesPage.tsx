@@ -5,10 +5,13 @@ import {
   type Dashboard,
   type DashboardThread,
   type Draft,
+  SituationChoice,
+  describeSituation,
   describeWaiting,
 } from "@mimic/contracts";
 import { useDashboard, useStartAssistDrafts } from "@/hooks/useDashboard";
 import { useGenerateDraft, useResolveDraft } from "@/hooks/useCompose";
+import { useSituations } from "@/hooks/useVoice";
 import { formatRelative } from "@/lib/format";
 import { toast } from "@/state/toast";
 import { ipc } from "@/lib/ipc";
@@ -136,6 +139,10 @@ function Thread({ thread }: { thread: DashboardThread }) {
   const generate = useGenerateDraft();
   const [draft, setDraft] = useState<Draft | null>(thread.draft);
   const [intent, setIntent] = useState("");
+  // Empty means "work it out from my note", which is the default: most people
+  // will never touch this, and the note is read the same way either way.
+  const [situationId, setSituationId] = useState("");
+  const situations = useSituations();
   const who = thread.participant?.displayName ?? "Someone I couldn't put a name to";
   const address = thread.participant?.identifiers?.[0]?.value ?? null;
   // "She wrote" needs a gender nobody told us. "They wrote" is wrong for one
@@ -150,6 +157,7 @@ function Thread({ thread }: { thread: DashboardThread }) {
       channel: thread.channel,
       incomingMessage: thread.lastMessage,
       intent: intent.trim() || null,
+      situationId: situationId || null,
     });
     setDraft(result);
   }
@@ -188,6 +196,20 @@ function Thread({ thread }: { thread: DashboardThread }) {
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
           />
+          {situations.data ? (
+            <label className="thread__kind">
+              <span className="muted small">What kind of reply</span>
+              <select value={situationId} onChange={(e) => setSituationId(e.target.value)}>
+                <option value="">Work it out from what I wrote</option>
+                {situations.data.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                    {s.measurable ? "" : " (I haven't seen enough of these yet)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <div className="row gap-3">
             <Button variant="primary" onClick={writeDraft} disabled={generate.isPending}>
               {generate.isPending ? "Writing…" : "Write it"}
@@ -212,6 +234,8 @@ export function DraftReview({ draft, onDone }: { draft: Draft; onDone: () => voi
   const [text, setText] = useState(draft.generatedText);
   const [editing, setEditing] = useState(false);
   const edited = text !== draft.generatedText;
+  const situation = SituationChoice.safeParse(draft.context["situation"]);
+  const situationLine = describeSituation(situation.success ? situation.data : null);
 
   async function use() {
     await navigator.clipboard.writeText(text).catch(() => undefined);
@@ -278,6 +302,7 @@ export function DraftReview({ draft, onDone }: { draft: Draft; onDone: () => voi
         </button>
       </div>
       <p className="muted small">
+        {situationLine ? `${situationLine} ` : null}
         {draft.intent
           ? "Written from what you told me you wanted to say."
           : "You didn't tell me what you wanted to say, so this comes from their message and how you usually write — worth a read before you use it."}{" "}

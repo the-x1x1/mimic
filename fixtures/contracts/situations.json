@@ -1,0 +1,44 @@
+[
+  {
+    "id": "declining",
+    "label": "Saying no",
+    "layerLabel": "When you say no",
+    "ownMessages": 0,
+    "measurable": false
+  },
+  {
+    "id": "scheduling",
+    "label": "Setting a time",
+    "layerLabel": "When you set up a time",
+    "ownMessages": 1,
+    "measurable": false
+  },
+  {
+    "id": "apologising",
+    "label": "Apologising",
+    "layerLabel": "When you apologise",
+    "ownMessages": 0,
+    "measurable": false
+  },
+  {
+    "id": "thanking",
+    "label": "Saying thanks",
+    "layerLabel": "When you thank someone",
+    "ownMessages": 1,
+    "measurable": false
+  },
+  {
+    "id": "explaining",
+    "label": "Explaining something",
+    "layerLabel": "When you explain something",
+    "ownMessages": 0,
+    "measurable": false
+  },
+  {
+    "id": "disagreeing",
+    "label": "Disagreeing",
+    "layerLabel": "When you disagree",
+    "ownMessages": 0,
+    "measurable": false
+  }
+]

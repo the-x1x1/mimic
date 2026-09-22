@@ -58,6 +58,15 @@ pub fn word_count(body: &str) -> i64 {
 
 const COLS: &str = "id, conversation_id, source_id, participant_id, external_id, direction, channel, sent_at, sequence_index, body, word_count, char_count, reply_to_message_id, response_latency_seconds, metadata_json";
 
+/// Which of the user's own messages a page is drawn from. `None` does not
+/// narrow.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SelfScope<'a> {
+    pub channel: Option<&'a str>,
+    pub participant_id: Option<&'a str>,
+    pub situation_id: Option<&'a str>,
+}
+
 fn map(r: &Row<'_>) -> rusqlite::Result<Message> {
     Ok(Message {
         id: r.get(0)?,
@@ -284,18 +293,35 @@ impl Db {
         after: Option<(&str, &str)>,
         limit: usize,
     ) -> DbResult<Vec<Message>> {
+        self.page_self_messages_in(&SelfScope { channel, participant_id, situation_id: None }, after, limit)
+    }
+
+    /// Page the user's own messages within a scope, by keyset on
+    /// `(sent_at, id)`. Every field of the scope narrows.
+    pub fn page_self_messages_in(
+        &self,
+        scope: &SelfScope<'_>,
+        after: Option<(&str, &str)>,
+        limit: usize,
+    ) -> DbResult<Vec<Message>> {
         let conn = self.conn();
         let mut sql = format!("SELECT {COLS} FROM messages m WHERE direction = 'self'");
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(c) = channel {
+        if let Some(c) = scope.channel {
             sql.push_str(" AND channel = ?");
             args.push(Box::new(c.to_string()));
         }
-        if let Some(p) = participant_id {
+        if let Some(p) = scope.participant_id {
             sql.push_str(
                 " AND conversation_id IN (SELECT conversation_id FROM conversation_participants WHERE participant_id = ?)",
             );
             args.push(Box::new(p.to_string()));
+        }
+        if let Some(s) = scope.situation_id {
+            sql.push_str(
+                " AND EXISTS (SELECT 1 FROM message_situations ms WHERE ms.message_id = m.id AND ms.situation_id = ?)",
+            );
+            args.push(Box::new(s.to_string()));
         }
         if let Some((sent_at, id)) = after {
             sql.push_str(" AND (COALESCE(sent_at,'') > ? OR (COALESCE(sent_at,'') = ? AND id > ?))");

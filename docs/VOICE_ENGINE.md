@@ -8,12 +8,12 @@ A person does not have one writing style. They have a default and a set of adjus
 
 Modelling that as one averaged profile produces a voice nobody has — the mean of "Dear Dr Okafor" and "lol ok". So Mimic computes four layers independently and resolves them outermost to innermost at generation time:
 
-| Layer            | Scope                        | Status                                             |
-| ---------------- | ---------------------------- | -------------------------------------------------- |
-| **GLOBAL**       | everything the user wrote    | implemented                                        |
-| **CHANNEL**      | per channel (email, sms, …)  | implemented                                        |
-| **RELATIONSHIP** | per person                   | implemented                                        |
-| **SITUATIONAL**  | per situation (declining, …) | schema and resolution only; nothing classifies yet |
+| Layer            | Scope                        | Status                                 |
+| ---------------- | ---------------------------- | -------------------------------------- |
+| **GLOBAL**       | everything the user wrote    | implemented                            |
+| **CHANNEL**      | per channel (email, sms, …)  | implemented                            |
+| **RELATIONSHIP** | per person                   | implemented                            |
+| **SITUATIONAL**  | per situation (declining, …) | implemented — filed by rule, see below |
 
 Resolution: global, then channel, then relationship, then situation, then the user's manual preferences, which beat everything. `voice::effective_metrics` folds them so the innermost layer that measured a given metric wins it, and an inner layer that measured nothing does not erase what an outer one knows.
 
@@ -44,6 +44,20 @@ Every metric below is arithmetic over text. No model is involved and none is nee
 **Twenty messages, or nothing.** Below `MIN_SAMPLE = 20` of the user's own messages in a scope, the profile is written with its sample size and every rate `null`. Rates over a handful of messages are noise wearing a decimal point.
 
 **`null` is not zero.** `emojiRate: 0.0` means this person does not use emoji — a fact, and an instruction to the prompt. `null` means we have not seen enough to say. The distinction survives from the Rust struct through the zod schema to the rendered sentence, and there is a test at each layer that it does.
+
+## Situations
+
+A situation is what a message is _doing_: saying no, setting a time, apologising, thanking, explaining, disagreeing. Six, fixed, seeded by migration 0007 with stable ids that are the situational layer's scope keys. The list is short on purpose: a layer needs twenty of the user's messages behind it, and a long tail of situations would leave every one of them under the floor.
+
+**How messages are filed.** `situations::classify` reads each of the user's own messages — `direction = 'self'` only; what other people wrote is not evidence of how the user says no — against a table of cue phrases per situation, each with a weight. Weights are summed, clamped to 1, and a message is filed under a situation at `RULE_THRESHOLD = 0.6` or above. Some cues take evidence away ("sorry to hear" is sympathy, not an apology; "no thanks" is a refusal, not a thank-you). A short closing block is ignored before reading, so "Thanks," above a name does not make every message a thank-you. Explaining needs twenty words. A message can be filed under more than one situation ("sorry, can't make it" is both).
+
+The rules are tuned for precision rather than recall: an unfiled message costs the layer one sample, a misfiled one teaches it the wrong habit. Every row they write says `classified_by = 'rule'`; a row the user sets (`'user'`) is never overwritten and never duplicated by a rule. Filing happens at the start of every analysis, and a situation that ends up with nothing filed loses its layer rather than keeping a description of messages it no longer counts.
+
+A language model would classify better. It would also need every message the user has ever written sent to it, which is not a thing to do from a background job against a hosted provider. `classify` is the seam a local model can replace.
+
+**How a draft gets a situation.** Two ways, and the draft records which (`SituationChoice.source`). The user can choose one (`chosen`). Otherwise their note is read by the same rules plus a few instruction-shaped cues ("say no", "push back", "thank them") (`fromNote`). With no note, nothing is inferred: what the other person asked is not what the user has decided to answer. The screen words the second case as a reading — "your note read like saying no" — and never as something the user said.
+
+**What a situation changes.** Its layer resolves innermost, after relationship, so where it is measurable its metrics win. Retrieval asks first for times the user did the same thing with the same person on the same channel, then, if there are fewer than two, for a couple from anyone, and fills the rest as before; each such example's reason starts "a time you said no". The prompt gains one line — "In this reply they are saying no to something." — and the evidence says how many times the user has done it, or that it has too few to go on.
 
 ## Representative examples
 

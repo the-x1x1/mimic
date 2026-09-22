@@ -23,6 +23,7 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration { version: 5, name: "communication", sql: include_str!("migrations/0005_communication.sql") },
     Migration { version: 6, name: "themes", sql: include_str!("migrations/0006_themes.sql") },
+    Migration { version: 7, name: "situations", sql: include_str!("migrations/0007_situations.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -77,7 +78,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 6);
+        assert_eq!(latest_version(), 7);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -89,6 +90,25 @@ mod tests {
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {
         let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap();
         stmt.query_map([], |r| r.get::<_, String>(1)).unwrap().map(Result::unwrap).collect()
+    }
+
+    /// The situation vocabulary arrives with the migration, matches the six
+    /// the classifier knows, and survives being applied to a database that
+    /// already has them.
+    #[test]
+    fn the_situation_vocabulary_is_seeded_and_matches_the_classifier() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&mut conn).unwrap();
+        let mut stmt = conn.prepare("SELECT id, label, is_builtin FROM situations ORDER BY rowid").unwrap();
+        let rows: Vec<(String, String, i64)> =
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(Result::unwrap).collect();
+        let expected: Vec<(String, String, i64)> =
+            crate::situations::BUILTINS.iter().map(|b| (b.id.to_string(), b.label.to_string(), 1)).collect();
+        assert_eq!(rows, expected);
+        // Re-running the seed is harmless.
+        conn.execute_batch(MIGRATIONS[6].sql).unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM situations", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 6);
     }
 
     /// A theme name that this build cannot render is carried over rather than
@@ -152,7 +172,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6]);
+        assert_eq!(applied, vec![5, 6, 7]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
 
         let tables = table_names(&conn);
@@ -216,6 +236,8 @@ mod tests {
         assert_eq!((jobs, events), (1, 1));
 
         assert!(column_names(&conn, "messages").contains(&"direction".to_string()));
+        let situations: i64 = conn.query_row("SELECT COUNT(*) FROM situations", [], |r| r.get(0)).unwrap();
+        assert_eq!(situations, 6, "an upgraded install gets the vocabulary a fresh one does");
         assert!(migrate(&mut conn).unwrap().is_empty(), "idempotent");
     }
 

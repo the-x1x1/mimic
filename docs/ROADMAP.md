@@ -14,7 +14,6 @@ Done: schema v6; the source-connector contract with two real connectors; the str
 
 Not done, and the reason each is not just an oversight:
 
-- **Situational classification.** The tables exist; nothing writes to them. This is the first place a language model is genuinely needed rather than convenient, and it needs a defined situation vocabulary before it is worth building.
 - **Analysis streams rather than materializing.** A scope's messages are currently loaded into memory before metrics are computed. Fine at a hundred thousand; not at a million.
 - **Embeddings are lexical.** `lexical_v1` is honest about what it is and reports `semantic: false`. It is a real improvement over exact match and it is not semantic similarity.
 
@@ -23,7 +22,8 @@ Not done, and the reason each is not just an oversight:
 Make the model of the person better, not the prompt longer.
 
 - A pinned sentence encoder behind the existing manifest mechanism; `message_embeddings` populated in a background job; retrieval's scorer swapped behind the same signature.
-- Situation classification — declining, scheduling, apologising, thanking, explaining, disagreeing — with the situational layer resolved into generation.
+- Situation classification by a local model, replacing the rules behind `situations::classify` (the vocabulary, the rule classifier and the situational layer landed in 0.10.0-alpha.1).
+- Correcting a message's situation by hand (`classified_by = 'user'` is already respected by the rules).
 - Qualitative interpretation: the one genuinely semantic thing a model should do here, turning measured statistics into a description of register that a prompt can use.
 - Streaming analysis; incremental recomputation of only the scopes a new import touched.
 - Credentials moved to DPAPI on Windows and Keychain/Secret Service elsewhere.

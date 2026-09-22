@@ -1,4 +1,4 @@
-# Project status — 0.9.0-alpha.4
+# Project status — 0.10.0-alpha.1
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -10,7 +10,7 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 | ------------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------- |
 | SQLite, WAL, foreign keys, one connection behind a mutex           | IMPLEMENTED | `db::tests::foreign_keys_are_enforced`, `reopen_is_idempotent_and_keeps_data`         |
 | Forward-only migrations with a backup before upgrading an install  | IMPLEMENTED | `db::tests::upgrade_from_older_schema_creates_backup`                                 |
-| Schema v6; a v4 photography database upgrades cleanly              | IMPLEMENTED | `migrations::tests::photography_database_upgrades_to_the_communication_schema`        |
+| Schema v7; a v4 photography database upgrades cleanly              | IMPLEMENTED | `migrations::tests::photography_database_upgrades_to_the_communication_schema`        |
 | Schema invariants (direction vocabulary, import key, cascades)     | IMPLEMENTED | `migrations::tests::communication_schema_enforces_its_invariants`                     |
 | Persistent job queue: progress, cancellation, interrupted recovery | IMPLEMENTED | `jobs::tests::runs_completes_and_fails_jobs`, `cancel_stops_between_items`            |
 | Python engine sidecar: NDJSON, restart budget, size caps, timeouts | IMPLEMENTED | `tests/engine_protocol.rs` (4 tests against a real child process)                     |
@@ -54,7 +54,12 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 | A sample under 20 reports its size and no rates             | IMPLEMENTED | `voice::metrics::tests::a_small_sample_reports_its_size_and_refuses_to_guess`                                                                                         |
 | `null` (unmeasured) and `0` (measured zero) stay distinct   | IMPLEMENTED | `metrics::tests::punctuation_habits_are_counted_from_the_last_real_character`; `contracts.test.ts` "rates are rendered honestly"                                      |
 | Global, channel and relationship layers                     | IMPLEMENTED | `voice::tests::analysis_writes_a_layer_per_scope_and_says_what_it_could_not_measure`                                                                                  |
-| Situational layer                                           | PARTIAL     | Tables, resolution and prompt slot exist; nothing classifies. Phase 2                                                                                                 |
+| Situation vocabulary (six, seeded by migration 0007)        | IMPLEMENTED | `migrations::tests::the_situation_vocabulary_is_seeded_and_matches_the_classifier`                                                                                    |
+| Filing the user's own messages by rule, precision first     | IMPLEMENTED | `situations::tests` (12 tests); `repo_situations::tests::rule_rows_are_replaced_and_user_rows_are_kept`                                                               |
+| Received messages are never filed                           | IMPLEMENTED | `voice::tests::received_messages_are_never_filed_under_a_situation`                                                                                                   |
+| Situational layer                                           | IMPLEMENTED | `voice::tests::analysis_files_messages_by_situation_and_measures_each_one`, `a_situation_that_empties_loses_its_layer_on_the_next_analysis`                           |
+| Situation classification by a model                         | PLANNED     | Rules only. A model would need every message the user wrote; the seam is `situations::classify`                                                                       |
+| Correcting a message's situation by hand                    | PLANNED     | The schema holds `classified_by = 'user'` and the rules respect it; nothing in the UI writes it yet                                                                   |
 | Layer resolution, innermost measurable wins                 | IMPLEMENTED | `voice::tests::effective_metrics_prefer_the_innermost_measurable_layer`                                                                                               |
 | Manual preferences override the statistics                  | IMPLEMENTED | `repo_voice::tests::manual_preferences_are_upserted_and_scoped`; `generation::tests::manual_preferences_appear_after_the_measurements_and_are_labelled_as_overriding` |
 | Representative examples: deterministic, de-duplicated       | IMPLEMENTED | `voice::tests::example_selection_is_deterministic_and_avoids_duplicates`, `near_duplicate_messages_are_not_all_chosen`                                                |
@@ -63,18 +68,21 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 
 ## Retrieval and generation
 
-| Item                                                            | Status      | Evidence                                                                                 |
-| --------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------- |
-| Metadata filter applied before ranking                          | IMPLEMENTED | `retrieval::tests::the_filter_runs_before_the_ranking`                                   |
-| Every filter dimension narrows                                  | IMPLEMENTED | `retrieval::tests::every_filter_dimension_narrows`                                       |
-| Lexical ranking with inverse document frequency                 | IMPLEMENTED | `retrieval::tests::similar_wording_outranks_recency`                                     |
-| Embedding-backed ranking                                        | PARTIAL     | `lexical_v1` in the engine, reporting `semantic: false`. Phase 2                         |
-| Generation context with human-readable evidence                 | IMPLEMENTED | `generation::tests::the_prompt_carries_the_intent_the_incoming_message_and_the_examples` |
-| Prompt assembly is a pure function                              | IMPLEMENTED | `generation::tests::the_prompt_is_a_pure_function_of_the_context`                        |
-| Measured habits become instructions, unmeasured ones are silent | IMPLEMENTED | `generation::tests::measured_habits_become_instructions_not_raw_numbers`                 |
-| Output budget derived from the user's own message length        | IMPLEMENTED | `generation::tests::the_output_budget_follows_how_long_this_person_actually_writes`      |
-| Adjustments (shorter, longer, casual, professional)             | IMPLEMENTED | `generation::tests::an_adjustment_changes_the_prompt_and_the_hash`                       |
-| Falling back to the global voice for an unknown recipient       | IMPLEMENTED | `generation::tests::writing_to_someone_new_falls_back_to_the_global_voice_and_says_so`   |
+| Item                                                            | Status      | Evidence                                                                                                                                                                      |
+| --------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Metadata filter applied before ranking                          | IMPLEMENTED | `retrieval::tests::the_filter_runs_before_the_ranking`                                                                                                                        |
+| Every filter dimension narrows                                  | IMPLEMENTED | `retrieval::tests::every_filter_dimension_narrows`                                                                                                                            |
+| Lexical ranking with inverse document frequency                 | IMPLEMENTED | `retrieval::tests::similar_wording_outranks_recency`                                                                                                                          |
+| Embedding-backed ranking                                        | PARTIAL     | `lexical_v1` in the engine, reporting `semantic: false`. Phase 2                                                                                                              |
+| Generation context with human-readable evidence                 | IMPLEMENTED | `generation::tests::the_prompt_carries_the_intent_the_incoming_message_and_the_examples`                                                                                      |
+| Prompt assembly is a pure function                              | IMPLEMENTED | `generation::tests::the_prompt_is_a_pure_function_of_the_context`                                                                                                             |
+| Measured habits become instructions, unmeasured ones are silent | IMPLEMENTED | `generation::tests::measured_habits_become_instructions_not_raw_numbers`                                                                                                      |
+| Output budget derived from the user's own message length        | IMPLEMENTED | `generation::tests::the_output_budget_follows_how_long_this_person_actually_writes`                                                                                           |
+| Adjustments (shorter, longer, casual, professional)             | IMPLEMENTED | `generation::tests::an_adjustment_changes_the_prompt_and_the_hash`                                                                                                            |
+| Falling back to the global voice for an unknown recipient       | IMPLEMENTED | `generation::tests::writing_to_someone_new_falls_back_to_the_global_voice_and_says_so`                                                                                        |
+| A reply's situation: chosen, or read from the note and said so  | IMPLEMENTED | `generation::tests::a_note_that_reads_like_a_no_uses_the_times_the_user_said_no`, `a_situation_the_user_chose_is_labelled_as_theirs`; `contracts.test.ts` "describeSituation" |
+| Nothing is inferred from the incoming message                   | IMPLEMENTED | `generation::tests::with_no_note_nothing_is_guessed_from_their_message`                                                                                                       |
+| Situation-matched examples lead retrieval                       | IMPLEMENTED | `generation::tests::a_note_that_reads_like_a_no_uses_the_times_the_user_said_no`                                                                                              |
 
 ## Providers
 

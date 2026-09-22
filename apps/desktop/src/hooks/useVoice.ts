@@ -7,6 +7,10 @@ export function useVoiceOverview() {
   return useQuery({ queryKey: qk.voice, queryFn: ipc.voiceOverview });
 }
 
+export function useSituations() {
+  return useQuery({ queryKey: qk.situations, queryFn: ipc.situations, staleTime: 60_000 });
+}
+
 export function useStartAnalysis() {
   const qc = useQueryClient();
   return useMutation({

@@ -74,6 +74,28 @@ export const ResolvedVoice = z.object({
 export type ResolvedVoice = z.infer<typeof ResolvedVoice>;
 
 /**
+ * What a reply is doing, and how Mimic knows. `chosen` is something the user
+ * said; `fromNote` is Mimic's reading of their note, and the UI must word it
+ * as a reading ("your note reads like…"), never as a fact.
+ */
+export const SituationChoice = z.object({
+  id: z.string(),
+  label: z.string(),
+  source: z.enum(["chosen", "fromNote"]),
+  cue: z.string().nullable(),
+});
+export type SituationChoice = z.infer<typeof SituationChoice>;
+
+/** How a draft's situation is described under it. */
+export function describeSituation(s: SituationChoice | null | undefined): string | null {
+  if (!s) return null;
+  const what = s.label.toLowerCase();
+  return s.source === "chosen"
+    ? `Written as ${what}, because you said so.`
+    : `Your note read like ${what}, so I wrote it the way you usually do that.`;
+}
+
+/**
  * What a draft will be based on, before one exists. `evidence` is written for
  * a person to read and is shown verbatim.
  */
@@ -84,6 +106,7 @@ export const GenerationContext = z.object({
   effective: VoiceMetrics,
   examples: z.array(RetrievedExchange),
   transcript: z.array(Message),
+  situation: SituationChoice.nullable(),
   evidence: z.array(z.string()),
 });
 export type GenerationContext = z.infer<typeof GenerationContext>;

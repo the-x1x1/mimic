@@ -2,6 +2,26 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.1] — 2026-09-22
+
+Situations. Mimic learns how you say no separately from how you say thanks.
+
+### Added
+
+- **Six situations, and your own messages filed under them.** Saying no, setting a time, apologising, saying thanks, explaining something, disagreeing — seeded by migration 0007 with ids that stay fixed. At the start of every analysis each message you sent (and only those — what other people wrote is not evidence of how you say no) is read against a table of cue phrases, and filed where the evidence clears a threshold. The rules would rather miss a message than misfile one: "sorry to hear" is not an apology, "no thanks" is not a thank-you, and "Thanks," at the bottom of every email is a sign-off rather than a situation. A message can be doing two things at once.
+- **A voice layer per situation**, innermost after the relationship layer, with the same twenty-message floor as every other layer. "How you write" shows each one — "When you say no" — with its count, or how far it is from being measurable.
+- **Replies know what they are doing.** Tell Mimic "say no, busy that week" and it reads that as saying no, leans on the times you have said no before (to this person first, then to anyone), and says so under the draft: _your note read like saying no_. Or pick the kind of reply yourself from a new, optional control under the note. The draft records which of the two it was, because only one of them is something you said. With no note, nothing is guessed from the other person's message.
+- `list_situations`, `SituationSummary`, `SituationChoice`, and two fixtures parsed by both sides: `situations.json` and `generation_context_situation.json`.
+
+### Changed
+
+- Schema v7.
+- `voice::resolve` takes the situation; `GenerationContext` carries it; a draft's `situation_id` is now the situation it was actually written for, and its context records where that came from.
+
+### Not in this release
+
+A model deciding situations. It would classify better, and it would mean sending everything you have ever written to it; `situations::classify` is the seam for a local one. Correcting a message's situation by hand: the database already keeps a hand-made call above any rule, and nothing on screen makes one yet.
+
 ## [0.9.0-alpha.4] — 2026-09-21
 
 ### Fixed

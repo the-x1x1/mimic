@@ -74,6 +74,7 @@ pub fn run() {
             commands::voice::get_voice_overview,
             commands::voice::start_voice_analysis,
             commands::voice::get_voice_profile,
+            commands::voice::list_situations,
             commands::voice::list_voice_examples,
             commands::voice::set_voice_preference,
             commands::voice::list_voice_preferences,

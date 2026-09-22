@@ -64,6 +64,55 @@ pub struct ComposeRequest {
     pub adjustment: Option<Adjustment>,
 }
 
+/// Where the situation a draft is written for came from. The two are kept
+/// apart because only one of them is something the user said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SituationSource {
+    /// The user picked it.
+    Chosen,
+    /// Mimic read it from the user's note, by rule. A reading, not a fact.
+    FromNote,
+}
+
+/// What this reply is doing, when that is known, and how it came to be known.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SituationChoice {
+    pub id: String,
+    pub label: String,
+    pub source: SituationSource,
+    /// The phrase in the note that the reading rests on, when it was read.
+    pub cue: Option<String>,
+}
+
+/// Decide what the reply is doing. A situation the user chose wins; failing
+/// that, their note is read by the same rules that file their messages; with
+/// no note there is nothing to read, and nothing is guessed from the incoming
+/// message — what they asked is not what the user has decided to answer.
+pub fn choose_situation(req: &ComposeRequest) -> Result<Option<SituationChoice>, DbError> {
+    if let Some(id) = req.situation_id.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(b) = crate::situations::builtin(id) {
+            return Ok(Some(SituationChoice {
+                id: b.id.into(),
+                label: b.label.into(),
+                source: SituationSource::Chosen,
+                cue: None,
+            }));
+        }
+        return Err(DbError::Invalid(format!("{id:?} is not a situation Mimic knows")));
+    }
+    let Some(note) = req.intent.as_deref().filter(|s| !s.trim().is_empty()) else { return Ok(None) };
+    Ok(crate::situations::classify_note(note).and_then(|c| {
+        crate::situations::builtin(&c.situation_id).map(|b| SituationChoice {
+            id: b.id.into(),
+            label: b.label.into(),
+            source: SituationSource::FromNote,
+            cue: Some(c.cue),
+        })
+    }))
+}
+
 /// Everything gathered before a model is involved.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +123,8 @@ pub struct GenerationContext {
     pub effective: VoiceMetrics,
     pub examples: Vec<RetrievedExchange>,
     pub transcript: Vec<Message>,
+    /// What the reply is doing, when that is known.
+    pub situation: Option<SituationChoice>,
     /// Plain-language statements of what this draft is based on. Shown in the
     /// Compose evidence panel verbatim, so they are written for a person.
     pub evidence: Vec<String>,
@@ -85,25 +136,44 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
         Some(id) => db.get_participant(id)?,
         None => None,
     };
-    let voice = voice::resolve(db, &channel, req.participant_id.as_deref())?;
+    let situation = choose_situation(req)?;
+    let voice = voice::resolve(db, &channel, req.participant_id.as_deref(), situation.as_ref().map(|s| s.id.as_str()))?;
     let effective = voice::effective_metrics(&voice);
 
-    let filter = RetrievalFilter {
+    let incoming = req.incoming_message.as_deref().unwrap_or_default();
+    let base = RetrievalFilter {
         participant_id: req.participant_id.clone(),
         channel: Some(channel.clone()),
-        situation_id: req.situation_id.clone(),
         ..Default::default()
     };
-    let mut examples = retrieval::retrieve(db, req.incoming_message.as_deref().unwrap_or_default(), &filter, EXAMPLES)?;
+    let mut examples: Vec<RetrievedExchange> = Vec::new();
+    if let Some(sit) = &situation {
+        // Times the user did this same thing with this person on this
+        // channel first; then, if there are hardly any, a couple from anyone,
+        // because how someone says no carries across more than what they say.
+        let done = crate::situations::builtin(&sit.id).map(|b| b.done).unwrap_or("did this");
+        let narrow = RetrievalFilter { situation_id: Some(sit.id.clone()), ..base.clone() };
+        let mut found = retrieval::retrieve(db, incoming, &narrow, EXAMPLES)?;
+        if found.len() < 2 {
+            let wide = RetrievalFilter { situation_id: Some(sit.id.clone()), ..Default::default() };
+            found.extend(retrieval::retrieve(db, incoming, &wide, 2)?);
+        }
+        for mut e in found {
+            if examples.len() < EXAMPLES && !examples.iter().any(|x| x.reply_message_id == e.reply_message_id) {
+                e.reason = format!("a time you {done}; {}", e.reason);
+                examples.push(e);
+            }
+        }
+    }
+    for e in retrieval::retrieve(db, incoming, &base, EXAMPLES)? {
+        if examples.len() < EXAMPLES && !examples.iter().any(|x| x.reply_message_id == e.reply_message_id) {
+            examples.push(e);
+        }
+    }
     // With nothing written to this person on this channel, widen rather than
     // hand the model nothing: the global voice is still the user's voice.
     if examples.is_empty() {
-        examples = retrieval::retrieve(
-            db,
-            req.incoming_message.as_deref().unwrap_or_default(),
-            &RetrievalFilter::default(),
-            EXAMPLES,
-        )?;
+        examples = retrieval::retrieve(db, incoming, &RetrievalFilter::default(), EXAMPLES)?;
     }
 
     let conversation_id = match (&req.conversation_id, &req.participant_id) {
@@ -137,6 +207,25 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
         Some(l) if l.measurable => evidence.push(format!("{} of your messages overall", l.sample_size)),
         _ => evidence.push("Not enough of your own writing has been imported to describe your style yet".into()),
     }
+    if let Some(sit) = &situation {
+        let b = crate::situations::builtin(&sit.id);
+        let done = b.map(|b| b.done).unwrap_or("did this");
+        let what = sit.label.to_lowercase();
+        let layer = voice.layers.iter().find(|l| l.layer == "situational");
+        let why = match (sit.source, &sit.cue) {
+            (SituationSource::Chosen, _) => format!("You said this reply is {what}"),
+            (SituationSource::FromNote, Some(cue)) => format!("Your note reads like {what} (\"{cue}\")"),
+            (SituationSource::FromNote, None) => format!("Your note reads like {what}"),
+        };
+        evidence.push(match layer {
+            Some(l) if l.measurable => format!("{why}, so I leaned on {} times you {done}", l.sample_size),
+            Some(l) => format!(
+                "{why}, but I've only seen you do that {} — not enough to go on, so this uses how you write generally",
+                if l.sample_size == 1 { "once".to_string() } else { format!("{} times", l.sample_size) }
+            ),
+            None => format!("{why}, but I haven't seen you do that yet, so this uses how you write generally"),
+        });
+    }
     if !examples.is_empty() {
         evidence.push(format!("{} past replies of yours, chosen by similarity", examples.len()));
     }
@@ -147,7 +236,7 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
         evidence.push("Your profile is out of date — messages have been imported since it was built".into());
     }
 
-    Ok(GenerationContext { participant, channel, voice, effective, examples, transcript, evidence })
+    Ok(GenerationContext { participant, channel, voice, effective, examples, transcript, situation, evidence })
 }
 
 /// Build the prompt. Pure: the same context always produces the same request,
@@ -203,6 +292,15 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         system.push_str(&format!(". The channel is {}.\n", ctx.channel));
     } else {
         system.push_str(&format!("\nThe channel is {}.\n", ctx.channel));
+    }
+
+    if let Some(b) = ctx.situation.as_ref().and_then(|s| crate::situations::builtin(&s.id)) {
+        system.push_str(&format!("\nIn this reply they are {}.", b.doing));
+        let measured = ctx.voice.layers.iter().any(|l| l.layer == "situational" && l.measurable);
+        if measured {
+            system.push_str(" The measurements above already reflect how they write when they do that.");
+        }
+        system.push('\n');
     }
 
     if let Some(a) = req.adjustment {
@@ -355,7 +453,7 @@ pub fn compose(db: &Db, provider: &dyn ModelProvider, req: &ComposeRequest) -> R
         participant_id: req.participant_id.clone(),
         conversation_id: req.conversation_id.clone(),
         channel: ctx.channel.clone(),
-        situation_id: req.situation_id.clone(),
+        situation_id: ctx.situation.as_ref().map(|s| s.id.clone()),
         incoming_message: req.incoming_message.clone(),
         intent: req.intent.clone(),
         generated_text: response.text.clone(),
@@ -365,6 +463,7 @@ pub fn compose(db: &Db, provider: &dyn ModelProvider, req: &ComposeRequest) -> R
             "layers": ctx.voice.layers.iter().map(|l| json!({"layer": l.layer, "sampleSize": l.sample_size, "measurable": l.measurable})).collect::<Vec<_>>(),
             "adjustment": req.adjustment,
             "examples": ctx.examples.len(),
+            "situation": ctx.situation,
         }),
         prompt_hash,
         evidence: json!({
@@ -601,5 +700,119 @@ mod tests {
         assert!(ctx.evidence.iter().any(|e| e.contains("No profile for this person yet")), "{:?}", ctx.evidence);
         assert!(!ctx.examples.is_empty(), "the global voice still has examples to offer");
         assert!(ctx.effective.measurable);
+    }
+
+    /// A corpus where the user says no to Ada twenty-five times, in their own
+    /// clipped way, and writes ordinary messages otherwise.
+    fn seeded_with_refusals() -> (Db, String) {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let source = db.list_sources().unwrap()[0].id.clone();
+        let convo = db.upsert_conversation(&source, "t2", "chat", None).unwrap();
+        db.link_conversation_participant(&convo, &ada).unwrap();
+        let mut batch = Vec::new();
+        for i in 0..25 {
+            batch.push(NewMessage {
+                conversation_id: convo.clone(),
+                source_id: source.clone(),
+                participant_id: Some(ada.clone()),
+                external_id: format!("ask{i}"),
+                direction: "other".into(),
+                channel: "chat".into(),
+                sent_at: Some(format!("2026-03-{:02}T09:00:00Z", (i % 27) + 1)),
+                sequence_index: (i * 2) as i64,
+                body: format!("want to come to the thing on friday {i}?"),
+                reply_to_external_id: None,
+                metadata: serde_json::Value::Null,
+            });
+            batch.push(NewMessage {
+                conversation_id: convo.clone(),
+                source_id: source.clone(),
+                participant_id: None,
+                external_id: format!("no{i}"),
+                direction: "self".into(),
+                channel: "chat".into(),
+                sent_at: Some(format!("2026-03-{:02}T09:05:00Z", (i % 27) + 1)),
+                sequence_index: (i * 2 + 1) as i64,
+                body: format!("ah can't make it this time, sorry {i}"),
+                reply_to_external_id: None,
+                metadata: serde_json::Value::Null,
+            });
+        }
+        db.insert_messages(&batch).unwrap();
+        db.link_replies(&convo).unwrap();
+        db.refresh_conversation_stats(&convo).unwrap();
+        voice::analyze(&db, &mut |_, _| {}).unwrap();
+        (db, ada)
+    }
+
+    #[test]
+    fn a_note_that_reads_like_a_no_uses_the_times_the_user_said_no() {
+        let (db, ada) = seeded_with_refusals();
+        let req = ComposeRequest { intent: Some("say no, busy".into()), ..request(&ada) };
+        let ctx = build_context(&db, &req).unwrap();
+        let sit = ctx.situation.clone().expect("the note reads like a no");
+        assert_eq!(sit.id, "declining");
+        assert_eq!(sit.source, SituationSource::FromNote, "read from the note, not stated by the user");
+        assert!(ctx.voice.layers.iter().any(|l| l.layer == "situational" && l.measurable));
+        assert!(ctx.examples.iter().take(2).all(|e| e.reply.starts_with("ah can't make it")), "{:?}", ctx.examples);
+        assert!(ctx.examples[0].reason.starts_with("a time you said no"));
+        assert!(
+            ctx.evidence
+                .iter()
+                .any(|e| e.starts_with("Your note reads like saying no") && e.contains("times you said no")),
+            "{:?}",
+            ctx.evidence
+        );
+        let prompt = assemble(&ctx, &req);
+        assert!(prompt.system.contains("In this reply they are saying no to something."));
+    }
+
+    #[test]
+    fn a_situation_the_user_chose_is_labelled_as_theirs() {
+        let (db, ada) = seeded_with_refusals();
+        let req = ComposeRequest { situation_id: Some("declining".into()), intent: None, ..request(&ada) };
+        let ctx = build_context(&db, &req).unwrap();
+        assert_eq!(ctx.situation.as_ref().unwrap().source, SituationSource::Chosen);
+        assert!(ctx.evidence.iter().any(|e| e.starts_with("You said this reply is saying no")), "{:?}", ctx.evidence);
+    }
+
+    #[test]
+    fn a_situation_with_too_little_behind_it_says_so_and_changes_nothing_measured() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let req = ComposeRequest { intent: Some("thank them for the intro".into()), ..request(&ada) };
+        let ctx = build_context(&db, &req).unwrap();
+        assert_eq!(ctx.situation.as_ref().unwrap().id, "thanking");
+        assert!(!ctx.voice.layers.iter().any(|l| l.layer == "situational"));
+        assert!(ctx.evidence.iter().any(|e| e.contains("haven't seen you do that yet")), "{:?}", ctx.evidence);
+        let plain = build_context(&db, &request(&ada)).unwrap();
+        assert_eq!(ctx.effective, plain.effective, "no situational layer, no change to the measurements");
+    }
+
+    #[test]
+    fn an_unknown_situation_is_refused_rather_than_ignored() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let req = ComposeRequest { situation_id: Some("gloating".into()), ..request(&ada) };
+        assert!(build_context(&db, &req).is_err());
+    }
+
+    #[test]
+    fn with_no_note_nothing_is_guessed_from_their_message() {
+        let (db, ada) = seeded_with_refusals();
+        let req = ComposeRequest {
+            intent: None,
+            incoming_message: Some("sorry, can you make it friday?".into()),
+            ..request(&ada)
+        };
+        assert!(build_context(&db, &req).unwrap().situation.is_none());
+    }
+
+    #[test]
+    fn the_draft_records_the_situation_it_was_written_for() {
+        let (db, ada) = seeded_with_refusals();
+        let provider = MockProvider::answering("ah can't this time");
+        let req = ComposeRequest { intent: Some("say no".into()), ..request(&ada) };
+        let draft = compose(&db, &provider, &req).unwrap();
+        assert_eq!(draft.situation_id.as_deref(), Some("declining"));
+        assert_eq!(draft.context["situation"]["source"], "fromNote");
     }
 }
