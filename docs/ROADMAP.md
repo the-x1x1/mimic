@@ -30,8 +30,7 @@ Make the model of the person better, not the prompt longer.
 
 ## Phase 3 — The learning loop closes
 
-- The feedback already recorded starts changing profiles, at the threshold the previous product earned: a pattern counts only when at least three observations agree on a direction and account for the majority of the magnitude.
-- Manual preferences get a first-class editor on the Voice screen rather than living only in the API.
+- Done in 0.10.0-alpha.2: sent drafts change the next draft at the threshold the previous product earned, and notes the user types are listed and can be taken back. Still open: letting a pattern adjust a measured metric rather than adding an instruction beside it, and editing a structured preference (as opposed to a note) from the screen.
 - The held-out evaluation runs over a real corpus and writes `evaluations` rows, with both baselines implemented: a generic assistant reply, and the user's most common phrasing. Until then no accuracy figure appears anywhere in the UI.
 
 ## Phase 4 — Connectors

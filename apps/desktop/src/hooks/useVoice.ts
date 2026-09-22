@@ -11,6 +11,29 @@ export function useSituations() {
   return useQuery({ queryKey: qk.situations, queryFn: ipc.situations, staleTime: 60_000 });
 }
 
+export function useLearning() {
+  return useQuery({ queryKey: qk.learning, queryFn: ipc.learning });
+}
+
+export function useAddVoiceNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ participantId, note }: { participantId: string | null; note: string }) =>
+      ipc.addVoiceNote(participantId, note),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.learning }),
+    onError: (e: Error) => toast.danger("I couldn't keep that", e.message),
+  });
+}
+
+export function useForgetVoiceNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ipc.deleteVoicePreference,
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.learning }),
+    onError: (e: Error) => toast.danger("I couldn't forget that", e.message),
+  });
+}
+
 export function useStartAnalysis() {
   const qc = useQueryClient();
   return useMutation({

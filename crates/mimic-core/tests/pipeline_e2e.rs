@@ -411,3 +411,43 @@ fn situations_are_filed_from_the_users_own_messages_and_read_from_a_note() {
     assert!(ctx.evidence.iter().any(|e| e.starts_with("Your note reads like saying no")), "{:?}", ctx.evidence);
     check_fixture("generation_context_situation.json", &serde_json::to_value(&ctx).unwrap());
 }
+
+/// The loop closed over a real import: three drafts to Ada sent without the
+/// greeting Mimic put on them, and the fourth is written without one.
+#[test]
+fn what_the_user_changes_three_times_the_next_draft_does_by_itself() {
+    let (db, source_id) = setup();
+    run_import(&db, &source_id);
+    voice::analyze(&db, &mut |_, _| {}).unwrap();
+    let ada = db
+        .list_participants(10)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.participant.display_name == "Ada Lovelace")
+        .unwrap()
+        .participant
+        .id;
+    let request = ComposeRequest {
+        participant_id: Some(ada.clone()),
+        channel: "chat".into(),
+        incoming_message: Some("can you send the deck again?".into()),
+        intent: Some("yes, tomorrow morning".into()),
+        ..Default::default()
+    };
+    let provider = MockProvider::answering("Hi Ada,\n\nyeah, sending it tomorrow morning");
+    for _ in 0..3 {
+        let d = mimic_core::generation::compose(&db, &provider, &request).unwrap();
+        db.resolve_draft(&d.id, "sent_edited", Some("yeah, sending it tomorrow morning then")).unwrap();
+    }
+    mimic_core::learning::remember_note(&db, Some(&ada), "keep it to one line").unwrap();
+
+    mimic_core::generation::compose(&db, &provider, &request).unwrap();
+    let prompt = provider.last_request().unwrap();
+    assert!(prompt.system.contains("- Do not open with a greeting."), "{}", prompt.system);
+    assert!(prompt.system.contains("- keep it to one line"));
+
+    let overview = mimic_core::learning::overview(&db).unwrap();
+    assert_eq!(overview.drafts_considered, 3);
+    assert!(overview.patterns.iter().any(|p| p.holds && p.participant_id.as_deref() == Some(ada.as_str())));
+    check_fixture("learning.json", &serde_json::to_value(&overview).unwrap());
+}

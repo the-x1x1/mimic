@@ -125,6 +125,9 @@ pub struct GenerationContext {
     pub transcript: Vec<Message>,
     /// What the reply is doing, when that is known.
     pub situation: Option<SituationChoice>,
+    /// Patterns in what the user changed in earlier drafts, that passed the
+    /// threshold and apply to this recipient.
+    pub learned: Vec<crate::learning::LearnedPattern>,
     /// Plain-language statements of what this draft is based on. Shown in the
     /// Compose evidence panel verbatim, so they are written for a person.
     pub evidence: Vec<String>,
@@ -229,14 +232,29 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
     if !examples.is_empty() {
         evidence.push(format!("{} past replies of yours, chosen by similarity", examples.len()));
     }
+    let learned = crate::learning::applicable(db, req.participant_id.as_deref())?;
+    if !learned.is_empty() {
+        evidence.push(format!(
+            "{} you've made to my drafts before: {}",
+            if learned.len() == 1 { "A change".to_string() } else { format!("{} changes", learned.len()) },
+            learned.iter().map(|p| crate::learning::short_label(p)).collect::<Vec<_>>().join(", ")
+        ));
+    }
     if !voice.overrides.is_empty() {
-        evidence.push(format!("{} preferences you set by hand", voice.overrides.len()));
+        evidence.push(format!(
+            "{} you've told me directly",
+            if voice.overrides.len() == 1 {
+                "One thing".to_string()
+            } else {
+                format!("{} things", voice.overrides.len())
+            }
+        ));
     }
     if voice.layers.iter().any(|l| l.stale) {
         evidence.push("Your profile is out of date — messages have been imported since it was built".into());
     }
 
-    Ok(GenerationContext { participant, channel, voice, effective, examples, transcript, situation, evidence })
+    Ok(GenerationContext { participant, channel, voice, effective, examples, transcript, situation, learned, evidence })
 }
 
 /// Build the prompt. Pure: the same context always produces the same request,
@@ -260,14 +278,23 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         );
     }
 
+    if !ctx.learned.is_empty() {
+        system.push_str(
+            "\nWhat they changed in earlier drafts Mimic wrote for them, which adjusts the measurements above:\n",
+        );
+        for p in &ctx.learned {
+            system.push_str("- ");
+            system.push_str(&crate::learning::instruction(p));
+            system.push('\n');
+        }
+    }
+
     if !ctx.voice.overrides.is_empty() {
-        system.push_str("\nThings they have told Mimic directly, which override the measurements above:\n");
+        system.push_str("\nThings they have told Mimic directly, which override everything above:\n");
         for (key, value) in &ctx.voice.overrides {
-            let rendered = match value {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            system.push_str(&format!("- {key}: {rendered}\n"));
+            system.push_str("- ");
+            system.push_str(&crate::learning::preference_text(key, value));
+            system.push('\n');
         }
     }
 
@@ -464,6 +491,7 @@ pub fn compose(db: &Db, provider: &dyn ModelProvider, req: &ComposeRequest) -> R
             "adjustment": req.adjustment,
             "examples": ctx.examples.len(),
             "situation": ctx.situation,
+            "learned": ctx.learned.iter().map(|p| json!({"habit": p.habit, "direction": p.direction, "agreeing": p.agreeing})).collect::<Vec<_>>(),
         }),
         prompt_hash,
         evidence: json!({
@@ -636,7 +664,7 @@ mod tests {
         let ctx = build_context(&db, &request(&ada)).unwrap();
         let prompt = assemble(&ctx, &request(&ada));
         let measured = prompt.system.find("How this person writes").unwrap();
-        let overrides = prompt.system.find("override the measurements").unwrap();
+        let overrides = prompt.system.find("override everything above").unwrap();
         assert!(overrides > measured, "overrides come last so they win");
         assert!(prompt.system.contains("signOff: — C"));
     }
@@ -814,5 +842,49 @@ mod tests {
         let draft = compose(&db, &provider, &req).unwrap();
         assert_eq!(draft.situation_id.as_deref(), Some("declining"));
         assert_eq!(draft.context["situation"]["source"], "fromNote");
+    }
+
+    fn send(db: &Db, provider: &MockProvider, req: &ComposeRequest, final_text: &str) {
+        let d = compose(db, provider, req).unwrap();
+        let outcome = if d.generated_text == final_text { "sent_unedited" } else { "sent_edited" };
+        db.resolve_draft(&d.id, outcome, Some(final_text)).unwrap();
+    }
+
+    #[test]
+    fn three_edits_the_same_way_change_the_next_prompt_and_two_do_not() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let provider = MockProvider::answering("Hi Ada,\n\nyeah, tomorrow morning works for me");
+        send(&db, &provider, &request(&ada), "yeah, tomorrow morning works for me then");
+        send(&db, &provider, &request(&ada), "yeah, tomorrow morning works for me then");
+        let ctx = build_context(&db, &request(&ada)).unwrap();
+        assert!(ctx.learned.is_empty(), "two edits are an anecdote");
+        assert!(!assemble(&ctx, &request(&ada)).system.contains("changed in earlier drafts"));
+
+        send(&db, &provider, &request(&ada), "yeah, tomorrow morning works for me then");
+        let ctx = build_context(&db, &request(&ada)).unwrap();
+        assert_eq!(ctx.learned.len(), 1);
+        assert!(
+            ctx.evidence.iter().any(|e| e.starts_with("A change you've made to my drafts before: no greeting")),
+            "{:?}",
+            ctx.evidence
+        );
+        let prompt = assemble(&ctx, &request(&ada));
+        let learned = prompt.system.find("changed in earlier drafts").unwrap();
+        assert!(prompt.system[learned..].contains("- Do not open with a greeting."));
+        assert!(learned > prompt.system.find("How this person writes").unwrap(), "after the measurements it adjusts");
+    }
+
+    #[test]
+    fn a_note_the_user_typed_reaches_the_prompt_in_their_words_and_outranks_the_rest() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        crate::learning::remember_note(&db, Some(&ada), "she hates being called Mrs Lovelace").unwrap();
+        let ctx = build_context(&db, &request(&ada)).unwrap();
+        assert!(ctx.evidence.iter().any(|e| e == "One thing you've told me directly"), "{:?}", ctx.evidence);
+        let prompt = assemble(&ctx, &request(&ada));
+        assert!(prompt.system.contains("- she hates being called Mrs Lovelace\n"), "{}", prompt.system);
+        assert!(!prompt.system.contains("said:"), "the storage key never reaches the model");
+        // Someone else is not told about Ada.
+        let other = ComposeRequest { participant_id: None, ..request(&ada) };
+        assert!(!assemble(&build_context(&db, &other).unwrap(), &other).system.contains("Lovelace"));
     }
 }

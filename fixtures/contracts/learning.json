@@ -1,0 +1,39 @@
+{
+  "draftsConsidered": 3,
+  "patterns": [
+    {
+      "habit": "greeting",
+      "direction": "less",
+      "participantId": null,
+      "participantName": null,
+      "agreeing": 3,
+      "observations": 3,
+      "share": 1.0,
+      "holds": true,
+      "meanChange": null,
+      "summary": "You took the greeting out of my drafts 3 times, so I've stopped adding one."
+    },
+    {
+      "habit": "greeting",
+      "direction": "less",
+      "participantId": "273beb70-23b2-4b8e-bafe-2bb56954375e",
+      "participantName": "Ada Lovelace",
+      "agreeing": 3,
+      "observations": 3,
+      "share": 1.0,
+      "holds": true,
+      "meanChange": null,
+      "summary": "You took the greeting out of my drafts to Ada Lovelace 3 times, so I've stopped adding one."
+    }
+  ],
+  "minAgreeing": 3,
+  "notes": [
+    {
+      "id": "58e17edb-a6fa-4ae3-93b9-f5e4d35c7299",
+      "text": "keep it to one line",
+      "participantId": "273beb70-23b2-4b8e-bafe-2bb56954375e",
+      "participantName": "Ada Lovelace",
+      "updatedAt": "2026-09-22T21:14:52.983Z"
+    }
+  ]
+}

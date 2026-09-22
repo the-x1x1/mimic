@@ -2,6 +2,26 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.2] — 2026-09-22
+
+The learning loop closes. What you change three times, I start doing myself.
+
+### Added
+
+- **Sent drafts change the next draft.** Every draft you send — edited or not — is compared with what I wrote, for five habits: the greeting, the sign-off, emoji, a full stop at the end, and length. Once three drafts moved a habit the same way, and they outweigh the drafts that went the other way or left it alone, the next draft does it without being told. Two is an anecdote, and so is three against four you left as they were.
+- **Per person.** Take the greeting off three drafts to Ada and hers stop having one; everyone else's keep theirs. And a habit you have with one person overrides the one you have with everyone.
+- **"Tell me what to do differently"** under a draft is now a field on the page rather than a system dialog, and what you type is kept as a note about whoever the draft was for. Notes reach the model in your words, last, above everything I worked out myself.
+- **"What I've learned from you"** under How you write: every pattern that holds, in a sentence ("You took the greeting out of my drafts to Ada 3 times, so I've stopped adding one"), the ones still forming and how far off they are, and every note you've given me with a way to take it back.
+- `get_learning_overview`, `add_voice_note`; `LearnedPattern`, `StatedNote`, `LearningOverview`; the `learning.json` fixture parsed by both sides. `GenerationContext` carries the patterns that applied.
+
+### Fixed
+
+- "Why I wrote it this way" asked "What should I do differently next time?" — the label said one thing and the dialog another, and what you typed was recorded against the draft and then never read by anything. It is now labelled for what it does, and what you type is used.
+
+### Not in this release
+
+A pattern changing a measured number. What you wrote and what you changed in my drafts stay separate — the first is measurement, the second is instruction — so the screen can always tell you which is which.
+
 ## [0.10.0-alpha.1] — 2026-09-22
 
 Situations. Mimic learns how you say no separately from how you say thanks.

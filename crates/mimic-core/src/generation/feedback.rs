@@ -91,7 +91,7 @@ fn words(text: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
-fn has_greeting(text: &str) -> bool {
+pub(crate) fn has_greeting(text: &str) -> bool {
     const OPENERS: [&str; 8] = ["hi", "hey", "hello", "morning", "good morning", "dear", "yo", "hiya"];
     let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or_default().trim().to_lowercase();
     let clause = first.split([',', '!', '-', ':']).next().unwrap_or(&first).trim().to_string();
@@ -99,7 +99,7 @@ fn has_greeting(text: &str) -> bool {
     (1..=2).any(|n| w.len() >= n && OPENERS.contains(&w[..n].join(" ").as_str()))
 }
 
-fn has_sign_off(text: &str) -> bool {
+pub(crate) fn has_sign_off(text: &str) -> bool {
     const CLOSERS: [&str; 8] = ["thanks", "thank you", "cheers", "best", "regards", "talk soon", "later", "sincerely"];
     let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or_default().trim().to_lowercase();
     if crate::db::word_count(&last) > 5 {
@@ -110,11 +110,11 @@ fn has_sign_off(text: &str) -> bool {
     (1..=2).any(|n| w.len() >= n && CLOSERS.contains(&w[..n].join(" ").as_str()))
 }
 
-fn has_emoji(text: &str) -> bool {
+pub(crate) fn has_emoji(text: &str) -> bool {
     text.chars().any(|c| matches!(c as u32, 0x1F300..=0x1FAFF | 0x1F000..=0x1F2FF | 0x2600..=0x27BF | 0x2B00..=0x2BFF))
 }
 
-fn ends_with_period(text: &str) -> bool {
+pub(crate) fn ends_with_period(text: &str) -> bool {
     text.trim_end().ends_with('.')
 }
 

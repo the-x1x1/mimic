@@ -201,6 +201,20 @@ impl Db {
             .optional()?)
     }
 
+    /// Every draft the user sent, with who it went to, what Mimic wrote and
+    /// what went out: `(participant_id, generated_text, final_text)`, oldest
+    /// first. Discarded and unresolved drafts are not evidence of anything.
+    pub fn sent_drafts_for_learning(&self) -> DbResult<Vec<(Option<String>, String, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT participant_id, generated_text, final_text FROM drafts
+             WHERE outcome IN ('sent_unedited','sent_edited') AND final_text IS NOT NULL
+             ORDER BY created_at, id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
     pub fn pending_feedback_count(&self) -> DbResult<i64> {
         Ok(self.conn().query_row(
             "SELECT COUNT(*) FROM draft_feedback WHERE applied_to_analysis_version IS NULL",

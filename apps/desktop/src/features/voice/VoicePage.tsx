@@ -3,7 +3,14 @@ import { useState } from "react";
 import { Badge, Button, Card, EmptyState, Metric } from "@mimic/ui";
 import { MIN_SAMPLE, describeMetric, formatDuration, formatRate } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
-import { useStartAnalysis, useVoiceExamples, useVoiceOverview } from "@/hooks/useVoice";
+import {
+  useAddVoiceNote,
+  useForgetVoiceNote,
+  useLearning,
+  useStartAnalysis,
+  useVoiceExamples,
+  useVoiceOverview,
+} from "@/hooks/useVoice";
 import { useDraftOutcomes } from "@/hooks/useCompose";
 import { countOf, formatRelative } from "@/lib/format";
 
@@ -86,6 +93,8 @@ export function VoicePage() {
         />
       </div>
 
+      <Learned />
+
       {(o?.profiles ?? []).map((p) => {
         const key = `${p.layer}|${p.scopeKey}`;
         const habits = HABITS.map((h) => describeMetric(h, p.metrics)).filter(
@@ -163,5 +172,104 @@ function Examples({ layer, scopeKey }: { layer: string; scopeKey: string }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * What the drafts you sent have taught Mimic, and what you told it outright.
+ *
+ * A pattern changes the next draft only once three drafts agree and outweigh
+ * the drafts that went the other way; until then it is listed as forming,
+ * with how far it has to go. Notes are listed with a way to take each back,
+ * because something you said once should not be permanent by accident.
+ */
+function Learned() {
+  const learning = useLearning();
+  const add = useAddVoiceNote();
+  const forget = useForgetVoiceNote();
+  const [note, setNote] = useState("");
+  const l = learning.data;
+  if (!l) return null;
+  const holding = l.patterns.filter((p) => p.holds);
+  const forming = l.patterns.filter((p) => !p.holds);
+
+  return (
+    <Card title="What I've learned from you">
+      {l.draftsConsidered === 0 ? (
+        <p className="neutral">
+          When you change one of my drafts before using it, I notice. Once you&rsquo;ve made the
+          same change {l.minAgreeing} times &mdash; and not undone it more often than that &mdash; I
+          start making it myself.
+        </p>
+      ) : (
+        <>
+          <p className="muted small">
+            From {countOf(l.draftsConsidered, "draft")} you sent, edited or not.
+          </p>
+          {holding.length > 0 ? (
+            <ul className="plain-list">
+              {holding.map((p) => (
+                <li key={`${p.habit}|${p.direction}|${p.participantId ?? ""}`}>{p.summary}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="neutral">Nothing you&rsquo;ve changed has added up to a habit yet.</p>
+          )}
+          {forming.length > 0 ? (
+            <ul className="plain-list muted small">
+              {forming.map((p) => (
+                <li key={`${p.habit}|${p.direction}|${p.participantId ?? ""}`}>{p.summary}</li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      )}
+
+      <h3 className="card-subhead">Things you&rsquo;ve told me</h3>
+      {l.notes.length === 0 ? (
+        <p className="muted small">
+          Nothing yet. What you tell me outranks anything I work out for myself.
+        </p>
+      ) : (
+        <ul className="notes">
+          {l.notes.map((n) => (
+            <li key={n.id} className="notes__item">
+              <span className="letter">{n.text}</span>
+              <span className="muted small">
+                {n.participantName ? `about ${n.participantName}` : "about everyone"}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={forget.isPending}
+                onClick={() => forget.mutate(n.id)}
+              >
+                Forget this
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="row gap-2 wrap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!note.trim()) return;
+          add.mutate({ participantId: null, note: note.trim() }, { onSuccess: () => setNote("") });
+        }}
+      >
+        <input
+          type="text"
+          aria-label="Something I should always do, or never do"
+          placeholder="I never use exclamation marks"
+          maxLength={500}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <Button type="submit" size="sm" disabled={add.isPending || !note.trim()}>
+          Remember this
+        </Button>
+      </form>
+    </Card>
   );
 }

@@ -169,6 +169,28 @@ impl Db {
             .optional()?)
     }
 
+    /// Every preference the user has set, anywhere, newest first — for the
+    /// screen that lists them so any of them can be taken back.
+    pub fn all_voice_preferences(&self) -> DbResult<Vec<VoicePreference>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, layer, scope_key, key, value_json, note, updated_at
+             FROM voice_preferences ORDER BY updated_at DESC, id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(VoicePreference {
+                id: r.get(0)?,
+                layer: r.get(1)?,
+                scope_key: r.get(2)?,
+                key: r.get(3)?,
+                value: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null),
+                note: r.get(5)?,
+                updated_at: r.get(6)?,
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
     /// Every override that applies to a scope, innermost last so a caller can
     /// fold them in order.
     pub fn voice_preferences_for(&self, scopes: &[(VoiceLayer, String)]) -> DbResult<Vec<VoicePreference>> {

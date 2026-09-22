@@ -1,4 +1,4 @@
-# Project status — 0.10.0-alpha.1
+# Project status — 0.10.0-alpha.2
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
@@ -97,13 +97,18 @@ Statuses: `IMPLEMENTED` · `PARTIAL` · `PLANNED` · `UNSUPPORTED`
 
 ## Learning loop
 
-| Item                                                   | Status      | Evidence                                                                                |
-| ------------------------------------------------------ | ----------- | --------------------------------------------------------------------------------------- |
-| Draft → sent → diff recorded                           | IMPLEMENTED | `pipeline_e2e::the_learning_loop_records_what_the_user_actually_sent`                   |
-| Diff describes length, greeting, sign-off, emoji, case | IMPLEMENTED | `generation::feedback::tests` (8 tests)                                                 |
-| Stated preferences outweigh inferred edits             | IMPLEMENTED | `repo_drafts::tests::explicit_preferences_outweigh_inferred_edits_and_replace_in_place` |
-| Measured draft outcomes; unmeasured stays null         | IMPLEMENTED | `repo_drafts::tests::outcomes_are_unmeasured_until_a_draft_is_resolved`                 |
-| Feedback changes a profile                             | PLANNED     | Phase 3. Nothing consumes `draft_feedback` yet                                          |
+| Item                                                    | Status      | Evidence                                                                                                                                                                                                                                   |
+| ------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Draft → sent → diff recorded                            | IMPLEMENTED | `pipeline_e2e::the_learning_loop_records_what_the_user_actually_sent`                                                                                                                                                                      |
+| Diff describes length, greeting, sign-off, emoji, case  | IMPLEMENTED | `generation::feedback::tests` (8 tests)                                                                                                                                                                                                    |
+| Stated preferences outweigh inferred edits              | IMPLEMENTED | `repo_drafts::tests::explicit_preferences_outweigh_inferred_edits_and_replace_in_place`                                                                                                                                                    |
+| Measured draft outcomes; unmeasured stays null          | IMPLEMENTED | `repo_drafts::tests::outcomes_are_unmeasured_until_a_draft_is_resolved`                                                                                                                                                                    |
+| Sent drafts change the next draft, at three agreeing    | IMPLEMENTED | `learning::tests::two_edits_are_an_anecdote_and_three_are_a_pattern`; `generation::tests::three_edits_the_same_way_change_the_next_prompt_and_two_do_not`; `pipeline_e2e::what_the_user_changes_three_times_the_next_draft_does_by_itself` |
+| Unedited sends count against a pattern                  | IMPLEMENTED | `learning::tests::drafts_sent_unedited_count_against_a_pattern`                                                                                                                                                                            |
+| A person's pattern stays with that person               | IMPLEMENTED | `learning::tests::a_persons_pattern_stays_with_that_person`, `a_persons_pattern_replaces_the_global_one_on_the_same_habit`                                                                                                                 |
+| Notes the user types reach the prompt in their words    | IMPLEMENTED | `generation::tests::a_note_the_user_typed_reaches_the_prompt_in_their_words_and_outranks_the_rest`; `learning::tests::a_note_is_remembered_for_the_right_person_and_can_be_taken_back`                                                     |
+| Learned patterns and notes shown, and notes forgettable | IMPLEMENTED | `contracts.test.ts` "parses what was learned from sent drafts"; `VoicePage` `Learned`                                                                                                                                                      |
+| Learning changes the measured metrics themselves        | PLANNED     | Patterns reach the prompt as instructions; `voice_profiles` are still pure measurement                                                                                                                                                     |
 
 ## Privacy
 
