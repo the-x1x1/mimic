@@ -1190,6 +1190,9 @@ mod tests {
 
     fn db_for(port: u16) -> (Db, String) {
         let db = Db::open_in_memory().unwrap();
+        // Fixed dates: the waiting window is measured against the clock, so
+        // it is opened to any age here (`repo_waiting` tests the window).
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         db.set_user_identity("C").unwrap();
         db.add_user_identifier(crate::db::IdentifierKind::Email, "c@example.com").unwrap();
         let config = ImapSourceConfig {

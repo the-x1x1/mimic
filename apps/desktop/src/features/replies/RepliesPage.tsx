@@ -9,6 +9,9 @@ import {
   SituationChoice,
   describeAutomated,
   describeLeftOut,
+  describeQuiet,
+  leftOutTotal,
+  olderThan,
   describeMailChecking,
   describeSituation,
   describeWaiting,
@@ -29,9 +32,10 @@ import { ipc } from "@/lib/ipc";
  * anything else. And a draft is a draft: using one copies it and records what
  * you sent. Nothing here sends.
  *
- * What is waiting leaves out mail that looks automated and threads the user
- * said need no reply. It always says how many it left out, and shows them when
- * asked, so leaving something out never becomes hiding it.
+ * What is waiting leaves out mail that looks automated, threads that have gone
+ * quiet (older than the window in Settings) and threads the user said need no
+ * reply. It always says how many it left out, and shows them when asked, so
+ * leaving something out never becomes hiding it.
  */
 export function RepliesPage() {
   const [showLeftOut, setShowLeftOut] = useState(false);
@@ -68,15 +72,16 @@ export function RepliesPage() {
         {data.awaiting.map((t) => (
           // Keyed by the message as well as the thread: when they write again,
           // everything this card remembered was about the old message.
-          <Thread key={`${t.conversationId}:${t.lastMessageId}`} thread={t} />
+          <Thread
+            key={`${t.conversationId}:${t.lastMessageId}`}
+            thread={t}
+            withinDays={data.waitingWithinDays}
+          />
         ))}
       </div>
 
       {showLeftOut && data.showingLeftOut && data.leftOutThreads.length > 0 ? (
-        <LeftOutList
-          threads={data.leftOutThreads}
-          total={data.leftOut.automated + data.leftOut.notNeeded}
-        />
+        <LeftOutList data={data} />
       ) : null}
 
       {data.awaiting.length > 0 ? <Footer data={data} /> : null}
@@ -112,33 +117,90 @@ function LeftOutLine({
   );
 }
 
-function LeftOutList({ threads, total }: { threads: DashboardThread[]; total: number }) {
+/**
+ * What was left out, grouped by why in the order the line above gives the
+ * reasons, each group its own newest few — the core lists them per reason so
+ * a month of newsletters cannot crowd out every thread that has gone quiet.
+ */
+export function LeftOutList({ data }: { data: Dashboard }) {
+  const threads = data.leftOutThreads;
+  const withinDays = data.waitingWithinDays;
+  const groups = [
+    {
+      key: "automated",
+      title:
+        data.leftOut.automated === 1
+          ? "This one looks automated to me"
+          : "These look automated to me",
+      items: threads.filter((t) => t.mark !== "no_reply_needed" && t.automated !== null),
+      total: data.leftOut.automated,
+    },
+    {
+      key: "quiet",
+      title: `${data.leftOut.quiet === 1 ? "Its" : "Their"} last message is ${olderThan(withinDays)}`,
+      items: threads.filter((t) => t.mark !== "no_reply_needed" && t.automated === null),
+      total: data.leftOut.quiet,
+    },
+    {
+      key: "not-needed",
+      title:
+        data.leftOut.notNeeded === 1
+          ? "You said this one doesn't need a reply"
+          : "You said these don't need a reply",
+      items: threads.filter((t) => t.mark === "no_reply_needed"),
+      total: data.leftOut.notNeeded,
+    },
+  ].filter((g) => g.items.length > 0);
   return (
     <section id="left-out" className="replies__leftout-list" aria-label="What I left out">
       <h2 className="card-subhead">What I left out</h2>
       <p className="muted small">
         As far as I can tell, none of these is waiting on you. If one is, say so and it goes back on
         the list.
-        {threads.length < total ? ` Here are the ${threads.length} most recent.` : null}
       </p>
-      {threads.map((t) => (
-        <LeftOutThread key={`${t.conversationId}:${t.lastMessageId}`} thread={t} />
+      {groups.map((g) => (
+        <section key={g.key} aria-label={g.title}>
+          <h3 className="letter-label">{g.title}</h3>
+          {g.items.length < g.total ? (
+            <p className="muted small">
+              {g.items.length === 1
+                ? `Here's the most recent of ${g.total.toLocaleString()}.`
+                : `Here are the ${g.items.length} most recent of ${g.total.toLocaleString()}.`}
+            </p>
+          ) : null}
+          {g.items.map((t) => (
+            <LeftOutThread
+              key={`${t.conversationId}:${t.lastMessageId}`}
+              thread={t}
+              withinDays={withinDays}
+            />
+          ))}
+        </section>
       ))}
     </section>
   );
 }
 
-function LeftOutThread({ thread }: { thread: DashboardThread }) {
+export function LeftOutThread({
+  thread,
+  withinDays,
+}: {
+  thread: DashboardThread;
+  withinDays: number | null;
+}) {
   const mark = useMarkThread();
   const who = thread.participant?.displayName ?? "Someone I couldn't put a name to";
   const address = thread.participant?.identifiers?.[0]?.value ?? null;
   const why =
     thread.mark === "no_reply_needed"
       ? "You said this one doesn't need a reply."
-      : `It looks automated to me: ${describeAutomated(thread.automated) ?? ""}`;
-  // Putting back a thread that also looks automated has to say it needs a
-  // reply: taking the mark away alone would leave it out for the other reason.
-  const back: ThreadMark | null = thread.automated ? "needs_reply" : null;
+      : thread.automated !== null
+        ? `It looks automated to me: ${describeAutomated(thread.automated) ?? ""}`
+        : describeQuiet(withinDays);
+  // Putting back a thread that also looks automated, or has gone quiet, has
+  // to say it needs a reply: taking the mark away alone would leave it out
+  // for the other reason.
+  const back: ThreadMark | null = thread.automated !== null || thread.quiet ? "needs_reply" : null;
   return (
     <article className="thread thread--left-out">
       <header className="thread__head">
@@ -259,7 +321,7 @@ function CaughtUp({ data }: { data: Dashboard }) {
     <section className="note">
       <h2 className="note__title">You&rsquo;re all caught up.</h2>
       <p className="note__body">
-        {data.leftOut.automated + data.leftOut.notNeeded > 0
+        {leftOutTotal(data) > 0
           ? "Everything I've read either ends with you, or is one of the threads I left out."
           : "Nothing in the mail I've read ends with someone else waiting on you."}{" "}
         {checking && data.mailChecking?.failing
@@ -312,7 +374,14 @@ function Footer({ data }: { data: Dashboard }) {
  * One person waiting. The message is shown in full rather than as a teaser:
  * deciding whether a prepared reply is right is impossible without it.
  */
-export function Thread({ thread }: { thread: DashboardThread }) {
+export function Thread({
+  thread,
+  withinDays = null,
+}: {
+  thread: DashboardThread;
+  /** The waiting window, to name when the user kept an old thread on the list. */
+  withinDays?: number | null;
+}) {
   const generate = useGenerateDraft();
   // A draft written here shows at once; one prepared in the background shows
   // when the screen next loads it; one the user has used or dropped stays
@@ -358,7 +427,9 @@ export function Thread({ thread }: { thread: DashboardThread }) {
 
       {thread.subject ? <p className="thread__subject">{thread.subject}</p> : null}
 
-      {thread.mark === "needs_reply" && thread.automated ? <KeptOnTheList thread={thread} /> : null}
+      {thread.mark === "needs_reply" && (thread.automated !== null || thread.quiet) ? (
+        <KeptOnTheList thread={thread} withinDays={withinDays} />
+      ) : null}
 
       <div className="thread__part">
         <div className="letter-label">{saidLabel}</div>
@@ -420,14 +491,24 @@ export function Thread({ thread }: { thread: DashboardThread }) {
   );
 }
 
-/** A thread the user kept on the list although it looks automated, and the way to undo that. */
-function KeptOnTheList({ thread }: { thread: DashboardThread }) {
+/**
+ * A thread the user kept on the list although it looks automated or has gone
+ * quiet, and the way to undo that.
+ */
+function KeptOnTheList({
+  thread,
+  withinDays,
+}: {
+  thread: DashboardThread;
+  withinDays: number | null;
+}) {
   const mark = useMarkThread();
   const who = thread.participant?.displayName ?? "Someone I couldn't put a name to";
   return (
     <p className="muted small">
-      You said this one needs a reply, though it looks automated to me:{" "}
-      {describeAutomated(thread.automated)}{" "}
+      {thread.automated !== null
+        ? `You said this one needs a reply, though it looks automated to me: ${describeAutomated(thread.automated) ?? ""}`
+        : `You said this one needs a reply, though its last message is ${olderThan(withinDays)}.`}{" "}
       <button
         type="button"
         className="linkish"

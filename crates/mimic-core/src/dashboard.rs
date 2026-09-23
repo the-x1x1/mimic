@@ -11,9 +11,10 @@
 //! arrives by itself, so the screen never implies mail is arriving when it is
 //! not. And a thread is "awaiting a reply" because the last message in it came
 //! from someone else and was never answered — no heuristic about urgency, no
-//! inferred intent — unless the user said it needs none, or its headers say a
-//! machine sent it (`db::repo_waiting` has the order). What was left out is
-//! counted and can be shown, so leaving something out never hides it.
+//! inferred intent — unless the user said it needs none, its headers say a
+//! machine sent it, or it is older than the waiting window the user chose
+//! (`db::repo_waiting` has the order). What was left out is counted and can
+//! be shown, so leaving something out never hides it.
 
 use serde::Serialize;
 
@@ -49,6 +50,9 @@ pub struct DashboardThread {
     pub automated: Option<String>,
     /// What the user said about this thread, while it still applies.
     pub mark: Option<ThreadMark>,
+    /// Its last message is older than the waiting window. On a thread that is
+    /// waiting, only because the user said it needs a reply.
+    pub quiet: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,19 +62,24 @@ pub struct Dashboard {
     pub conversations: i64,
     pub messages: i64,
     pub own_messages: i64,
-    /// Threads that need a reply, newest first: unanswered, and neither
-    /// automated nor marked by the user as needing none (`db::repo_waiting`).
+    /// Threads that need a reply, newest first: unanswered, and not marked by
+    /// the user as needing none, looking automated, or older than the waiting
+    /// window — unless the user said they need one (`db::repo_waiting`).
     pub awaiting: Vec<DashboardThread>,
     /// How many such threads exist in total, which may exceed `awaiting.len()`.
     pub awaiting_total: i64,
     /// Unanswered threads that are not in `awaiting`, counted by reason.
     pub left_out: LeftOut,
-    /// Those threads themselves, newest first — only when asked for, so the
-    /// home screen does not load a thousand newsletters to show a count.
+    /// Those threads themselves, up to `limit` for each reason, newest first
+    /// within it — only when asked for, so the home screen does not load a
+    /// thousand newsletters to show a count.
     pub left_out_threads: Vec<DashboardThread>,
     /// Whether `left_out_threads` was asked for. Empty and not asked for are
     /// different answers.
     pub showing_left_out: bool,
+    /// How many days back a thread can be waiting; `None` for any age. The
+    /// screen names it wherever it says a thread has gone quiet.
+    pub waiting_within_days: Option<i64>,
     /// Unresolved drafts, including any not attached to a conversation.
     pub pending_drafts: Vec<Draft>,
     pub outcomes: DraftOutcomes,
@@ -86,15 +95,21 @@ pub struct Dashboard {
 }
 
 pub fn dashboard(db: &Db, limit: usize, auto_draft: bool, show_left_out: bool) -> Result<Dashboard, DbError> {
-    let awaiting =
-        db.threads_awaiting_reply(limit)?.into_iter().map(|row| thread(db, row)).collect::<Result<Vec<_>, _>>()?;
+    // One window for the whole screen, so its lists and counts are judged
+    // against the same moment and the same setting.
+    let window = db.waiting_window()?;
+    let awaiting = db
+        .threads_awaiting_reply_in(&window, limit)?
+        .into_iter()
+        .map(|row| thread(db, row))
+        .collect::<Result<Vec<_>, _>>()?;
     let left_out_threads = if show_left_out {
-        db.threads_left_out(limit)?.into_iter().map(|row| thread(db, row)).collect::<Result<Vec<_>, _>>()?
+        db.threads_left_out_in(&window, limit)?.into_iter().map(|row| thread(db, row)).collect::<Result<Vec<_>, _>>()?
     } else {
         Vec::new()
     };
 
-    let (awaiting_total, left_out) = db.waiting_counts()?;
+    let (awaiting_total, left_out) = db.waiting_counts_in(&window)?;
     Ok(Dashboard {
         people: db.count_participants()?,
         conversations: db.count_conversations()?,
@@ -105,6 +120,7 @@ pub fn dashboard(db: &Db, limit: usize, auto_draft: bool, show_left_out: bool) -
         left_out,
         left_out_threads,
         showing_left_out: show_left_out,
+        waiting_within_days: window.within_days,
         pending_drafts: db.pending_drafts(limit)?,
         outcomes: db.measured_draft_outcomes()?,
         last_import_at: db.last_import_at()?,
@@ -136,6 +152,7 @@ fn thread(db: &Db, row: AwaitingReply) -> Result<DashboardThread, DbError> {
         has_relationship_profile,
         automated: row.automated,
         mark: row.mark,
+        quiet: row.quiet,
     })
 }
 
@@ -157,6 +174,9 @@ mod tests {
                 config: Value::Null,
             })
             .unwrap();
+        // Dated September 2026; the window is measured against the clock, so
+        // these rules are tested at any age (`repo_waiting` tests the window).
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         let convo = db.upsert_conversation(&source.id, "t1", "chat", Some("Lunch")).unwrap();
         let ada =
             db.resolve_participant("Ada", &[IdentifierInput::new(IdentifierKind::Handle, "@ada")], false).unwrap();
@@ -225,6 +245,7 @@ mod tests {
         assert!(empty.awaiting.is_empty());
         assert!(empty.pending_drafts.is_empty());
         assert_eq!(empty.last_import_at, None, "nothing has been imported yet and the screen must say so");
+        assert_eq!(empty.waiting_within_days, None, "any age, as set above");
         assert_eq!(empty.outcomes.unedited_rate, None, "unmeasured, not zero");
         assert!(!empty.auto_draft);
 
@@ -247,5 +268,24 @@ mod tests {
         assert!(!thread.has_relationship_profile, "one message is not a profile");
         assert!(thread.draft.is_none(), "no draft exists until one is generated");
         assert!(view.auto_draft);
+    }
+
+    #[test]
+    fn a_thread_that_has_gone_quiet_is_counted_and_named_with_its_window() {
+        let (db, source, convo, ada) = db_with_thread();
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &30).unwrap();
+        let mut old = msg(&source, &convo, Some(&ada), "m1", "other", 0, "any news on the lease?");
+        old.sent_at = Some(crate::ids::fmt_rfc3339(chrono::Utc::now() - chrono::Duration::days(60)));
+        db.insert_messages(&[old]).unwrap();
+        db.refresh_conversation_stats(&convo).unwrap();
+
+        let view = dashboard(&db, 10, false, true).unwrap();
+        assert!(view.awaiting.is_empty());
+        assert_eq!(view.awaiting_total, 0);
+        assert_eq!(view.left_out.quiet, 1);
+        assert_eq!(view.waiting_within_days, Some(30));
+        assert_eq!(view.left_out_threads.len(), 1);
+        assert!(view.left_out_threads[0].quiet);
+        assert_eq!(view.left_out_threads[0].participant.as_ref().unwrap().display_name, "Ada");
     }
 }

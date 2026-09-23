@@ -61,6 +61,10 @@ fn shape(v: &Value) -> Value {
 
 fn setup() -> (Db, String) {
     let db = Db::open_in_memory().unwrap();
+    // The sample export is from January 2026, and the waiting window is
+    // measured against the clock, so the pipeline runs with it open to any
+    // age; the dashboard test closes it at the end to show what goes quiet.
+    db.set_setting(mimic_core::db::WITHIN_DAYS_SETTING, &0).unwrap();
     db.set_user_identity("C").unwrap();
     db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
     // The same person, reachable two ways: the SMS thread uses a phone number.
@@ -407,7 +411,7 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     let marked = mimic_core::dashboard::dashboard(&db, 25, true, true).unwrap();
     assert_eq!(marked.awaiting.len(), waiting - 1);
     assert_eq!(marked.awaiting_total, waiting as i64 - 1);
-    assert_eq!(marked.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 1 });
+    assert_eq!(marked.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 1, quiet: 0 });
     let taken = marked.left_out_threads.iter().find(|t| t.conversation_id == off).unwrap();
     assert_eq!(taken.mark, Some(mimic_core::db::ThreadMark::NoReplyNeeded));
     assert!(taken.draft.is_some(), "no draft was resolved by it");
@@ -420,7 +424,63 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert_eq!(shown.left_out_threads[0].automated.as_deref(), Some("newsletter"));
     assert!(shown.showing_left_out);
 
-    check_fixture("dashboard.json", &serde_json::to_value(&shown).unwrap());
+    // Closing the window. The export is from January, so with a 30-day window
+    // nobody is still waiting on it: a question Carol asked then is left out
+    // as gone quiet, counted and listed rather than dropped; the thread the
+    // user says needs a reply stays, whatever its age, and says it is old; and
+    // the newsletter is counted for its headers, not its age.
+    let carol = db
+        .resolve_participant(
+            "Carol",
+            &[mimic_core::db::IdentifierInput::new(IdentifierKind::Email, "carol@example.com")],
+            false,
+        )
+        .unwrap();
+    let lease = db.upsert_conversation(&source_id, "lease-1", "email", Some("The lease")).unwrap();
+    db.link_conversation_participant(&lease, &carol).unwrap();
+    db.insert_messages(&[mimic_core::db::NewMessage {
+        conversation_id: lease.clone(),
+        source_id: source_id.clone(),
+        participant_id: Some(carol.clone()),
+        external_id: "lease-1-a".into(),
+        direction: "other".into(),
+        channel: "email".into(),
+        sent_at: Some("2026-01-08T09:00:00Z".into()),
+        sequence_index: 0,
+        body: "Any news on the lease?".into(),
+        reply_to_external_id: None,
+        metadata: Value::Null,
+    }])
+    .unwrap();
+    db.refresh_conversation_stats(&lease).unwrap();
+    db.set_setting(mimic_core::db::WITHIN_DAYS_SETTING, &30).unwrap();
+    // An attributed one-to-one thread, so the fixture keeps one of those for
+    // the zod suite's "people" wording.
+    let kept = shown.awaiting.iter().find(|t| t.participant.is_some() && !t.is_group).unwrap().clone();
+    assert!(db
+        .mark_thread(&kept.conversation_id, &kept.last_message_id, Some(mimic_core::db::ThreadMark::NeedsReply))
+        .unwrap());
+    let quiet = mimic_core::dashboard::dashboard(&db, 25, true, true).unwrap();
+    assert_eq!(quiet.waiting_within_days, Some(30));
+    // Bob's was the only thread the export left waiting.
+    assert_eq!(waiting, 1);
+    assert_eq!(quiet.awaiting.len(), 1);
+    assert_eq!(quiet.awaiting[0].conversation_id, kept.conversation_id);
+    assert!(quiet.awaiting[0].quiet, "kept by the user's word, and still said to be old");
+    assert_eq!(quiet.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 0, quiet: 1 });
+    let lease_row = quiet.left_out_threads.iter().find(|t| t.conversation_id == lease).unwrap();
+    assert!(lease_row.quiet && lease_row.automated.is_none() && lease_row.mark.is_none());
+    assert_eq!(lease_row.participant.as_ref().unwrap().display_name, "Carol");
+    assert_eq!(quiet.left_out_threads.len(), 2, "listed per reason: the newsletter, then the quiet");
+    assert_eq!(quiet.left_out_threads[0].automated.as_deref(), Some("newsletter"));
+    assert_eq!(db.threads_awaiting_reply(50).unwrap().len(), 1, "assisted drafting reads the same list");
+
+    check_fixture("dashboard.json", &serde_json::to_value(&quiet).unwrap());
+
+    // Back to any age for the rest. Carol's thread has no draft, so the draft
+    // counts below are unchanged by it.
+    db.mark_thread(&kept.conversation_id, &kept.last_message_id, None).unwrap();
+    db.set_setting(mimic_core::db::WITHIN_DAYS_SETTING, &0).unwrap();
 
     // Approving one is the ordinary draft resolution: it records what was
     // sent and takes the draft off the screen. It does not send anything.

@@ -27,6 +27,9 @@ pub fn defaults() -> Map<String, Value> {
         mimic_core::sources::imap::INTERVAL_SETTING.into(),
         json!(mimic_core::sources::imap::DEFAULT_INTERVAL_MINUTES),
     );
+    // How many days back a thread can be waiting on a reply; 0 is any age.
+    // Older ones are left out as gone quiet, counted and shown on request.
+    m.insert(mimic_core::db::WITHIN_DAYS_SETTING.into(), json!(mimic_core::db::DEFAULT_WITHIN_DAYS));
     m.insert("onboarding.completed".into(), json!(false));
     m
 }
@@ -48,20 +51,7 @@ pub async fn set_setting(
     key: String,
     value: Value,
 ) -> CommandResult<Map<String, Value>> {
-    let defaults = defaults();
-    let Some(default) = defaults.get(&key) else {
-        return Err(CommandError::new("unknown_setting", format!("{key} is not a Mimic setting")));
-    };
-    let same_kind = matches!(
-        (default, &value),
-        (Value::Bool(_), Value::Bool(_)) | (Value::Number(_), Value::Number(_)) | (Value::String(_), Value::String(_))
-    );
-    if !same_kind {
-        return Err(CommandError::new("invalid_setting", format!("{key} expects a {}", kind(default))));
-    }
-    if key == "updates.channel" && !matches!(value.as_str(), Some("stable") | Some("beta")) {
-        return Err(CommandError::new("invalid_setting", "updates.channel must be stable or beta"));
-    }
+    check(&key, &value)?;
     state.db.set_setting(&key, &value)?;
     if key == "updates.channel" {
         let mut st = state.db.update_state()?;
@@ -74,11 +64,57 @@ pub async fn set_setting(
     get_settings(state).await
 }
 
+/// Whether `value` may be stored under `key`: a known key, the same kind of
+/// value as its default, and in range where there is one.
+fn check(key: &str, value: &Value) -> CommandResult<()> {
+    let defaults = defaults();
+    let Some(default) = defaults.get(key) else {
+        return Err(CommandError::new("unknown_setting", format!("{key} is not a Mimic setting")));
+    };
+    let same_kind = matches!(
+        (default, value),
+        (Value::Bool(_), Value::Bool(_)) | (Value::Number(_), Value::Number(_)) | (Value::String(_), Value::String(_))
+    );
+    if !same_kind {
+        return Err(CommandError::new("invalid_setting", format!("{key} expects a {}", kind(default))));
+    }
+    if key == "updates.channel" && !matches!(value.as_str(), Some("stable") | Some("beta")) {
+        return Err(CommandError::new("invalid_setting", "updates.channel must be stable or beta"));
+    }
+    if key == mimic_core::db::WITHIN_DAYS_SETTING
+        && !value.as_i64().is_some_and(|d| (0..=mimic_core::db::MAX_WITHIN_DAYS).contains(&d))
+    {
+        return Err(CommandError::new(
+            "invalid_setting",
+            format!("{key} is a whole number of days up to {}, 0 for any age", mimic_core::db::MAX_WITHIN_DAYS),
+        ));
+    }
+    Ok(())
+}
+
 fn kind(v: &Value) -> &'static str {
     match v {
         Value::Bool(_) => "boolean",
         Value::Number(_) => "number",
         Value::String(_) => "string",
         _ => "value",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_waiting_window_takes_whole_days_in_range_and_nothing_else() {
+        let key = mimic_core::db::WITHIN_DAYS_SETTING;
+        assert_eq!(defaults().get(key), Some(&json!(mimic_core::db::DEFAULT_WITHIN_DAYS)));
+        for ok in [json!(0), json!(7), json!(30), json!(mimic_core::db::MAX_WITHIN_DAYS)] {
+            assert!(check(key, &ok).is_ok(), "{ok}");
+        }
+        for bad in [json!(-1), json!(7.5), json!(mimic_core::db::MAX_WITHIN_DAYS + 1), json!("30"), json!(true)] {
+            assert!(check(key, &bad).is_err(), "{bad}");
+        }
+        assert!(check("waiting.somethingElse", &json!(1)).is_err());
     }
 }

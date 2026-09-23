@@ -640,6 +640,9 @@ mod tests {
     fn removing_a_source_that_only_joined_a_thread_tidies_the_thread() {
         use crate::db::{IdentifierKind, NewMessage, NewSource};
         let db = Db::open_in_memory().unwrap();
+        // Dated March 2026; the waiting window is measured against the
+        // clock, so it is opened to any age here.
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         db.set_user_identity("C").unwrap();
         db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
         let mk = |connector: &str| {

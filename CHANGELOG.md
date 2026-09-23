@@ -2,6 +2,24 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.7] — 2026-09-22
+
+Only what is still waiting. A connected mailbox brings in years of mail, and every thread that ended with someone else looked like someone waiting on you — a question from two summers ago counted the same as one from this morning.
+
+### Added
+
+- **Threads that have gone quiet are left out of what's waiting.** When the last message in a thread is more than 30 days old, I take it that nobody is still waiting on a reply. It's a reading of the date and nothing else, so the line under the heading counts them — "I left out 1,200 threads whose last message is more than 30 days old" — and **Show them** lists them with **It needs a reply** on each. What I left out is now listed in groups by why, each with its own most recent few, so a month of newsletters can't push the rest out of sight. Anything you said needs a reply stays on the list, whatever its age, and says so. A message with no date, or one I can't read, is never counted as old.
+- **Settings → What counts as waiting** chooses the window: the last week, the last two weeks, the last 30 days, the last 90 days, or any time.
+- Replies prepared in advance skip threads that have gone quiet, the same as the list does, so a first run over a real mailbox doesn't spend its drafts answering last year's mail.
+
+### Changed
+
+- With nothing waiting but something left out, the heading says "Nothing I've read looks like it's waiting on you" rather than that nobody is — the second is a reading of headers, dates and what you said.
+
+### Not in this release
+
+The window is measured from the message's own date, so mail with a wrong date is judged by it, and a date in an unusual form — some exports write their own — is never counted as old. Nothing about a quiet thread is changed or hidden: it's counted, listed on request, and comes back by itself when someone writes again.
+
 ## [0.10.0-alpha.6] — 2026-09-22
 
 Passwords locked to your account. Your next step is typing a real mailbox's app password into Mimic, so this comes first.

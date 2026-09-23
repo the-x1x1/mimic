@@ -57,6 +57,8 @@ Done in 0.10.0-alpha.4: mail that looks automated from its headers (`sources::au
 
 Done in 0.10.0-alpha.5: senders that have only ever sent automated mail are left out of People and of every person picker, counted, and shown on request.
 
+Done in 0.10.0-alpha.7: threads whose last message is older than a window the user chooses (30 days unless changed) are left out of what is waiting as gone quiet, counted and shown on request, for the list and for assisted drafting alike.
+
 ## Phase 7 — Trusted mode
 
 Designed, deliberately not scheduled. See `docs/PRODUCT.md`. The blocker is not implementation.
