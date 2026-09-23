@@ -8,6 +8,7 @@ pub mod migrations;
 pub mod models;
 mod repo_analysis;
 mod repo_drafts;
+mod repo_evaluations;
 mod repo_identity;
 mod repo_jobs;
 mod repo_messages;
@@ -27,6 +28,7 @@ use crate::ids::now_rfc3339;
 
 pub use models::*;
 pub use repo_drafts::{DraftOutcomes, NewDraft};
+pub use repo_evaluations::{EvaluationCaseRow, EvaluationRow, Exchange, NewEvaluation, NewEvaluationCase};
 pub use repo_identity::{AddressAdded, AddressOwner, AddressPreview, Claimed, HeldAddress, Reconciled};
 pub use repo_messages::{word_count, ConversationPage, ImportCounts, NewMessage, SelfScope, ThreadMessage, Toward};
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};

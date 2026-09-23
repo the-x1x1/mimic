@@ -27,6 +27,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 8, name: "message_ids", sql: include_str!("migrations/0008_message_ids.sql") },
     Migration { version: 9, name: "thread_marks", sql: include_str!("migrations/0009_thread_marks.sql") },
     Migration { version: 10, name: "kept_apart", sql: include_str!("migrations/0010_kept_apart.sql") },
+    Migration { version: 11, name: "evaluations", sql: include_str!("migrations/0011_evaluations.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -81,7 +82,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 10);
+        assert_eq!(latest_version(), 11);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -175,9 +176,14 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10]);
+        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
         assert!(column_names(&conn, "participants").contains(&"kept_apart".to_string()));
+        let cases = column_names(&conn, "evaluation_cases");
+        for column in ["incoming_message_id", "reply_message_id", "system", "based_on_message_id"] {
+            assert!(cases.contains(&column.to_string()), "evaluation_cases has no {column}");
+        }
+        assert!(!cases.contains(&"actual_text".to_string()), "no copy of a message is kept for a case");
 
         let tables = table_names(&conn);
         for gone in [
@@ -366,7 +372,7 @@ mod tests {
             [],
         )
         .unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10]);
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11]);
         let apart: i64 =
             conn.query_row("SELECT kept_apart FROM participants WHERE id = 'p'", [], |r| r.get(0)).unwrap();
         assert_eq!(apart, 0, "only the user's own no sets it");

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use mimic_core::db::{Db, IdentifierKind, NewSource};
 use mimic_core::generation::{feedback, Adjustment, ComposeRequest};
 use mimic_core::providers::mock::MockProvider;
-use mimic_core::{import, voice};
+use mimic_core::{evaluation, import, voice};
 use serde_json::Value;
 
 fn repo_root() -> PathBuf {
@@ -506,6 +506,33 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
 
 /// Situations over a real import: what the classifier filed, the situation a
 /// note is read as, and the fixtures the zod suite parses for both.
+fn quiet(_: usize, _: usize, _: &str) {}
+
+/// The drafts measured against what the user wrote, over the sample export:
+/// every answer recorded against the messages it was measured on, none of
+/// them a draft, and the fixture the zod suite parses.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_drafts_are_measured_against_what_the_user_actually_wrote() {
+    let (db, source_id) = setup();
+    run_import(&db, &source_id);
+    voice::analyze(&db, &mut |_, _| {}).unwrap();
+
+    let provider = MockProvider::default();
+    let outcome =
+        evaluation::measure(&db, &provider, &evaluation::LocalHarness, evaluation::MAX_CASES, &quiet, &|| false)
+            .await
+            .expect("the sample export has replies in more than one conversation");
+    assert!(outcome.measured > 0 && outcome.failed == 0, "{outcome:?}");
+    assert!(db.pending_drafts(50).unwrap().is_empty(), "measuring writes no draft");
+
+    let view = evaluation::latest(&db).unwrap().expect("recorded");
+    assert_eq!(view.remaining, outcome.measured);
+    assert_eq!(view.systems[0].system, evaluation::MIMIC);
+    assert!(view.systems.iter().all(|s| s.cases == view.remaining && s.length.is_some()));
+    assert!(view.cases.iter().all(|c| !c.reply.is_empty() && !c.incoming.is_empty()));
+    check_fixture("evaluation.json", &serde_json::to_value(&view).unwrap());
+}
+
 #[test]
 fn situations_are_filed_from_the_users_own_messages_and_read_from_a_note() {
     let (db, source_id) = setup();

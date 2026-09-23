@@ -41,6 +41,46 @@ pub async fn get_learning_overview(
     Ok(mimic_core::learning::overview(&state.db)?)
 }
 
+/// The latest measurement of the drafts against what the user wrote, worked
+/// out from the cases still here. `None` before the first.
+#[tauri::command]
+pub async fn get_evaluation(
+    state: State<'_, SharedState>,
+) -> CommandResult<Option<mimic_core::evaluation::EvaluationView>> {
+    Ok(mimic_core::evaluation::latest(&state.db)?)
+}
+
+/// Measure the drafts, in the background. Refused up front when it could not
+/// run — no engine, or no model to write with — so the button doesn't queue
+/// something that is bound to fail.
+#[tauri::command]
+pub async fn start_evaluation(state: State<'_, SharedState>) -> CommandResult<mimic_core::db::Job> {
+    if !state.engine.is_ready() {
+        return Err(CommandError::new(
+            "engine_unavailable",
+            "The part of Mimic that does the measuring isn't running, so this can't be measured right now. Settings → Diagnostics can restart it.",
+        ));
+    }
+    state.active_provider()?;
+    // One at a time: a second would spend the same calls again for nothing.
+    if state.db.list_jobs(50, true)?.iter().any(|j| j.kind == mimic_core::evaluation::JOB_KIND) {
+        return Err(CommandError::new("already_running", "I'm already measuring my drafts."));
+    }
+    Ok(state.jobs.enqueue(mimic_core::evaluation::JOB_KIND, json!({}))?)
+}
+
+/// Stop a measurement of the drafts that is queued or running. Called before
+/// anything is deleted: what it has written so far may come from the mail
+/// being deleted, and a stopped run records nothing.
+pub(crate) fn stop_measuring(state: &SharedState) {
+    let Ok(active) = state.db.list_jobs(50, true) else { return };
+    for job in active.iter().filter(|j| j.kind == mimic_core::evaluation::JOB_KIND) {
+        if let Err(e) = state.jobs.cancel(&job.id) {
+            tracing::warn!(target: "jobs", error = %e, "a measurement of the drafts could not be stopped");
+        }
+    }
+}
+
 /// Remember something the user typed, about one person or everyone.
 #[tauri::command]
 pub async fn add_voice_note(

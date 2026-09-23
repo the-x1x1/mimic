@@ -20,6 +20,7 @@ import {
   DraftFeedback,
   DraftOutcomes,
   EngineStatus,
+  EvaluationView,
   EventRow,
   GenerationContext,
   InstallGuard,
@@ -211,6 +212,9 @@ export const ipc = {
   addVoiceNote: (participantId: string | null, note: string) =>
     call("add_voice_note", VoicePreference, { participantId, note }),
   startVoiceAnalysis: () => call("start_voice_analysis", Job),
+  /** The latest measurement of the drafts, from the cases still here; null before the first. */
+  evaluation: () => call("get_evaluation", EvaluationView.nullable()),
+  startEvaluation: () => call("start_evaluation", Job),
   voiceExamples: (layer: string, scopeKey: string, limit = 10) =>
     call("list_voice_examples", RepresentativeExample.array(), { layer, scopeKey, limit }),
   voicePreferences: (layer: string, scopeKey: string) =>

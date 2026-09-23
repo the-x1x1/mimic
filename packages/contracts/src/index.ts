@@ -10,6 +10,7 @@
  */
 export * from "./app";
 export * from "./compose";
+export * from "./evaluation";
 export * from "./identity";
 export * from "./jobs";
 export * from "./privacy";

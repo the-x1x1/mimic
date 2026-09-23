@@ -5,6 +5,11 @@
 //! * Every request carries a UUID `requestId`; responses are correlated.
 //! * Lines above `max_message_bytes` are rejected and the child is restarted.
 //! * Unsolicited `event` lines (`job.progress`, `log`) are broadcast.
+//! * Nothing waits on the engine without a limit. A request's timeout covers
+//!   writing it as well as the answer, so an engine that stopped reading
+//!   can't hold a caller forever; a line that could not be written whole
+//!   leaves the stream unreadable, so that engine is killed (and the app
+//!   starts another). Stopping the engine never waits on a write.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -138,14 +143,23 @@ struct WireError {
     details: Option<Value>,
 }
 
-struct Running {
-    child: Child,
-    stdin: ChildStdin,
+/// Where requests to one engine process are written. Each process has its
+/// own, with its own lock, so a write stuck on an engine that stopped reading
+/// holds up only requests to that engine, and starting the next one never
+/// waits for it.
+#[derive(Clone)]
+struct Writer {
+    generation: u64,
+    stdin: Arc<tokio::sync::Mutex<ChildStdin>>,
 }
 
 struct Inner {
     config: EngineConfig,
-    running: tokio::sync::Mutex<Option<Running>>,
+    /// The live process, with its generation. Locked only to start, reap or
+    /// kill it — never while a request is written — so stopping the engine
+    /// can't wait on a write.
+    child: tokio::sync::Mutex<Option<(u64, Child)>>,
+    writer: Mutex<Option<Writer>>,
     pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, EngineError>>>>,
     status: RwLock<EngineStatus>,
     events: broadcast::Sender<EngineEvent>,
@@ -163,7 +177,8 @@ impl EngineClient {
         Self {
             inner: Arc::new(Inner {
                 config,
-                running: tokio::sync::Mutex::new(None),
+                child: tokio::sync::Mutex::new(None),
+                writer: Mutex::new(None),
                 pending: Mutex::new(HashMap::new()),
                 status: RwLock::new(EngineStatus::default()),
                 events,
@@ -185,9 +200,47 @@ impl EngineClient {
         f(&mut s);
     }
 
+    fn writer(&self) -> Option<Writer> {
+        self.inner.writer.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// Nothing more is written to the engine of `generation`, if it is still
+    /// the live one. Writes already under way fail once it is gone.
+    fn close_writer(&self, generation: u64) {
+        let mut slot = self.inner.writer.lock().unwrap_or_else(|p| p.into_inner());
+        if slot.as_ref().is_some_and(|w| w.generation == generation) {
+            *slot = None;
+        }
+    }
+
+    /// A request to the engine of `generation` could not be written whole:
+    /// part of a line may be in the pipe, and nothing after it would be read
+    /// correctly. Kill that engine, if it is still the live one; its reader
+    /// reports the exit, and the app starts another.
+    async fn abandon(&self, generation: u64, why: &str) {
+        if self.inner.generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        tracing::error!(target: "engine", "{why}; stopping the engine, whose input can no longer be read");
+        self.kill_generation(generation).await;
+    }
+
+    /// Kill the engine of `generation`, and only that one: one started since
+    /// (by the app's restart, say) is left alone.
+    async fn kill_generation(&self, generation: u64) {
+        self.close_writer(generation);
+        let mut guard = self.inner.child.lock().await;
+        if guard.as_ref().is_some_and(|(g, _)| *g == generation) {
+            if let Some((_, mut child)) = guard.take() {
+                let _ = child.start_kill();
+                let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
+            }
+        }
+    }
+
     /// Spawn the child and wait for a successful `engine.hello`.
     pub async fn start(&self) -> Result<EngineStatus, EngineError> {
-        let mut guard = self.inner.running.lock().await;
+        let mut guard = self.inner.child.lock().await;
         if guard.is_some() {
             return Ok(self.status());
         }
@@ -226,7 +279,9 @@ impl EngineClient {
         let stderr = child.stderr.take().expect("piped stderr");
         let stdin = child.stdin.take().expect("piped stdin");
         let generation = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        *guard = Some(Running { child, stdin });
+        *guard = Some((generation, child));
+        *self.inner.writer.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(Writer { generation, stdin: Arc::new(tokio::sync::Mutex::new(stdin)) });
         drop(guard);
 
         // Reader tasks.
@@ -302,7 +357,7 @@ impl EngineClient {
             if n > max {
                 tracing::error!("engine message of {n} bytes exceeds limit {max}; restarting engine");
                 self.fail_all_pending(EngineError::Protocol(format!("message exceeded {max} bytes")));
-                self.kill_internal().await;
+                self.kill_generation(generation).await;
                 break;
             }
             let line = String::from_utf8_lossy(&buf);
@@ -349,33 +404,42 @@ impl EngineClient {
                 Err(e) => tracing::warn!("unparseable engine response: {e}"),
             }
         }
-        // Child ended (or was killed). Only react if this reader belongs to the live generation.
-        if self.inner.generation.load(Ordering::SeqCst) == generation {
-            let code = {
-                let mut guard = self.inner.running.lock().await;
-                // stdout can close before the process is fully reaped (visible on
-                // Windows), so wait briefly for the real exit status.
-                let code = match guard.as_mut() {
-                    Some(r) => tokio::time::timeout(Duration::from_secs(5), r.child.wait())
-                        .await
-                        .ok()
-                        .and_then(|res| res.ok())
-                        .and_then(|s| s.code()),
-                    None => None,
-                };
+        // Child ended (or was killed). Only react if this reader belongs to
+        // the live generation — checked again under the process lock, and
+        // the lock held until the exit is reported, so an engine started
+        // meanwhile (a restart) is neither reaped, failed nor reported here.
+        if self.inner.generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let mut guard = self.inner.child.lock().await;
+        if self.inner.generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        self.close_writer(generation);
+        // stdout can close before the process is fully reaped (visible on
+        // Windows), so wait briefly for the real exit status.
+        let code = match guard.as_mut() {
+            Some((g, child)) if *g == generation => {
+                let code = tokio::time::timeout(Duration::from_secs(5), child.wait())
+                    .await
+                    .ok()
+                    .and_then(|res| res.ok())
+                    .and_then(|s| s.code());
                 *guard = None;
                 code
-            };
-            self.fail_all_pending(EngineError::NotRunning("engine process exited".into()));
-            self.set_status(|s| {
-                if s.state != "failed" {
-                    s.state = "stopped".into();
-                }
-                s.pid = None;
-                s.last_error.get_or_insert_with(|| format!("engine exited with code {code:?}"));
-            });
-            let _ = self.inner.events.send(EngineEvent::Exited { code });
-        }
+            }
+            _ => None,
+        };
+        self.fail_all_pending(EngineError::NotRunning("engine process exited".into()));
+        self.set_status(|s| {
+            if s.state != "failed" {
+                s.state = "stopped".into();
+            }
+            s.pid = None;
+            s.last_error.get_or_insert_with(|| format!("engine exited with code {code:?}"));
+        });
+        let _ = self.inner.events.send(EngineEvent::Exited { code });
+        drop(guard);
     }
 
     fn fail_all_pending(&self, err: EngineError) {
@@ -386,17 +450,20 @@ impl EngineClient {
         }
     }
 
+    /// Kill the live engine. Never waits on a write: the process lock is not
+    /// held while writing, and a write in progress fails once it is gone.
     async fn kill_internal(&self) {
-        let mut guard = self.inner.running.lock().await;
-        if let Some(mut r) = guard.take() {
-            let _ = r.child.start_kill();
-            let _ = tokio::time::timeout(Duration::from_secs(3), r.child.wait()).await;
+        self.inner.writer.lock().unwrap_or_else(|p| p.into_inner()).take();
+        let mut guard = self.inner.child.lock().await;
+        if let Some((_, mut child)) = guard.take() {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
         }
     }
 
     /// Graceful stop: ask the engine to exit, then kill.
     pub async fn stop(&self) {
-        let _ = tokio::time::timeout(Duration::from_secs(2), self.call("engine.shutdown", json!({}))).await;
+        let _ = self.call_with_timeout("engine.shutdown", json!({}), Duration::from_secs(2)).await;
         self.kill_internal().await;
         self.set_status(|s| {
             s.state = "stopped".into();
@@ -436,12 +503,16 @@ impl EngineClient {
         self.call_with_timeout(method, params, self.inner.config.request_timeout).await
     }
 
+    /// Send a request and await its response, all within `timeout`: waiting
+    /// for another request to finish being written, writing this one, and
+    /// the answer.
     pub async fn call_with_timeout(
         &self,
         method: &str,
         params: Value,
         timeout: Duration,
     ) -> Result<Value, EngineError> {
+        let deadline = tokio::time::Instant::now() + timeout;
         let request_id = new_id();
         let line = serde_json::to_string(&json!({
             "protocolVersion": crate::ENGINE_PROTOCOL_VERSION,
@@ -452,27 +523,68 @@ impl EngineClient {
         if line.len() > self.inner.config.max_message_bytes {
             return Err(EngineError::Protocol("request exceeds max message size".into()));
         }
+        let Some(writer) = self.writer() else {
+            return Err(EngineError::NotRunning(self.status().last_error.unwrap_or_else(|| "not started".into())));
+        };
         let (tx, rx) = oneshot::channel();
         self.inner.pending.lock().unwrap_or_else(|p| p.into_inner()).insert(request_id.clone(), tx);
-        {
-            let mut guard = self.inner.running.lock().await;
-            let Some(running) = guard.as_mut() else {
-                self.inner.pending.lock().unwrap_or_else(|p| p.into_inner()).remove(&request_id);
-                return Err(EngineError::NotRunning(self.status().last_error.unwrap_or_else(|| "not started".into())));
+        let forget = || {
+            self.inner.pending.lock().unwrap_or_else(|p| p.into_inner()).remove(&request_id);
+        };
+
+        // Written by a task of its own, so a caller that gives up part-way
+        // (a timeout around this call, say) can't leave half a line in the
+        // pipe: the line is either written whole or its engine is abandoned.
+        let mut bytes = line.into_bytes();
+        bytes.push(b'\n');
+        let generation = writer.generation;
+        let this = self.clone();
+        let write = tokio::spawn(async move {
+            // Nothing is written while waiting for the lock, so running out of
+            // time here leaves the stream as it was.
+            let Ok(mut stdin) = tokio::time::timeout_at(deadline, writer.stdin.lock()).await else {
+                return Err(EngineError::Timeout(timeout));
             };
-            let mut bytes = line.into_bytes();
-            bytes.push(b'\n');
-            if let Err(e) = running.stdin.write_all(&bytes).await {
-                self.inner.pending.lock().unwrap_or_else(|p| p.into_inner()).remove(&request_id);
-                return Err(EngineError::Io(e));
+            let written = tokio::time::timeout_at(deadline, async {
+                match stdin.write_all(&bytes).await {
+                    Ok(()) => stdin.flush().await,
+                    Err(e) => Err(e),
+                }
+            })
+            .await;
+            drop(stdin);
+            match written {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => {
+                    this.abandon(writer.generation, &format!("writing to the engine failed: {e}")).await;
+                    Err(EngineError::Io(e))
+                }
+                Err(_) => {
+                    this.abandon(writer.generation, &format!("a request could not be written within {timeout:?}"))
+                        .await;
+                    Err(EngineError::Timeout(timeout))
+                }
             }
-            let _ = running.stdin.flush().await;
+        });
+        match write.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                forget();
+                return Err(e);
+            }
+            Err(e) => {
+                // The write task itself failed, perhaps part-way through a
+                // line: that engine's input can't be trusted either.
+                forget();
+                self.abandon(generation, &format!("writing a request failed: {e}")).await;
+                return Err(EngineError::NotRunning(format!("writing the request failed: {e}")));
+            }
         }
-        match tokio::time::timeout(timeout, rx).await {
+        match tokio::time::timeout_at(deadline, rx).await {
             Ok(Ok(res)) => res,
             Ok(Err(_)) => Err(EngineError::NotRunning("engine dropped the request".into())),
             Err(_) => {
-                self.inner.pending.lock().unwrap_or_else(|p| p.into_inner()).remove(&request_id);
+                forget();
                 Err(EngineError::Timeout(timeout))
             }
         }
@@ -549,4 +661,53 @@ pub fn resolve_engine_command(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The dependency-free fake engine the protocol tests use, if there is a
+    /// Python to run it with.
+    fn fake_engine() -> Option<EngineClient> {
+        let python = ["python3", "python"]
+            .into_iter()
+            .find(|p| std::process::Command::new(p).arg("--version").output().is_ok_and(|o| o.status.success()))?;
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/support/fake_engine.py");
+        let mut cfg = EngineConfig::new(EngineCommand {
+            program: PathBuf::from(python),
+            args: vec![script.to_string_lossy().to_string()],
+            cwd: None,
+            env: vec![],
+        });
+        cfg.request_timeout = Duration::from_secs(10);
+        cfg.startup_timeout = Duration::from_secs(20);
+        Some(EngineClient::new(cfg))
+    }
+
+    /// A late failure from an engine that has since been replaced — a write
+    /// to it failing after the app restarted it, say — stops nothing: only
+    /// the engine it happened to is killed, and that one is gone already.
+    #[tokio::test]
+    async fn giving_up_on_an_old_engine_leaves_the_new_one_running() {
+        let Some(engine) = fake_engine() else { return };
+        engine.start().await.unwrap();
+        let old = engine.inner.generation.load(Ordering::SeqCst);
+        engine.restart().await.unwrap();
+        let new = engine.inner.generation.load(Ordering::SeqCst);
+        assert_ne!(old, new);
+
+        engine.kill_generation(old).await;
+        engine.abandon(old, "a write to the old engine failed").await;
+        assert!(engine.is_ready());
+        assert_eq!(engine.call("echo", json!({"still": "here"})).await.unwrap()["still"], "here");
+
+        engine.kill_generation(new).await;
+        let started = std::time::Instant::now();
+        while engine.is_ready() && started.elapsed() < Duration::from_secs(10) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(!engine.is_ready(), "its own generation is killed");
+        engine.stop().await;
+    }
 }

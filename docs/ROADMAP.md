@@ -31,7 +31,7 @@ Make the model of the person better, not the prompt longer.
 ## Phase 3 — The learning loop closes
 
 - Done in 0.10.0-alpha.2: sent drafts change the next draft at the threshold the previous product earned, and notes the user types are listed and can be taken back. Still open: letting a pattern adjust a measured metric rather than adding an instruction beside it, and editing a structured preference (as opposed to a note) from the screen.
-- The held-out evaluation runs over a real corpus and writes `evaluations` rows, with both baselines implemented: a generic assistant reply, and the user's most common phrasing. Until then no accuracy figure appears anywhere in the UI.
+- Done in 0.10.0-alpha.11: the held-out evaluation runs over the user's own mail and writes `evaluations` rows, next to both baselines — a generic reply from the same model, and the reply the user sends most often — with each measure shown on its own and no headline number. Still open: running it with a note (as the user would draft), holding the held-out replies out of the voice measurements as well as the examples, and a semantic encoder behind "overall wording".
 
 ## Phase 4 — Connectors
 

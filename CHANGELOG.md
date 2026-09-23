@@ -2,6 +2,30 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.11] — 2026-09-22
+
+How close my drafts come — measured, not claimed.
+
+### Added
+
+- **How you write → How close my drafts come.** I now check my drafts against what you actually wrote. I hold back some of your conversations, answer messages in them without looking at what you wrote back, and compare each with what you sent — next to a generic reply from the same model, and the reply you send most often. Four measures are shown on their own, each with its 10th percentile: length, words in common, punctuation habits, and overall wording. Nothing adds them up into a score, because they aren't the same kind of thing, and none of them says whether a reply was a good one. **Show the replies** puts yours, mine and the generic one side by side.
+- It answers up to 12 messages people sent you, asking your writing model for two replies to each. On a local model nothing leaves your computer. On a hosted one, those messages, the messages before each, and some of your past replies with the messages they answered are sent to it and billed like any other draft — I choose the messages, not you, so the card says this before you start. Mail isn't checked until it's done.
+- For the measurement I work out how you write again without the conversations I held back, and take no examples from them, so nothing I'm shown was measured on a reply I'm trying to match. What I've learned from your edits to my drafts is left out too, since some of those edits could be to these very replies; that leans against me, and the card says so. It also says what "overall wording" is: with no text encoder installed, it compares words and letters, not meaning.
+- Nothing written while measuring is a draft. Deleting a person or a mailbox deletes the measurement — what I wrote for it came partly from other people's messages — and the deletion preview says so. Deleting someone while I'm measuring stops the measurement, and keeps nothing written from their mail. If someone turns out to be you, replies measured on their messages stop counting, and the card says how many are left.
+
+### Fixed
+
+- **Something canceled just as it was about to start no longer starts anyway.** Stopping a queued mailbox check or measurement could lose to it starting, and it then ran as if nothing had been said.
+- **A request to the part of Mimic that measures can't hold anything up.** A request's time limit now covers sending it as well as waiting for the answer, and stopping it never waits for a request to finish being sent. Before, if it got stuck and stopped reading, a large request could wait on it forever.
+
+### Changed
+
+- The database moves to schema 11. The tables for measurements, never written until now, are replaced with ones that refer to your messages rather than copying them, and go with them. A backup is written before the upgrade, as always.
+
+### Not in this release
+
+The drafts are measured with no note from you, the way replies prepared in advance are written; a draft you've said something about would likely come closer. A measurement needs replies of yours in at least two conversations.
+
 ## [0.10.0-alpha.10] — 2026-09-22
 
 The whole conversation.

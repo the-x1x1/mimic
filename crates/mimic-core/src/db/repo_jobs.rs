@@ -56,12 +56,20 @@ impl Db {
             .optional()?)
     }
 
-    pub fn mark_job_running(&self, id: &str) -> DbResult<()> {
+    /// Start a queued job. False when it is not queued any more — canceled
+    /// between the runner picking it and starting it — in which case it is
+    /// left as it is and not run: the cancel is not undone.
+    pub fn mark_job_running(&self, id: &str) -> DbResult<bool> {
         let now = now_rfc3339();
-        self.expect_row(self.conn().execute(
-            "UPDATE jobs SET status = 'running', started_at = COALESCE(started_at, ?2), heartbeat_at = ?2 WHERE id = ?1",
+        let started = self.conn().execute(
+            "UPDATE jobs SET status = 'running', started_at = COALESCE(started_at, ?2), heartbeat_at = ?2
+             WHERE id = ?1 AND status = 'queued'",
             params![id, now],
-        )?, id)
+        )?;
+        if started == 0 && self.get_job(id)?.is_none() {
+            return Err(DbError::NotFound(id.to_string()));
+        }
+        Ok(started == 1)
     }
 
     pub fn update_job_progress(&self, id: &str, current: i64, total: i64, phase: Option<&str>) -> DbResult<()> {
@@ -99,25 +107,28 @@ impl Db {
     }
 
     /// Request cancellation. Queued jobs are canceled immediately; running jobs
-    /// are flagged and the worker observes `job_cancel_requested`.
+    /// are flagged and the worker observes `job_cancel_requested`. A job that
+    /// starts between the two is caught as running, not relabelled canceled
+    /// while it still runs.
     pub fn cancel_job(&self, id: &str) -> DbResult<Job> {
         let job = self.get_job(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))?;
-        match job.status.as_str() {
-            "queued" | "paused" => {
-                self.conn().execute(
-                    "UPDATE jobs SET status = 'canceled', completed_at = ?2 WHERE id = ?1",
-                    params![id, now_rfc3339()],
-                )?;
+        if matches!(job.status.as_str(), "queued" | "paused") {
+            let canceled = self.conn().execute(
+                "UPDATE jobs SET status = 'canceled', completed_at = ?2
+                 WHERE id = ?1 AND status IN ('queued', 'paused')",
+                params![id, now_rfc3339()],
+            )?;
+            if canceled == 1 {
+                return self.get_job(id)?.ok_or_else(|| DbError::NotFound(id.to_string()));
             }
-            "running" => {
-                let mut payload = job.payload.clone();
-                if let Value::Object(map) = &mut payload {
-                    map.insert("cancelRequested".into(), Value::Bool(true));
-                }
-                self.conn()
-                    .execute("UPDATE jobs SET payload_json = ?2 WHERE id = ?1", params![id, payload.to_string()])?;
+        }
+        let job = self.get_job(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))?;
+        if job.status == "running" {
+            let mut payload = job.payload.clone();
+            if let Value::Object(map) = &mut payload {
+                map.insert("cancelRequested".into(), Value::Bool(true));
             }
-            _ => {}
+            self.conn().execute("UPDATE jobs SET payload_json = ?2 WHERE id = ?1", params![id, payload.to_string()])?;
         }
         self.get_job(id)?.ok_or_else(|| DbError::NotFound(id.to_string()))
     }
@@ -185,6 +196,19 @@ mod tests {
         assert_eq!(db.get_job(&job.id).unwrap().unwrap().status, "canceled");
         assert!(db.list_jobs(10, true).unwrap().is_empty());
         assert_eq!(db.list_jobs(10, false).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_job_canceled_after_it_was_picked_is_not_started() {
+        let db = Db::open_in_memory().unwrap();
+        let job = db.create_job("evaluate_drafts", &json!({}), false).unwrap();
+        let picked = db.next_queued_job().unwrap().unwrap();
+        // Someone deletes a person, which stops any measurement, just as the
+        // runner is about to start this one.
+        db.cancel_job(&job.id).unwrap();
+        assert!(!db.mark_job_running(&picked.id).unwrap(), "the cancel is not undone");
+        assert_eq!(db.get_job(&job.id).unwrap().unwrap().status, "canceled");
+        assert!(matches!(db.mark_job_running("no-such-job"), Err(DbError::NotFound(_))));
     }
 
     #[test]

@@ -23,6 +23,7 @@ pub mod dashboard;
 pub mod db;
 pub mod diagnostics;
 pub mod engine;
+pub mod evaluation;
 pub mod generation;
 pub mod ids;
 pub mod import;

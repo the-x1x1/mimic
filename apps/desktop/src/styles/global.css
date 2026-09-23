@@ -901,6 +901,29 @@ select option {
 .settings__body {
   max-width: 880px;
 }
+/* How close my drafts come: each measure on its own row, with what it is
+   under its name and the worst tenth under each figure. */
+.how-close th[scope="row"] {
+  font-weight: 500;
+}
+.how-close__explains,
+.how-close__tail {
+  display: block;
+  font-weight: 400;
+}
+.how-close__cases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.how-close__answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
 .table {
   width: 100%;
   border-collapse: collapse;

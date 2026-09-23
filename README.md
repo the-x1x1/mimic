@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.10.0-alpha.10`
+## Current status — `0.10.0-alpha.11`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -24,7 +24,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | What's waiting leaves out threads that have gone quiet (last message older than a window you choose, 30 days by default) | Implemented and tested; a reading of the date, counted and shown on request                                                           |
 | People leaves out senders of nothing but automated mail, and says how many                                               | Implemented and tested; the same header reading                                                                                       |
 | Sending a reply                                                                                                          | Deliberately not built                                                                                                                |
-| SQLite schema v10, migrations, backup before upgrade, resumable jobs                                                     | Implemented and tested                                                                                                                |
+| SQLite schema v11, migrations, backup before upgrade, resumable jobs                                                     | Implemented and tested                                                                                                                |
 | One Mimic at a time: a second launch brings the open one to the front, and the data folder is locked while Mimic runs    | Implemented and tested; the hand-over itself is a Tauri plugin, not exercised by a test                                               |
 | Source connectors: standard `.mbox` (now decoding MIME), Mimic's own JSON format, and IMAP                               | Implemented and tested; IMAP only against a scripted server — no real provider exercised yet                                          |
 | Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume                                | Implemented and tested                                                                                                                |
@@ -37,7 +37,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | Saved API key and mailbox passwords locked to your Windows account (DPAPI); a mailbox's password can be given again      | Implemented and tested on Windows; a program running as you, or an administrator, can still unlock them, and the Privacy card says so |
 | Deletion that actually deletes, with a preview that cannot understate it                                                 | Implemented and tested                                                                                                                |
 | Learning loop: what you change three times, the next draft does by itself; notes you type are kept                       | Implemented and tested; patterns become instructions, measurements stay measurements                                                  |
-| Held-out evaluation harness                                                                                              | Implemented; not yet run over a real corpus, so **no accuracy figure appears anywhere**                                               |
+| How close the drafts come, measured on held-back conversations next to a generic reply and your most common one          | Implemented and tested; each measure shown on its own, **no headline number**; never yet run against a real model                     |
 | First run: onboarding that reacts to finished jobs, recovers from a bad import, and can be left early                    | Implemented and tested                                                                                                                |
 | Model reachability: the badge and the draft button follow a real check                                                   | Implemented and tested                                                                                                                |
 | Windows installer and signed updater                                                                                     | Built and signed by the Release workflow with a development key; an update has never been observed installing through the updater     |
@@ -67,7 +67,7 @@ Only import communication you own or have permission to process.
 
 It will not send a message. It has no send access to anything. Every draft is a draft, and you move it into whatever app you actually use.
 
-It will not show you a number it has not measured. A rate that has not been computed says "not measured yet"; a rate of zero means zero. There is no accuracy score, because the evaluation that would earn one has not been run over real data.
+It will not show you a number it has not measured. A rate that has not been computed says "not measured yet"; a rate of zero means zero. There is no accuracy score. Mimic can measure how close its drafts come to what you actually wrote, on conversations it held back, next to a generic reply and your most common one — and it shows each measure on its own, because adding them up would make a number nobody defined.
 
 ## Development
 
@@ -93,7 +93,7 @@ MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e
 | ------------------------------------------ | -------------------------------------------------------------------------- |
 | [PRODUCT](docs/PRODUCT.md)                 | What this is, what it is not, the core interaction, the autonomy modes     |
 | [ARCHITECTURE](docs/ARCHITECTURE.md)       | The three layers, why they are split that way, the rules that shape them   |
-| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v10, and why each table is shaped the way it is                     |
+| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v11, and why each table is shaped the way it is                     |
 | [VOICE_ENGINE](docs/VOICE_ENGINE.md)       | Every metric, how layers resolve, and how accuracy would have to be earned |
 | [IMPORT_PIPELINE](docs/IMPORT_PIPELINE.md) | The connector contract, the shipped connectors, the JSON format            |
 | [MODEL_PROVIDERS](docs/MODEL_PROVIDERS.md) | The provider boundary, credentials, and a known limitation                 |

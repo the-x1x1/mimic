@@ -1,6 +1,6 @@
 # Data model
 
-SQLite, schema version 10. Timestamps are RFC 3339 UTC `TEXT`, ids are UUID v4 `TEXT`, JSON columns end in `_json`. The authoritative definition is `crates/mimic-core/src/db/migrations/0005_communication.sql` and the migrations after it: `0006_themes.sql` carries an older install's theme name over, `0007_situations.sql` seeds the situation vocabulary, `0008_message_ids.sql` indexes `messages.external_id` for joining email threads by Message-ID, `0009_thread_marks.sql` adds what the user said about a thread's reply, and `0010_kept_apart.sql` adds `participants.kept_apart`, the user's answer that a person under one of their addresses is not them. This file explains why the tables are shaped the way they are.
+SQLite, schema version 11. Timestamps are RFC 3339 UTC `TEXT`, ids are UUID v4 `TEXT`, JSON columns end in `_json`. The authoritative definition is `crates/mimic-core/src/db/migrations/0005_communication.sql` and the migrations after it: `0006_themes.sql` carries an older install's theme name over, `0007_situations.sql` seeds the situation vocabulary, `0008_message_ids.sql` indexes `messages.external_id` for joining email threads by Message-ID, `0009_thread_marks.sql` adds what the user said about a thread's reply, `0010_kept_apart.sql` adds `participants.kept_apart`, the user's answer that a person under one of their addresses is not them, and `0011_evaluations.sql` replaces the never-written evaluation tables with ones that refer to messages by id and go with them. This file explains why the tables are shaped the way they are.
 
 ## Identity
 
@@ -76,7 +76,9 @@ Keying on `analysis_version` means a new analysis version is computed alongside 
 
 ## Analysis and evaluation
 
-**`analysis_runs`** is what lets the Voice screen say "last analyzed three days ago over 4,182 of your messages" instead of showing a number with no provenance. **`evaluations`** and **`evaluation_cases`** hold held-out results; **no score shown in the UI may exist without a row here.**
+**`analysis_runs`** is what lets the Voice screen say "last analyzed three days ago over 4,182 of your messages" instead of showing a number with no provenance.
+
+**`evaluations`** is one measurement of the drafts (`crate::evaluation`): when, with which provider and model, what was asked for (`config_json`) and how the split came out (`split_json`). **`evaluation_cases`** is one answer to one held-out exchange — Mimic's, the generic reply, or the user's most common reply (`system`) — with what the engine's comparison said about it (`metrics_json`). A case names the message answered and the user's reply by id, with `ON DELETE CASCADE` on both (and on `based_on_message_id`, the message a common reply was taken from); their text is read from `messages` when shown, and a case only counts while the one is still someone else's and the other the user's. What was written for a case came from more than those two messages — the conversation before them, and examples from other conversations — so deleting any person or source deletes every evaluation (`privacy`, counted in the deletion preview). No summary is stored either: the figures shown are worked out from the cases that remain each time, so **no figure shown in the UI can outlive the rows it came from.**
 
 ## Deletion
 

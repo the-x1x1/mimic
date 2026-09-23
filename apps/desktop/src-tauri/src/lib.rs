@@ -106,6 +106,8 @@ pub fn run() {
             commands::voice::get_voice_profile,
             commands::voice::list_situations,
             commands::voice::get_learning_overview,
+            commands::voice::get_evaluation,
+            commands::voice::start_evaluation,
             commands::voice::add_voice_note,
             commands::voice::list_voice_examples,
             commands::voice::set_voice_preference,
@@ -146,9 +148,9 @@ pub fn run() {
 }
 
 /// The longest closing waits for the engine: its shutdown call is allowed two
-/// seconds and the kill after it waits on the engine's writer, which a busy
-/// engine can hold. Kept under `startup::TAKE_OVER_WITHIN`, so a Mimic started
-/// again on the way out still finds the data free in time.
+/// seconds and the kill after it up to three (a kill never waits on a request
+/// being written). A backstop kept under `startup::TAKE_OVER_WITHIN`, so a
+/// Mimic started again on the way out still finds the data free in time.
 const ENGINE_STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Closing, kept on a running event loop. When the last window closes, the

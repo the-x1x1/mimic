@@ -90,7 +90,10 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     let executor = std::sync::Arc::new(mimic_core::jobs::CompositeExecutor::new(vec![
         mimic_core::import::ImportExecutor::shared(),
         mimic_core::voice::AnalyzeExecutor::shared(),
-        mimic_core::assist::AssistExecutor::shared(resolve_provider),
+        mimic_core::assist::AssistExecutor::shared(resolve_provider.clone()),
+        // Measuring the drafts writes with the same provider, and splits and
+        // compares in the engine.
+        mimic_core::evaluation::EvaluateExecutor::shared(engine.clone(), resolve_provider),
         // A mailbox's password is read from the secret store per run, so a
         // password changed or removed since the check was queued is honoured.
         mimic_core::sources::imap::CheckMailboxExecutor::shared({
