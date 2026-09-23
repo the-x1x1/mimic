@@ -2,6 +2,30 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.6] — 2026-09-22
+
+Passwords locked to your account. Your next step is typing a real mailbox's app password into Mimic, so this comes first.
+
+### Changed
+
+- **Your API key and mailbox passwords are locked to your Windows account.** Each one is sealed with Windows' own protection for saved passwords (DPAPI) before it is written, so a copy of the file — a backup, a sync, the disk read by another account or another operating system — can't be opened without your Windows password. What it doesn't stop, and the Privacy card says so: a program you run yourself could still unlock them, and so could an administrator of this computer or, on a work account, your organisation's IT — the same as your browser's saved passwords.
+- **What you saved before is moved in the first time this version starts.** The old file held it as plain text; it is deleted once everything in it has been moved in and read back. If Windows won't seal, nothing is written unsealed: the old file stays and keeps working, the Privacy card says so, and a new key or password isn't saved until it can be locked. Deleting the old file doesn't erase it from backups or from the disk, so a key or password you saved before this version may be worth replacing.
+- **Settings says how your passwords are kept**, from what was actually done rather than what was meant to happen, and the mailbox dialog says the password will be locked to your Windows account only when this copy of Mimic locks what it saves.
+
+### Added
+
+- **New password** for a connected mailbox, under Your mail. When your provider's app password changes, or a saved one can't be unlocked on this Windows account, you can give it again without removing the mailbox and everything read from it. I log in with it first and keep it only if that works.
+
+### Fixed
+
+- **Saving a key could fail without a word.** The Save button now says when a key wasn't saved, and why.
+- A crash while saving could leave the credentials file half-written, and a half-written file was read as empty and then overwritten, losing every saved password. Saves now replace the file in one step, and a file that can't be read is set aside rather than overwritten.
+- A mailbox whose password was missing told you to remove it and connect it again, which throws away everything read from it. It now points at **New password**.
+
+### Not in this release
+
+A key or password saved on another Windows account or computer, or before your Windows password was reset by someone else, can't be unlocked here. It is kept rather than deleted, the Privacy card counts it, and the key field and **New password** take it again. Going back to 0.10.0-alpha.5 or earlier after this version has started means entering the key and mailbox passwords again, because older versions only read the old file; if you do, this version picks up what you entered there when you come back, unless it's the same key or password it moved in before. macOS, which would use the Keychain, is still unbuilt.
+
 ## [0.10.0-alpha.5] — 2026-09-22
 
 People are people. With a mailbox connected, **People** was mostly newsletters.

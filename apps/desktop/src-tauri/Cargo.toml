@@ -30,6 +30,12 @@ tracing-subscriber.workspace = true
 tracing-appender = "0.2"
 anyhow.workspace = true
 rand.workspace = true
+hex.workspace = true
+sha2.workspace = true
+
+# DPAPI, to seal saved credentials to the user's Windows account (secrets.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
 
 [dev-dependencies]
 tempfile.workspace = true

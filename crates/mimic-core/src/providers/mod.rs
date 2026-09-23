@@ -8,7 +8,8 @@
 //!   text. It never sees the database, never decides what goes in the prompt,
 //!   and never logs message content.
 //! * Credentials never touch the database. A provider is handed them by the
-//!   shell through `SecretStore`, backed by the OS credential store.
+//!   shell through `SecretStore`; on Windows the shell keeps them sealed to
+//!   the user's account (`secrets.rs` in the desktop crate).
 //! * `local: true` providers are the default and are labelled as such in the
 //!   UI, because "this leaves your computer" is the single most important
 //!   thing a user can know about a provider.
@@ -102,8 +103,9 @@ pub trait ModelProvider: Send + Sync {
     fn health(&self) -> ProviderResult<()>;
 }
 
-/// Where credentials come from. The Tauri shell implements this over the OS
-/// credential store; tests implement it over a map.
+/// Where credentials come from. The Tauri shell implements this over a file
+/// whose values are sealed to the user's Windows account; tests implement it
+/// over a map.
 pub trait SecretStore: Send + Sync {
     fn get(&self, key: &str) -> Option<String>;
 }

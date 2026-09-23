@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useDeleteSource, useSources, useStartImport } from "@/hooks/useSources";
 import { AddSourceDialog } from "./AddSourceDialog";
 import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
+import { MailboxPassword } from "./MailboxPassword";
 import { formatRelative } from "@/lib/format";
 
 const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> = {
@@ -105,6 +106,9 @@ export function SourcesPage() {
                         Remove
                       </Button>
                     </div>
+                    {s.connector === "imap" ? (
+                      <MailboxPassword sourceId={s.id} name={s.name} />
+                    ) : null}
                   </td>
                 </tr>
               ))}

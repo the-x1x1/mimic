@@ -26,7 +26,7 @@ Make the model of the person better, not the prompt longer.
 - Correcting a message's situation by hand (`classified_by = 'user'` is already respected by the rules).
 - Qualitative interpretation: the one genuinely semantic thing a model should do here, turning measured statistics into a description of register that a prompt can use.
 - Streaming analysis; incremental recomputation of only the scopes a new import touched.
-- Credentials moved to DPAPI on Windows and Keychain/Secret Service elsewhere.
+- Credentials in the Keychain / Secret Service, with macOS. (DPAPI on Windows landed in 0.10.0-alpha.6.)
 
 ## Phase 3 — The learning loop closes
 

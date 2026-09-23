@@ -1,0 +1,28 @@
+{
+  "providers": [
+    {
+      "id": "local",
+      "displayName": "Local model",
+      "local": true,
+      "model": "llama3.2:3b",
+      "description": "A model running on this computer, through Ollama, LM Studio or anything else that speaks the OpenAI API. Nothing you write leaves the machine.",
+      "requiresCredential": false
+    },
+    {
+      "id": "anthropic",
+      "displayName": "Claude",
+      "local": false,
+      "model": "claude-sonnet-4-5",
+      "description": "Anthropic's hosted models. The message you are replying to, your intent and a handful of your own past messages are sent to Anthropic for each draft.",
+      "requiresCredential": true
+    }
+  ],
+  "active": "local",
+  "configuredSecrets": ["provider.anthropic.apiKey"],
+  "credentials": {
+    "protection": "account",
+    "unsealedLeft": false,
+    "locked": ["imap:elsewhere"],
+    "unreadable": null
+  }
+}

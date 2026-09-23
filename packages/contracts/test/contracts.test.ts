@@ -28,6 +28,9 @@ import {
   describeWaiting,
   describePeopleList,
   PeopleView,
+  ProviderState,
+  describeCredentials,
+  type CredentialState,
   describeAutomated,
   describeLeftOut,
   describeMailChecking,
@@ -649,5 +652,64 @@ describe("connecting a mailbox", () => {
     expect(guessMailHost("C@Outlook.com")?.supported).toBe(false);
     expect(guessMailHost("c@formicaria.us")).toBeNull();
     expect(guessMailHost("not an address")).toBeNull();
+  });
+});
+
+describe("saved passwords are described as they are kept", () => {
+  const kept = (over: Partial<CredentialState> = {}): CredentialState => ({
+    protection: "account",
+    unsealedLeft: false,
+    locked: [],
+    unreadable: null,
+    ...over,
+  });
+
+  it("parses the provider state, with keys and never values", () => {
+    const state = ProviderState.parse(read(contractFixture("provider_state.json")));
+    expect(state.configuredSecrets).toEqual(["provider.anthropic.apiKey"]);
+    expect(["account", "file"]).toContain(state.credentials.protection);
+    // The fixture has one password saved on another account, which is the
+    // state the Settings screen has to explain.
+    expect(state.credentials.locked).toEqual(["imap:elsewhere"]);
+    expect(state.credentials.unsealedLeft).toBe(false);
+    expect(state.credentials.unreadable).toBeNull();
+    expect(JSON.stringify(state)).not.toContain("sk-");
+  });
+
+  it("says what protects them, and what does not", () => {
+    const sealed = describeCredentials(kept());
+    expect(sealed).toMatch(/locked to your Windows account/);
+    expect(sealed).toMatch(/can't be opened without your Windows password/);
+    expect(sealed).toMatch(/A program you run yourself could still unlock it/);
+    expect(sealed).toMatch(
+      /an administrator of this computer or, on a work account, your organisation's IT/,
+    );
+    expect(sealed).not.toMatch(/before this version/);
+    const plain = describeCredentials(kept({ protection: "file" }));
+    expect(plain).toMatch(/isn't locked to your account/);
+    expect(plain).not.toMatch(/locked to your Windows account/);
+  });
+
+  it("says when something unsealed is still on disk", () => {
+    expect(describeCredentials(kept({ unsealedLeft: true }))).toMatch(
+      /The file they were kept in before this version isn't locked and is still on this computer/,
+    );
+  });
+
+  it("says when the file could not be read, and what that means", () => {
+    expect(describeCredentials(kept({ unreadable: "setAside" }))).toMatch(
+      /I put it aside; any you saved before then need entering again\./,
+    );
+    expect(describeCredentials(kept({ unreadable: "leftAlone" }))).toMatch(/won't save over it/);
+  });
+
+  it("names how many need entering again, and only when some do", () => {
+    expect(describeCredentials(kept({ locked: ["imap:a"] }))).toMatch(
+      /I can't unlock one saved key or password any more: it was locked to another Windows account or computer, or before your Windows password was reset, so it needs entering again\./,
+    );
+    expect(describeCredentials(kept({ locked: ["imap:a", "provider.anthropic.apiKey"] }))).toMatch(
+      /I can't unlock 2 saved keys or passwords any more: .* they need entering again\./,
+    );
+    expect(describeCredentials(kept())).not.toMatch(/can't unlock/);
   });
 });

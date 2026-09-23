@@ -38,7 +38,7 @@ export function useDeleteSource() {
   return useMutation({
     mutationFn: ipc.deleteSource,
     onSuccess: (report) => {
-      for (const key of [qk.sources, qk.people, qk.voice, qk.system, qk.onboarding]) {
+      for (const key of [qk.sources, qk.people, qk.voice, qk.system, qk.onboarding, qk.providers]) {
         qc.invalidateQueries({ queryKey: key });
       }
       toast.info(
@@ -47,6 +47,23 @@ export function useDeleteSource() {
       );
     },
     onError: (e: Error) => toast.danger("Could not remove that source", e.message),
+  });
+}
+
+/**
+ * A connected mailbox's password, given again. Resolves once the login worked
+ * and the password is saved; a check follows by itself.
+ */
+export function useSetMailboxPassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, password }: { sourceId: string; password: string }) =>
+      ipc.setMailboxPassword(sourceId, password),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.dashboard, qk.providers]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
   });
 }
 

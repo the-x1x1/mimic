@@ -6,6 +6,7 @@ import { guessMailHost, type ImapAccount, type ImapProbe } from "@mimic/contract
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
+import { useProviderState } from "@/hooks/useCompose";
 
 /**
  * Connecting a mailbox is: say which one, log in once to look around, see
@@ -27,6 +28,9 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"checking" | "connecting" | null>(null);
   const [isMine, setIsMine] = useState(true);
+  // Said only when the store reports it: until then, and on a build that
+  // does not seal, the note claims nothing it cannot back.
+  const sealed = useProviderState().data?.credentials.protection === "account";
 
   const known = guessMailHost(username);
   const account: ImapAccount = {
@@ -56,7 +60,14 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
     setBusy("connecting");
     try {
       await ipc.connectMailbox(account, password, isMine);
-      for (const key of [qk.sources, qk.jobs, qk.onboarding, qk.dashboard, qk.settings]) {
+      for (const key of [
+        qk.sources,
+        qk.jobs,
+        qk.onboarding,
+        qk.dashboard,
+        qk.settings,
+        qk.providers,
+      ]) {
         void qc.invalidateQueries({ queryKey: key });
       }
       toast.success("Connected.", "I'm reading your mail now. Nothing in the mailbox changes.");
@@ -110,8 +121,9 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
             <p className="muted small">
               Not your usual password: your provider makes a separate one for apps like this.{" "}
               {known ? known.help : "Look for “app passwords” in your account's security settings."}{" "}
-              It stays on this computer. Accounts that only allow single sign-on (some work and
-              school accounts) can&rsquo;t be connected this way &mdash; export your mail instead.
+              It stays on this computer{sealed ? ", locked to your Windows account" : ""}. Accounts
+              that only allow single sign-on (some work and school accounts) can&rsquo;t be
+              connected this way &mdash; export your mail instead.
             </p>
           )}
 
