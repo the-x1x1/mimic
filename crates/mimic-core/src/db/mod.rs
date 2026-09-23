@@ -28,7 +28,7 @@ use crate::ids::now_rfc3339;
 pub use models::*;
 pub use repo_drafts::{DraftOutcomes, NewDraft};
 pub use repo_messages::{word_count, ImportCounts, NewMessage, SelfScope};
-pub use repo_people::IdentifierInput;
+pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
 pub use repo_sources::channel_is_known;
 pub use repo_waiting::{AwaitingReply, LeftOut, ThreadMark};
 

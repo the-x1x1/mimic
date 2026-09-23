@@ -53,7 +53,9 @@ Done: the dashboard of threads awaiting a reply; background drafting for them be
 
 Done in 0.10.0-alpha.3: with a mailbox connected, each check is followed by assisted drafting when that is on, so replies are prepared as mail arrives.
 
-Done in 0.10.0-alpha.4: mail that looks automated from its headers (`sources::automated`) is left out of what is waiting, counted, and shown on request; any thread can be marked as needing no reply until its next message, or kept on the list against the headers; assisted drafting uses the same definition (`db::repo_waiting`). Not done: nothing decides that a person's thread needs no reply — that stays the user's call; automated senders still appear under People; mail imported before 0.10.0-alpha.4 has no reading of its headers until it is imported again.
+Done in 0.10.0-alpha.4: mail that looks automated from its headers (`sources::automated`) is left out of what is waiting, counted, and shown on request; any thread can be marked as needing no reply until its next message, or kept on the list against the headers; assisted drafting uses the same definition (`db::repo_waiting`). Not done: nothing decides that a person's thread needs no reply — that stays the user's call; mail imported before 0.10.0-alpha.4 has no reading of its headers until its source is removed and added again (importing the same source again adds nothing).
+
+Done in 0.10.0-alpha.5: senders that have only ever sent automated mail are left out of People and of every person picker, counted, and shown on request.
 
 ## Phase 7 — Trusted mode
 

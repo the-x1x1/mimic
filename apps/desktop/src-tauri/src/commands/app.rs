@@ -54,7 +54,7 @@ pub async fn get_system_status(state: State<'_, SharedState>) -> CommandResult<S
             "sources": sources.len(),
             "messages": sources.iter().map(|s| s.message_count).sum::<i64>(),
             "ownMessages": state.db.count_self_messages(None, None)?,
-            "people": state.db.list_participants(5000)?.len(),
+            "people": state.db.count_people()?.people,
             "drafts": state.db.measured_draft_outcomes()?.total,
         }),
     })

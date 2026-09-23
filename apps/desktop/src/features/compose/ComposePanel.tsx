@@ -121,17 +121,28 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
               <Field label="Recipient" htmlFor="recipient">
                 <select
                   id="recipient"
+                  aria-describedby={
+                    people.data && people.data.people.length < people.data.peopleTotal
+                      ? "recipient-note"
+                      : undefined
+                  }
                   value={participantId}
                   onChange={(e) => setParticipantId(e.target.value)}
                 >
-                  <option value="">Someone Mimic has not seen</option>
-                  {(people.data ?? []).map((p) => (
+                  <option value="">Someone not on this list</option>
+                  {(people.data?.people ?? []).map((p) => (
                     <option key={p.participant.id} value={p.participant.id}>
                       {p.participant.displayName}
                       {p.participant.relationship ? ` · ${p.participant.relationship}` : ""}
                     </option>
                   ))}
                 </select>
+                {people.data && people.data.people.length < people.data.peopleTotal ? (
+                  <span id="recipient-note" className="muted small">
+                    The {people.data.people.length} people you&rsquo;ve been in touch with most
+                    recently, of {people.data.peopleTotal.toLocaleString()}.
+                  </span>
+                ) : null}
               </Field>
               <Field label="Channel" htmlFor="channel">
                 <select

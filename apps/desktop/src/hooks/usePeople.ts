@@ -40,8 +40,17 @@ export function useRemoveIdentifier() {
   });
 }
 
-export function usePeople() {
-  return useQuery({ queryKey: qk.people, queryFn: () => ipc.people() });
+/**
+ * People — not the senders that have only ever sent automated mail, unless
+ * asked for. Every place a person is picked uses this list.
+ */
+export function usePeople(showAutomated = false, enabled = true) {
+  return useQuery({
+    queryKey: [...qk.people, showAutomated],
+    // The senders' query asks for no people: the page already has them.
+    queryFn: () => (showAutomated ? ipc.people(0, 200) : ipc.people(200, null)),
+    enabled,
+  });
 }
 
 export function useSetRelationship() {

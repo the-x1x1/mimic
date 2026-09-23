@@ -233,6 +233,9 @@ pub struct ParticipantSummary {
     pub first_message_at: Option<String>,
     pub last_message_at: Option<String>,
     pub has_relationship_profile: bool,
+    /// Everything they sent looks automated from its headers: a newsletter,
+    /// a notification service, a no-reply address. A reading, not a fact.
+    pub automated: bool,
 }
 
 // ------------------------------------------------------------ conversation

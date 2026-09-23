@@ -32,6 +32,9 @@ export function useMarkThread() {
     }) => ipc.markThread(conversationId, messageId, mark),
     onSuccess: (applied) => {
       void qc.invalidateQueries({ queryKey: qk.dashboard });
+      // Keeping a sender's thread on the list makes them a person, so the
+      // People list and every person picker change with it.
+      void qc.invalidateQueries({ queryKey: qk.people });
       if (!applied) {
         toast.info(
           "Something new came in on that thread.",

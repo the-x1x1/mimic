@@ -26,6 +26,8 @@ import {
   composeReadiness,
   describeDeletion,
   describeWaiting,
+  describePeopleList,
+  PeopleView,
   describeAutomated,
   describeLeftOut,
   describeMailChecking,
@@ -389,6 +391,30 @@ describe("the home screen speaks for itself, and does not pretend to be an inbox
         awaiting: [person!, { ...person!, participant: null }],
       }),
     ).toBe("2 conversations are waiting on you.");
+  });
+});
+
+describe("people are people", () => {
+  const view = PeopleView.parse(read(contractFixture("people.json")));
+
+  it("parses the People screen, with the automated sender apart", () => {
+    expect(view.peopleTotal).toBe(2);
+    expect(view.people.every((p) => !p.automated)).toBe(true);
+    expect(view.automatedSendersTotal).toBe(1);
+    expect(view.showingAutomated).toBe(true);
+    expect(view.automatedSenders[0]!.automated).toBe(true);
+  });
+
+  it("says what it left out, and when the list is cut short", () => {
+    expect(describePeopleList({ ...view, automatedSendersTotal: 0 })).toBeNull();
+    expect(describePeopleList({ ...view, automatedSendersTotal: 1 })).toBe(
+      "I left out one sender whose mail all looks automated.",
+    );
+    const cut = describePeopleList({ ...view, peopleTotal: 250, automatedSendersTotal: 0 });
+    expect(cut).toBe(`Here are the ${view.people.length} most recent of 250.`);
+    expect(describePeopleList({ ...view, automatedSendersTotal: 40 })).toMatch(
+      /^I left out 40 senders whose mail all looks automated/,
+    );
   });
 });
 

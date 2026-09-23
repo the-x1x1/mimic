@@ -500,3 +500,50 @@ fn what_the_user_changes_three_times_the_next_draft_does_by_itself() {
     assert!(overview.patterns.iter().any(|p| p.holds && p.participant_id.as_deref() == Some(ada.as_str())));
     check_fixture("learning.json", &serde_json::to_value(&overview).unwrap());
 }
+
+/// People over a real import, plus one sender of nothing but automated mail:
+/// the people are listed, the sender is counted and listed only when asked
+/// for, and the fixture the zod suite parses for the People screen.
+#[test]
+fn people_are_listed_and_the_senders_of_automated_mail_are_counted_apart() {
+    let (db, source_id) = setup();
+    run_import(&db, &source_id);
+    let before = db.people_view(200, None).unwrap();
+    assert_eq!(before.people_total, 2, "Ada and Bob");
+    assert_eq!(before.automated_senders_total, 0);
+
+    let convo = db.upsert_conversation(&source_id, "news-1", "chat", Some("This week")).unwrap();
+    let brand = db
+        .resolve_participant(
+            "Brand Weekly",
+            &[mimic_core::db::IdentifierInput::new(IdentifierKind::Email, "news@brand.example")],
+            false,
+        )
+        .unwrap();
+    db.link_conversation_participant(&convo, &brand).unwrap();
+    db.insert_messages(&[mimic_core::db::NewMessage {
+        conversation_id: convo,
+        source_id: source_id.clone(),
+        participant_id: Some(brand),
+        external_id: "news-1-a".into(),
+        direction: "other".into(),
+        channel: "chat".into(),
+        sent_at: Some("2026-01-01T08:00:00Z".into()),
+        sequence_index: 0,
+        body: "Twenty percent off everything this week.".into(),
+        reply_to_external_id: None,
+        metadata: serde_json::json!({ "automated": "newsletter" }),
+    }])
+    .unwrap();
+
+    let view = db.people_view(200, None).unwrap();
+    assert_eq!(view.people_total, 2, "a newsletter is not a person");
+    assert_eq!(view.automated_senders_total, 1);
+    assert!(view.people.iter().all(|p| !p.automated));
+    assert!(view.automated_senders.is_empty(), "not loaded unless asked for");
+
+    let shown = db.people_view(200, Some(200)).unwrap();
+    assert_eq!(shown.automated_senders.len(), 1);
+    assert!(shown.automated_senders[0].automated);
+    check_fixture("people.json", &serde_json::to_value(&shown).unwrap());
+}

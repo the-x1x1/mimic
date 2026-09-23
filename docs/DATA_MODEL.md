@@ -20,6 +20,8 @@ Two decisions worth stating. An identifier already owned by someone else is **no
 
 `relationship` is free text the user sets and Mimic never infers. It feeds the prompt and the retrieval filter.
 
+Whether a participant is a person or a sender of automated mail is computed, not stored (`Db::list_people`): a sender is automated when they sent at least one message and every message they sent carries an `automated` reading (see "What needs a reply"), and the user has not written in any conversation they are in, has not set their `relationship`, and has not marked one of their threads `needs_reply`. One message without a reading makes them a person; so does any of those. People, and every place a person is picked, list only people; the senders are counted and listed on request.
+
 ## Conversations and messages
 
 **`conversations`** — `(source_id, external_id)` unique, so a re-import finds the same thread. **`conversation_participants`** — who is in it, which is also what distinguishes a group thread from a one-to-one and therefore what deletion depends on.
