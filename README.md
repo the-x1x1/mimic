@@ -10,30 +10,31 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.10.0-alpha.3`
+## Current status — `0.10.0-alpha.4`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
-| Area                                                                                                  | Status                                                                                            |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Desktop shell: one screen, with People / How you write / Your mail / Settings in a drawer over it     | Implemented                                                                                       |
-| The one screen: who is waiting, and use / change / drop on each reply                                 | Implemented and tested                                                                            |
-| Assisted drafting in the background, off by default                                                   | Implemented and tested; needs a connector before it is "in advance" rather than "after an import" |
-| Sending a reply                                                                                       | Deliberately not built                                                                            |
-| SQLite schema v7, migrations, backup before upgrade, resumable jobs                                   | Implemented and tested                                                                            |
-| Source connectors: standard `.mbox` (now decoding MIME), Mimic's own JSON format, and IMAP            | Implemented and tested; IMAP only against a scripted server — no real provider exercised yet      |
-| Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume             | Implemented and tested                                                                            |
-| Voice engine: deterministic metrics, global / channel / relationship layers, representative examples  | Implemented and tested                                                                            |
-| Situational voice layer: six situations, your own messages filed by rule, a layer per situation       | Implemented and tested; rules rather than a model                                                 |
-| Retrieval: metadata filter, then lexical ranking                                                      | Implemented; embedding-backed ranking is Phase 2                                                  |
-| Generation: context builder, prompt assembler, draft record                                           | Implemented and tested                                                                            |
-| Model providers: local OpenAI-compatible endpoint, Anthropic                                          | Implemented; the hosted one has never been exercised in CI                                        |
-| Deletion that actually deletes, with a preview that cannot understate it                              | Implemented and tested                                                                            |
-| Learning loop: what you change three times, the next draft does by itself; notes you type are kept    | Implemented and tested; patterns become instructions, measurements stay measurements              |
-| Held-out evaluation harness                                                                           | Implemented; not yet run over a real corpus, so **no accuracy figure appears anywhere**           |
-| First run: onboarding that reacts to finished jobs, recovers from a bad import, and can be left early | Implemented and tested                                                                            |
-| Model reachability: the badge and the draft button follow a real check                                | Implemented and tested                                                                            |
-| Windows installer and signed updater                                                                  | Plumbing unchanged from 0.5.0 and never observed producing a build end to end                     |
+| Area                                                                                                       | Status                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop shell: one screen, with People / How you write / Your mail / Settings in a drawer over it          | Implemented                                                                                                                       |
+| The one screen: who is waiting, and use / change / drop on each reply                                      | Implemented and tested                                                                                                            |
+| Assisted drafting in the background, off by default                                                        | Implemented and tested; after an import or a mailbox check, and only for threads that need a reply                                |
+| What's waiting leaves out newsletters, notifications and threads you said need no reply, and says how many | Implemented and tested; decided from headers only, and your word outranks them                                                    |
+| Sending a reply                                                                                            | Deliberately not built                                                                                                            |
+| SQLite schema v9, migrations, backup before upgrade, resumable jobs                                        | Implemented and tested                                                                                                            |
+| Source connectors: standard `.mbox` (now decoding MIME), Mimic's own JSON format, and IMAP                 | Implemented and tested; IMAP only against a scripted server — no real provider exercised yet                                      |
+| Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume                  | Implemented and tested                                                                                                            |
+| Voice engine: deterministic metrics, global / channel / relationship layers, representative examples       | Implemented and tested                                                                                                            |
+| Situational voice layer: six situations, your own messages filed by rule, a layer per situation            | Implemented and tested; rules rather than a model                                                                                 |
+| Retrieval: metadata filter, then lexical ranking                                                           | Implemented; embedding-backed ranking is Phase 2                                                                                  |
+| Generation: context builder, prompt assembler, draft record                                                | Implemented and tested                                                                                                            |
+| Model providers: local OpenAI-compatible endpoint, Anthropic                                               | Implemented; the hosted one has never been exercised in CI                                                                        |
+| Deletion that actually deletes, with a preview that cannot understate it                                   | Implemented and tested                                                                                                            |
+| Learning loop: what you change three times, the next draft does by itself; notes you type are kept         | Implemented and tested; patterns become instructions, measurements stay measurements                                              |
+| Held-out evaluation harness                                                                                | Implemented; not yet run over a real corpus, so **no accuracy figure appears anywhere**                                           |
+| First run: onboarding that reacts to finished jobs, recovers from a bad import, and can be left early      | Implemented and tested                                                                                                            |
+| Model reachability: the badge and the draft button follow a real check                                     | Implemented and tested                                                                                                            |
+| Windows installer and signed updater                                                                       | Built and signed by the Release workflow with a development key; an update has never been observed installing through the updater |
 
 The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). If this README and that file disagree, PROJECT_STATUS wins, and the source code wins over both.
 
@@ -86,7 +87,7 @@ MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e
 | ------------------------------------------ | -------------------------------------------------------------------------- |
 | [PRODUCT](docs/PRODUCT.md)                 | What this is, what it is not, the core interaction, the autonomy modes     |
 | [ARCHITECTURE](docs/ARCHITECTURE.md)       | The three layers, why they are split that way, the rules that shape them   |
-| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v6, and why each table is shaped the way it is                      |
+| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v9, and why each table is shaped the way it is                      |
 | [VOICE_ENGINE](docs/VOICE_ENGINE.md)       | Every metric, how layers resolve, and how accuracy would have to be earned |
 | [IMPORT_PIPELINE](docs/IMPORT_PIPELINE.md) | The connector contract, the shipped connectors, the JSON format            |
 | [MODEL_PROVIDERS](docs/MODEL_PROVIDERS.md) | The provider boundary, credentials, and a known limitation                 |

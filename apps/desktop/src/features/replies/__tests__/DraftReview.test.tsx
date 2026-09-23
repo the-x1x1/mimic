@@ -22,6 +22,7 @@ const draft = (over: Partial<Draft> = {}): Draft => ({
   createdAt: "2026-09-20T10:00:00Z",
   resolvedAt: null,
   outcome: null,
+  incomingMessageId: "m2",
   ...over,
 });
 

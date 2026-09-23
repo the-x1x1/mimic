@@ -1,10 +1,46 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ThreadMark } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
 
-export function useDashboard(limit = 25) {
-  return useQuery({ queryKey: [...qk.dashboard, limit], queryFn: () => ipc.dashboard(limit) });
+export function useDashboard(limit = 25, showLeftOut = false) {
+  return useQuery({
+    queryKey: [...qk.dashboard, limit, showLeftOut],
+    queryFn: () => ipc.dashboard(limit, showLeftOut),
+    // Switching to the left-out view keeps the list on screen while it loads
+    // rather than flashing the "looking" line.
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * Say whether a thread needs a reply. The mark is tied to the message that is
+ * last in the thread now, so it lapses by itself when they write again.
+ */
+export function useMarkThread() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      conversationId,
+      messageId,
+      mark,
+    }: {
+      conversationId: string;
+      messageId: string;
+      mark: ThreadMark | null;
+    }) => ipc.markThread(conversationId, messageId, mark),
+    onSuccess: (applied) => {
+      void qc.invalidateQueries({ queryKey: qk.dashboard });
+      if (!applied) {
+        toast.info(
+          "Something new came in on that thread.",
+          "What you said was about the message before it, so the thread goes wherever the new one puts it.",
+        );
+      }
+    },
+    onError: (e: Error) => toast.danger("I couldn't change that", e.message),
+  });
 }
 
 /**

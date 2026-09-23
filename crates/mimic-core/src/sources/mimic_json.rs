@@ -174,7 +174,18 @@ impl CommunicationSource for MimicJsonSource {
                     author: m.from.to_ref(),
                     sent_at: m.sent_at.clone().filter(|s| !s.trim().is_empty()),
                     body,
-                    metadata: if m.metadata.is_object() { m.metadata.clone() } else { Value::Null },
+                    metadata: match &m.metadata {
+                        Value::Object(map) => {
+                            let mut map = map.clone();
+                            // `automated` is Mimic's reading of email headers,
+                            // and a file in this format has none to read. Left
+                            // in, it would let a file claim a person was a
+                            // machine, in words that say the headers did.
+                            map.remove("automated");
+                            Value::Object(map)
+                        }
+                        _ => Value::Null,
+                    },
                 });
             }
             if messages.is_empty() {
@@ -229,6 +240,26 @@ mod tests {
         assert_eq!(got[0].messages[1].body, "yeah tuesday's good", "quoted text is stripped on the way in");
         assert_eq!(got[0].messages[0].author.identifiers[0].value, "@ada");
         assert!(!got[1].messages[0].author.is_usable(), "a name with no address cannot be matched");
+    }
+
+    #[test]
+    fn a_file_cannot_say_a_message_was_sent_by_a_machine() {
+        let (_d, path) = write(
+            r#"{"channel": "email", "conversations": [{"id": "t", "messages": [
+                {"from": {"name": "Ada", "email": "ada@example.com"}, "body": "hello",
+                 "metadata": {"automated": true, "subject": "hi"}}
+            ]}]}"#,
+        );
+        let mut got = Vec::new();
+        MimicJsonSource
+            .import(&path, &mut |c| {
+                got.push(c);
+                Ok(())
+            })
+            .unwrap();
+        let meta = &got[0].messages[0].metadata;
+        assert!(meta.get("automated").is_none());
+        assert_eq!(meta["subject"], "hi", "everything else in it is kept as it was");
     }
 
     #[test]

@@ -31,18 +31,6 @@ pub struct NewMessage {
     pub metadata: Value,
 }
 
-/// A conversation waiting on the user, with the message it is waiting on.
-#[derive(Debug, Clone)]
-pub struct AwaitingReply {
-    pub conversation: Conversation,
-    pub last_message_id: String,
-    pub last_message: String,
-    pub last_message_at: Option<String>,
-    /// Who sent it. `None` when the import could not attribute the message to
-    /// a participant; the thread still shows, unattributed.
-    pub participant_id: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ImportCounts {
     pub inserted: usize,
@@ -91,9 +79,9 @@ const CONV_COLS: &str =
     "id, source_id, external_id, channel, subject, is_group, started_at, last_message_at, message_count, created_at";
 /// The same columns qualified, for the queries that join
 /// `conversation_participants` — which also has a `message_count`.
-const CONV_COLS_Q: &str = "c.id, c.source_id, c.external_id, c.channel, c.subject, c.is_group, c.started_at, c.last_message_at, c.message_count, c.created_at";
+pub(super) const CONV_COLS_Q: &str = "c.id, c.source_id, c.external_id, c.channel, c.subject, c.is_group, c.started_at, c.last_message_at, c.message_count, c.created_at";
 
-fn map_conv(r: &Row<'_>) -> rusqlite::Result<Conversation> {
+pub(super) fn map_conv(r: &Row<'_>) -> rusqlite::Result<Conversation> {
     Ok(Conversation {
         id: r.get(0)?,
         source_id: r.get(1)?,
@@ -437,79 +425,12 @@ impl Db {
             .optional()?)
     }
 
-    /// Conversations whose newest message came from someone else and was never
-    /// answered, newest first.
-    ///
-    /// "Awaiting a reply" is decided by the messages themselves, not by a flag
-    /// anyone set: the last message in the conversation has `direction =
-    /// 'other'`. A conversation the user ended, a conversation of only their
-    /// own messages, and one whose last inbound message they already answered
-    /// are all excluded, because in each the last row is not inbound. Messages
-    /// whose direction could not be established (`unknown`) never make a
-    /// thread look answered or unanswered — they are ignored, since guessing
-    /// either way would put a thread in front of the user on no evidence.
-    pub fn threads_awaiting_reply(&self, limit: usize) -> DbResult<Vec<AwaitingReply>> {
-        let conn = self.conn();
-        let sql = format!(
-            "WITH last AS (
-               SELECT m.conversation_id,
-                      m.id            AS message_id,
-                      m.direction     AS direction,
-                      m.body          AS body,
-                      m.sent_at       AS sent_at,
-                      m.participant_id AS participant_id,
-                      ROW_NUMBER() OVER (
-                        PARTITION BY m.conversation_id
-                        ORDER BY m.sequence_index DESC, m.id DESC
-                      ) AS rn
-               FROM messages m
-               WHERE m.direction IN ('self','other')
-             )
-             SELECT {CONV_COLS_Q}, last.message_id, last.body, last.sent_at, last.participant_id
-             FROM last
-             JOIN conversations c ON c.id = last.conversation_id
-             WHERE last.rn = 1 AND last.direction = 'other'
-             ORDER BY last.sent_at DESC NULLS LAST, c.id
-             LIMIT {limit}"
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map([], |r| {
-            Ok(AwaitingReply {
-                conversation: map_conv(r)?,
-                last_message_id: r.get(10)?,
-                last_message: r.get(11)?,
-                last_message_at: r.get(12)?,
-                participant_id: r.get(13)?,
-            })
-        })?;
-        rows.map(|r| r.map_err(DbError::from)).collect()
-    }
-
     pub fn count_messages(&self) -> DbResult<i64> {
         Ok(self.conn().query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?)
     }
 
     pub fn count_conversations(&self) -> DbResult<i64> {
         Ok(self.conn().query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))?)
-    }
-
-    /// How many threads are waiting, regardless of how many the caller asked
-    /// to see. Same definition as `threads_awaiting_reply`.
-    pub fn count_threads_awaiting_reply(&self) -> DbResult<i64> {
-        Ok(self.conn().query_row(
-            "WITH last AS (
-               SELECT m.conversation_id, m.direction,
-                      ROW_NUMBER() OVER (
-                        PARTITION BY m.conversation_id
-                        ORDER BY m.sequence_index DESC, m.id DESC
-                      ) AS rn
-               FROM messages m
-               WHERE m.direction IN ('self','other')
-             )
-             SELECT COUNT(*) FROM last WHERE rn = 1 AND direction = 'other'",
-            [],
-            |r| r.get(0),
-        )?)
     }
 
     pub fn count_self_messages(&self, channel: Option<&str>, participant_id: Option<&str>) -> DbResult<i64> {

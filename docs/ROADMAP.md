@@ -51,7 +51,9 @@ Mimic notices what it could answer and prepares drafts in advance. The user stil
 
 Done: the dashboard of threads awaiting a reply; background drafting for them behind `assist.autoDraft`, off by default, bounded per run and cancellable; approve / modify / reject recording real outcomes.
 
-Done in 0.10.0-alpha.3: with a mailbox connected, each check is followed by assisted drafting when that is on, so replies are prepared as mail arrives. Not done: nothing decides that a thread does not need a reply; every unanswered thread is shown, newsletters included.
+Done in 0.10.0-alpha.3: with a mailbox connected, each check is followed by assisted drafting when that is on, so replies are prepared as mail arrives.
+
+Done in 0.10.0-alpha.4: mail that looks automated from its headers (`sources::automated`) is left out of what is waiting, counted, and shown on request; any thread can be marked as needing no reply until its next message, or kept on the list against the headers; assisted drafting uses the same definition (`db::repo_waiting`). Not done: nothing decides that a person's thread needs no reply — that stays the user's call; automated senders still appear under People; mail imported before 0.10.0-alpha.4 has no reading of its headers until it is imported again.
 
 ## Phase 7 — Trusted mode
 
@@ -67,7 +69,6 @@ Designed, deliberately not scheduled. See `docs/PRODUCT.md`. The blocker is not 
 
 Small things the migration left behind, listed so they are not lost:
 
-- The nightly smoke workflow was rewritten but has never been observed running.
 - macOS is still unbuilt; nothing in the new code is Windows-specific, but nothing has been tested there either.
 - The updater ships with the development public key, which `verify-release.ps1` warns about and allows for alpha builds. A real key is a prerequisite for a beta.
 - The icon set is a plain wordmark rather than a designed one. It is product-neutral, so it is a want and not a blocker.

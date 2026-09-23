@@ -165,6 +165,20 @@ export type CommandError = z.infer<typeof CommandError>;
 // ------------------------------------------------------------- dashboard
 
 /**
+ * Why a message looks automated, read from its headers when it was imported:
+ * `newsletter`, `bulk`, `auto_reply`, `report` or `no_reply_address`
+ * (`sources::automated` in Rust). A string rather than an enum so that one
+ * unfamiliar reason cannot stop the whole home screen from parsing;
+ * `describeAutomated` words the ones it knows and says something true about
+ * the rest.
+ */
+export const AutomatedReason = z.string();
+
+/** What the user said about whether a thread needs a reply. */
+export const ThreadMark = z.enum(["no_reply_needed", "needs_reply"]);
+export type ThreadMark = z.infer<typeof ThreadMark>;
+
+/**
  * One row of the home screen: a conversation whose last message came from
  * someone else and was never answered, plus the draft Mimic has for it, if it
  * has one. `draft` is null until a draft actually exists — there is no
@@ -181,7 +195,12 @@ export const DashboardThread = z.object({
   lastMessageId: z.string(),
   participant: Participant.nullable(),
   hasRelationshipProfile: z.boolean(),
+  /** A draft written for `lastMessage`, never one written for an earlier message. */
   draft: Draft.nullable(),
+  /** Why the last message looks automated, when it does. A reading, not a fact. */
+  automated: AutomatedReason.nullable(),
+  /** What the user said about this thread, while it still applies. */
+  mark: ThreadMark.nullable(),
 });
 export type DashboardThread = z.infer<typeof DashboardThread>;
 
@@ -192,6 +211,12 @@ export const Dashboard = z.object({
   ownMessages: z.number(),
   awaiting: z.array(DashboardThread),
   awaitingTotal: z.number(),
+  /** Unanswered threads not in `awaiting`, counted by why. Counts, never estimates. */
+  leftOut: z.object({ automated: z.number(), notNeeded: z.number() }),
+  /** Those threads, only when they were asked for. */
+  leftOutThreads: z.array(DashboardThread),
+  /** Whether they were asked for: empty and not asked for are different answers. */
+  showingLeftOut: z.boolean(),
   pendingDrafts: z.array(Draft),
   outcomes: DraftOutcomes,
   /** When the last import finished. Null before the first one. */
@@ -223,6 +248,50 @@ export function describeMailChecking(d: Dashboard): string | null {
     return `Checking ${which} is turned off, so nothing new comes in until you ask.`;
   }
   return `I check ${which} every ${m.everyMinutes} minutes.`;
+}
+
+/**
+ * Why Mimic thinks a message was sent by a machine, as a clause that follows
+ * "It looks automated to me:". Worded as what the headers say, because that is
+ * all Mimic knows — it never read the words to decide.
+ */
+export function describeAutomated(reason: string | null): string | null {
+  switch (reason) {
+    case null:
+      return null;
+    case "newsletter":
+      return "it came through a mailing list with nowhere to reply to the list.";
+    case "bulk":
+      return "the sender marked it as junk mail.";
+    case "auto_reply":
+      return "it was sent automatically, like an out-of-office reply.";
+    case "report":
+      return "it's a delivery report, like a bounce or a read receipt.";
+    case "no_reply_address":
+      return "it came from an address that says not to reply to it.";
+    default:
+      return "its headers say a machine sent it.";
+  }
+}
+
+/**
+ * What was left out of the waiting list and why, in one sentence, or null when
+ * nothing was. Said every time something is left out, so leaving a thread out
+ * never quietly hides it.
+ */
+export function describeLeftOut(d: Dashboard): string | null {
+  const { automated, notNeeded } = d.leftOut;
+  if (automated === 0 && notNeeded === 0) return null;
+  const parts: string[] = [];
+  if (automated === 1) parts.push("one thread that looks automated");
+  if (automated > 1) {
+    parts.push(
+      `${automated.toLocaleString()} threads that look automated (newsletters, notifications and the like)`,
+    );
+  }
+  if (notNeeded === 1) parts.push("one you said doesn't need a reply");
+  if (notNeeded > 1) parts.push(`${notNeeded.toLocaleString()} you said don't need a reply`);
+  return `I left out ${parts.join(" and ")}.`;
 }
 
 export const AssistSummary = z.object({

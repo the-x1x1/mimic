@@ -398,6 +398,9 @@ pub struct Draft {
     pub created_at: String,
     pub resolved_at: Option<String>,
     pub outcome: Option<String>,
+    /// The stored message this draft answers. `None` for a draft written from
+    /// pasted text, and for drafts made before 0.10.0-alpha.4.
+    pub incoming_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

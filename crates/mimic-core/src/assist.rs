@@ -8,10 +8,14 @@
 //! * **It is off unless the user turned it on.** `assist.autoDraft` is a
 //!   setting that defaults to false. A run with it off does nothing and says
 //!   so, so an accidental enqueue cannot leak a message to a provider.
-//! * **It is bounded.** At most `MAX_PER_RUN` threads per run, oldest waiting
-//!   first, and never a thread that already has an unresolved draft. A mailbox
-//!   import of forty thousand conversations must not turn into forty thousand
-//!   provider calls.
+//! * **It is bounded.** At most `MAX_PER_RUN` threads per run, newest first,
+//!   and never a thread that already has an unresolved draft for its last
+//!   message. A mailbox import of forty thousand conversations must not turn
+//!   into forty thousand provider calls.
+//! * **It drafts only for what is waiting.** The same definition as the home
+//!   screen (`db::repo_waiting`): mail that looks automated from its headers
+//!   and threads the user said need no reply are not drafted for, so a run
+//!   spends its ten on people rather than on newsletters.
 //! * **It drafts; it does not send.** The output is a `drafts` row with no
 //!   outcome, exactly like a draft the user asked for by hand. Every reply
 //!   still leaves through a person.
@@ -39,6 +43,11 @@ pub const SETTING: &str = "assist.autoDraft";
 /// analysis, and a bound per run is what keeps a large import from becoming a
 /// large bill.
 pub const MAX_PER_RUN: usize = 10;
+
+/// How far down the waiting list a run looks for threads without a draft.
+/// Past the ones it already wrote, so a second run reaches the next ten
+/// instead of finding the first ten done and stopping.
+const SCAN_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,11 +82,19 @@ pub fn draft_waiting_threads(
         return Ok(summary);
     }
 
-    let waiting = db.threads_awaiting_reply(limit.min(MAX_PER_RUN))?;
-    let candidates: Vec<_> = waiting
-        .into_iter()
-        .filter(|t| matches!(db.pending_draft_for_conversation(&t.conversation.id), Ok(None)))
-        .collect();
+    let want = limit.min(MAX_PER_RUN);
+    let mut candidates = Vec::with_capacity(want);
+    for thread in db.threads_awaiting_reply(SCAN_LIMIT)? {
+        if candidates.len() >= want {
+            break;
+        }
+        // Any draft for the message waiting now — pending, used or turned
+        // down — means it has been dealt with. A draft for an earlier message
+        // does not.
+        if !db.any_draft_for_message(&thread.conversation.id, &thread.last_message_id, &thread.last_message)? {
+            candidates.push(thread);
+        }
+    }
     summary.considered = candidates.len();
     let total = candidates.len();
 
@@ -91,6 +108,7 @@ pub fn draft_waiting_threads(
             conversation_id: Some(thread.conversation.id.clone()),
             channel: thread.conversation.channel.clone(),
             incoming_message: Some(thread.last_message.clone()),
+            incoming_message_id: Some(thread.last_message_id.clone()),
             // No intent: nobody said what they want to say yet. The prompt
             // assembler already handles this, and the draft records it.
             intent: None,
@@ -214,7 +232,13 @@ mod tests {
         let first = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
         assert!(!first.disabled);
         assert_eq!(first.drafted, 1);
-        let pending = db.pending_draft_for_conversation(&convo).unwrap().expect("a draft for the waiting thread");
+        let waiting = &db.threads_awaiting_reply(1).unwrap()[0];
+        assert_eq!(waiting.conversation.id, convo);
+        let pending = db
+            .pending_draft_for_message(&convo, &waiting.last_message_id, &waiting.last_message)
+            .unwrap()
+            .expect("a draft for the waiting thread");
+        assert_eq!(pending.incoming_message_id.as_deref(), Some(waiting.last_message_id.as_str()));
         assert!(pending.outcome.is_none(), "a prepared draft is unresolved, never pre-approved");
         assert!(pending.intent.is_none(), "nobody stated an intent, so none is invented");
 
@@ -248,6 +272,169 @@ mod tests {
         let summary = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(summary.considered, 0);
         assert_eq!(provider.call_count(), 0);
+    }
+
+    fn waiting_thread(db: &Db, source: &str, key: &str, body: &str, automated: Option<&str>) -> String {
+        let convo = db.upsert_conversation(source, key, "chat", Some(key)).unwrap();
+        db.insert_messages(&[NewMessage {
+            conversation_id: convo.clone(),
+            source_id: source.into(),
+            participant_id: None,
+            external_id: format!("{key}-1"),
+            direction: "other".into(),
+            channel: "chat".into(),
+            sent_at: Some("2026-09-02T10:00:00Z".into()),
+            sequence_index: 0,
+            body: body.into(),
+            reply_to_external_id: None,
+            metadata: automated.map(|a| serde_json::json!({ "automated": a })).unwrap_or(Value::Null),
+        }])
+        .unwrap();
+        convo
+    }
+
+    #[test]
+    fn automated_mail_and_threads_taken_off_the_list_are_not_drafted_for() {
+        let (db, source, _c, _a) = seed();
+        db.set_setting(SETTING, &true).unwrap();
+        waiting_thread(&db, &source, "news", "this week's deals", Some("newsletter"));
+        let fyi = waiting_thread(&db, &source, "fyi", "fyi, minutes attached", None);
+        let fyi_message: String =
+            db.conn().query_row("SELECT id FROM messages WHERE conversation_id = ?1", [&fyi], |r| r.get(0)).unwrap();
+        db.mark_thread(&fyi, &fyi_message, Some(crate::db::ThreadMark::NoReplyNeeded)).unwrap();
+
+        let provider = MockProvider::default();
+        let summary = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(summary.considered, 1, "only the person asking for an invoice is waiting");
+        assert_eq!(provider.call_count(), 1);
+        let drafted = db.pending_drafts(10).unwrap();
+        assert_eq!(drafted[0].incoming_message.as_deref(), Some("can you send the invoice today?"));
+    }
+
+    #[test]
+    fn a_new_message_gets_a_new_draft() {
+        let (db, source, convo, ada) = seed();
+        db.set_setting(SETTING, &true).unwrap();
+        let provider = MockProvider::default();
+        draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        db.insert_messages(&[NewMessage {
+            conversation_id: convo.clone(),
+            source_id: source,
+            participant_id: Some(ada),
+            external_id: "m2".into(),
+            direction: "other".into(),
+            channel: "chat".into(),
+            sent_at: Some("2026-09-01T12:00:00Z".into()),
+            sequence_index: 1,
+            body: "actually, next week is fine".into(),
+            reply_to_external_id: None,
+            metadata: Value::Null,
+        }])
+        .unwrap();
+
+        // The first draft answered a question that is no longer the one
+        // waiting, so it does not stop a draft for the new one.
+        let second = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(second.drafted, 1);
+        let waiting = &db.threads_awaiting_reply(1).unwrap()[0];
+        assert_eq!(waiting.last_message, "actually, next week is fine");
+        assert!(db
+            .pending_draft_for_message(&convo, &waiting.last_message_id, &waiting.last_message)
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn a_draft_the_user_used_or_turned_down_is_not_written_again() {
+        let (db, _s, _c, _a) = seed();
+        db.set_setting(SETTING, &true).unwrap();
+        let provider = MockProvider::default();
+        draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        let draft = db.pending_drafts(10).unwrap().remove(0);
+        // Used, but the reply they sent has not been imported yet, so the
+        // thread is still waiting.
+        db.resolve_draft(&draft.id, "sent_unedited", Some(&draft.generated_text)).unwrap();
+        let again = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(again.considered, 0);
+        assert_eq!(provider.call_count(), 1);
+    }
+
+    #[test]
+    fn a_draft_written_after_dropping_one_is_still_offered() {
+        let (db, _s, convo, _a) = seed();
+        db.set_setting(SETTING, &true).unwrap();
+        let provider = MockProvider::default();
+        draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        let prepared = db.pending_drafts(10).unwrap().remove(0);
+        db.resolve_draft(&prepared.id, "discarded", None).unwrap();
+        let waiting = db.threads_awaiting_reply(1).unwrap().remove(0);
+        assert!(db
+            .pending_draft_for_message(&convo, &waiting.last_message_id, &waiting.last_message)
+            .unwrap()
+            .is_none());
+
+        // "Not this one", then the user says what they want and writes their own.
+        let request = ComposeRequest {
+            conversation_id: Some(convo.clone()),
+            channel: "chat".into(),
+            incoming_message: Some(waiting.last_message.clone()),
+            incoming_message_id: Some(waiting.last_message_id.clone()),
+            intent: Some("yes, sending it this afternoon".into()),
+            ..Default::default()
+        };
+        let written = compose(&db, &provider, &request).unwrap();
+        let offered = db.pending_draft_for_message(&convo, &waiting.last_message_id, &waiting.last_message).unwrap();
+        assert_eq!(offered.map(|d| d.id), Some(written.id), "it survives the screen reloading");
+    }
+
+    #[test]
+    fn two_messages_with_the_same_words_are_two_questions() {
+        let (db, source, convo, ada) = seed();
+        db.set_setting(SETTING, &true).unwrap();
+        let provider = MockProvider::default();
+        draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        // The user answers, and a week later Ada asks the same thing again.
+        for (ext, dir, seq, who, body) in
+            [("m2", "self", 1, None, "sent!"), ("m3", "other", 2, Some(ada.clone()), "can you send the invoice today?")]
+        {
+            db.insert_messages(&[NewMessage {
+                conversation_id: convo.clone(),
+                source_id: source.clone(),
+                participant_id: who,
+                external_id: ext.into(),
+                direction: dir.into(),
+                channel: "chat".into(),
+                sent_at: Some(format!("2026-09-0{}T10:00:00Z", seq + 1)),
+                sequence_index: seq,
+                body: body.into(),
+                reply_to_external_id: None,
+                metadata: Value::Null,
+            }])
+            .unwrap();
+        }
+        let waiting = &db.threads_awaiting_reply(1).unwrap()[0];
+        assert!(
+            db.pending_draft_for_message(&convo, &waiting.last_message_id, &waiting.last_message).unwrap().is_none(),
+            "the draft for the first time she asked is not shown under the second"
+        );
+        let second = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(second.drafted, 1);
+    }
+
+    #[test]
+    fn the_next_run_reaches_the_threads_the_last_one_did_not() {
+        let (db, source, _c, _a) = seed();
+        db.set_setting(SETTING, &true).unwrap();
+        for i in 0..11 {
+            waiting_thread(&db, &source, &format!("w{i}"), &format!("question {i}"), None);
+        }
+        let provider = MockProvider::default();
+        let first = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(first.drafted, MAX_PER_RUN);
+        let second = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(second.drafted, 2, "twelve waiting, ten done, two left");
+        let third = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(third.considered, 0);
     }
 
     #[test]

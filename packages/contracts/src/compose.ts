@@ -17,6 +17,8 @@ export const ComposeRequest = z.object({
   conversationId: z.string().nullish(),
   channel: z.string(),
   incomingMessage: z.string().nullish(),
+  /** The stored message being answered, so the draft is shown under it and no other. */
+  incomingMessageId: z.string().nullish(),
   intent: z.string().nullish(),
   situationId: z.string().nullish(),
   adjustment: Adjustment.nullish(),
@@ -133,6 +135,8 @@ export const Draft = z.object({
   createdAt: z.string(),
   resolvedAt: z.string().nullable(),
   outcome: z.string().nullable(),
+  /** The stored message this answers. Null for pasted text and for drafts made before 0.10.0-alpha.4. */
+  incomingMessageId: z.string().nullable(),
 });
 export type Draft = z.infer<typeof Draft>;
 

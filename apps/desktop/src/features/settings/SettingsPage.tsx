@@ -312,9 +312,10 @@ function AssistSection() {
   return (
     <Card title="Preparing replies in advance">
       <p className="neutral">
-        Mimic normally drafts only when you ask it to. With this on, it drafts a reply for every
-        thread that ends with someone else&rsquo;s message, after each import, and the dashboard
-        shows them waiting for your approval.
+        Mimic normally drafts only when you ask it to. With this on, after each import, mailbox
+        check or analysis it drafts replies for up to ten of the threads waiting on you &mdash; not
+        for mail that looks automated, or threads you said need no reply &mdash; and they wait on
+        the home screen for you to read.
       </p>
       <label className="row gap-2">
         <input

@@ -343,7 +343,7 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     run_import(&db, &source_id);
     voice::analyze(&db, &mut |_, _| {}).unwrap();
 
-    let before = mimic_core::dashboard::dashboard(&db, 25, false).unwrap();
+    let before = mimic_core::dashboard::dashboard(&db, 25, false, false).unwrap();
     assert!(before.messages > 0);
     assert!(before.last_import_at.is_some(), "an import has happened, so the screen may say so");
     assert!(!before.auto_draft, "assisted drafting is off unless it was turned on");
@@ -363,22 +363,71 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert_eq!(summary.drafted, summary.considered);
     assert!(summary.drafted > 0);
 
-    let after = mimic_core::dashboard::dashboard(&db, 25, true).unwrap();
+    let after = mimic_core::dashboard::dashboard(&db, 25, true, false).unwrap();
     assert_eq!(after.awaiting.len(), waiting, "drafting a reply does not answer the thread");
     let drafted = after.awaiting.iter().filter(|t| t.draft.is_some()).count();
     assert_eq!(drafted, summary.drafted, "every prepared draft is attached to its thread");
     assert_eq!(after.pending_drafts.len(), summary.drafted);
     assert!(after.pending_drafts.iter().all(|d| d.outcome.is_none()), "prepared, never pre-approved");
     assert_eq!(after.outcomes.unedited_rate, None, "nothing has been resolved, so the rate is unmeasured");
+    assert_eq!(after.left_out, mimic_core::db::LeftOut::default(), "an export of people's messages has no bulk mail");
+    assert!(!after.showing_left_out && after.left_out_threads.is_empty());
 
-    check_fixture("dashboard.json", &serde_json::to_value(&after).unwrap());
+    // Mail a machine sent is not someone waiting. It is counted, and it is
+    // there when asked for; it is not loaded when it is not.
+    let news = db.upsert_conversation(&source_id, "news-1", "chat", Some("This week")).unwrap();
+    db.insert_messages(&[mimic_core::db::NewMessage {
+        conversation_id: news.clone(),
+        source_id: source_id.clone(),
+        participant_id: None,
+        external_id: "news-1-a".into(),
+        direction: "other".into(),
+        channel: "chat".into(),
+        sent_at: Some("2026-01-01T08:00:00Z".into()),
+        sequence_index: 0,
+        body: "Twenty percent off everything this week.".into(),
+        reply_to_external_id: None,
+        metadata: serde_json::json!({ "automated": "newsletter" }),
+    }])
+    .unwrap();
+    db.refresh_conversation_stats(&news).unwrap();
+    let with_news = mimic_core::dashboard::dashboard(&db, 25, true, false).unwrap();
+    assert_eq!(with_news.awaiting.len(), waiting, "a newsletter is not someone waiting");
+    assert_eq!(with_news.left_out.automated, 1);
+    assert!(!with_news.showing_left_out && with_news.left_out_threads.is_empty());
+    let again = mimic_core::assist::draft_waiting_threads(&db, &provider, 25, &mut |_, _| {}, &|| false).unwrap();
+    assert_eq!(again.considered, 0, "and nothing is drafted for it");
+
+    // Taking a person's thread off the list moves it to what was left out,
+    // with its draft, because saying a thread needs no reply says nothing
+    // about the draft.
+    let off = after.awaiting[0].conversation_id.clone();
+    let seen = after.awaiting[0].last_message_id.clone();
+    assert!(db.mark_thread(&off, &seen, Some(mimic_core::db::ThreadMark::NoReplyNeeded)).unwrap());
+    let marked = mimic_core::dashboard::dashboard(&db, 25, true, true).unwrap();
+    assert_eq!(marked.awaiting.len(), waiting - 1);
+    assert_eq!(marked.awaiting_total, waiting as i64 - 1);
+    assert_eq!(marked.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 1 });
+    let taken = marked.left_out_threads.iter().find(|t| t.conversation_id == off).unwrap();
+    assert_eq!(taken.mark, Some(mimic_core::db::ThreadMark::NoReplyNeeded));
+    assert!(taken.draft.is_some(), "no draft was resolved by it");
+
+    // Putting it back is exactly that.
+    db.mark_thread(&off, &seen, None).unwrap();
+    let shown = mimic_core::dashboard::dashboard(&db, 25, true, true).unwrap();
+    assert_eq!(shown.awaiting.len(), waiting);
+    assert_eq!(shown.left_out_threads.len(), 1);
+    assert_eq!(shown.left_out_threads[0].automated.as_deref(), Some("newsletter"));
+    assert!(shown.showing_left_out);
+
+    check_fixture("dashboard.json", &serde_json::to_value(&shown).unwrap());
 
     // Approving one is the ordinary draft resolution: it records what was
     // sent and takes the draft off the screen. It does not send anything.
     let draft = after.pending_drafts[0].clone();
     let resolved = db.resolve_draft(&draft.id, "sent_unedited", Some(&draft.generated_text)).unwrap();
     assert_eq!(resolved.outcome.as_deref(), Some("sent_unedited"));
-    let later = mimic_core::dashboard::dashboard(&db, 25, true).unwrap();
+    let later = mimic_core::dashboard::dashboard(&db, 25, true, false).unwrap();
     assert_eq!(later.pending_drafts.len(), summary.drafted - 1);
     assert_eq!(later.outcomes.resolved, 1);
 }

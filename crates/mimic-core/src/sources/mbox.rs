@@ -37,6 +37,9 @@ pub(crate) struct Mail {
     pub(crate) from: AuthorRef,
     pub(crate) date: Option<String>,
     pub(crate) body: String,
+    /// Why the headers say a machine sent it, if they do. Decided here because
+    /// the headers are not kept after parsing.
+    pub(crate) automated: Option<super::automated::Automated>,
 }
 
 impl CommunicationSource for MboxSource {
@@ -170,6 +173,7 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         return None;
     }
     let from = parse_address(&super::mime::decode_header(get("from").as_deref().unwrap_or_default()));
+    let automated = super::automated::detect(&headers, from.identifiers.first().map(|i| i.value.as_str()));
     let message_id = get("message-id")
         .map(|s| s.trim().trim_matches(['<', '>']).to_string())
         .filter(|s| !s.is_empty())
@@ -193,6 +197,7 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         from,
         date: get("date").and_then(|d| parse_date(&d)),
         body,
+        automated,
     })
 }
 
@@ -319,6 +324,11 @@ pub(crate) fn thread(mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
                         }
                         if !refs.is_empty() {
                             meta.insert("refs".into(), json!(refs));
+                        }
+                        // Read by the dashboard to leave the thread out of
+                        // what is waiting; absent means a person wrote it.
+                        if let Some(a) = m.automated {
+                            meta.insert("automated".into(), json!(a.as_str()));
                         }
                         serde_json::Value::Object(meta)
                     },
@@ -558,5 +568,34 @@ mod tests {
         let convos = import(&path);
         let reply = convos.iter().flat_map(|c| &c.messages).find(|m| m.external_id == "a2@example.com").unwrap();
         assert_eq!(reply.metadata["refs"], serde_json::json!(["a1@example.com"]));
+    }
+
+    #[test]
+    fn a_newsletter_is_marked_as_automated_and_a_person_is_not() {
+        let mbox = concat!(
+            "From news@brand.example Mon Feb 02 08:00:00 2026\n",
+            "From: Brand Weekly <news@brand.example>\n",
+            "Subject: This week at Brand\n",
+            "Date: Mon, 2 Feb 2026 08:00:00 +0000\n",
+            "Message-ID: <n1@brand.example>\n",
+            "List-Unsubscribe: <https://brand.example/unsubscribe>\n",
+            "\n",
+            "Twenty percent off everything this week.\n",
+            "\n",
+            "From ada@example.com Mon Feb 02 09:00:00 2026\n",
+            "From: Ada <ada@example.com>\n",
+            "Subject: lunch\n",
+            "Date: Mon, 2 Feb 2026 09:00:00 +0000\n",
+            "Message-ID: <p1@example.com>\n",
+            "\n",
+            "lunch on thursday?\n",
+        );
+        let (_dir, path) = write(mbox);
+        let convos = import(&path);
+        let all: Vec<_> = convos.iter().flat_map(|c| &c.messages).collect();
+        let news = all.iter().find(|m| m.external_id == "n1@brand.example").unwrap();
+        let person = all.iter().find(|m| m.external_id == "p1@example.com").unwrap();
+        assert_eq!(news.metadata["automated"], serde_json::json!("newsletter"));
+        assert!(person.metadata.get("automated").is_none(), "a person's mail carries no marker at all");
     }
 }

@@ -1,6 +1,6 @@
 # Data model
 
-SQLite, schema version 6. Timestamps are RFC 3339 UTC `TEXT`, ids are UUID v4 `TEXT`, JSON columns end in `_json`. The authoritative definition is `crates/mimic-core/src/db/migrations/0005_communication.sql`, with `0006_themes.sql` carrying an older install's theme name over; this file explains why the tables are shaped the way they are.
+SQLite, schema version 9. Timestamps are RFC 3339 UTC `TEXT`, ids are UUID v4 `TEXT`, JSON columns end in `_json`. The authoritative definition is `crates/mimic-core/src/db/migrations/0005_communication.sql` and the migrations after it: `0006_themes.sql` carries an older install's theme name over, `0007_situations.sql` seeds the situation vocabulary, `0008_message_ids.sql` indexes `messages.external_id` for joining email threads by Message-ID, and `0009_thread_marks.sql` adds what the user said about a thread's reply. This file explains why the tables are shaped the way they are.
 
 ## Identity
 
@@ -26,18 +26,27 @@ Two decisions worth stating. An identifier already owned by someone else is **no
 
 **`messages`** is the table everything else is computed from.
 
-| Column                     | Why it exists                                                                                                                          |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `(source_id, external_id)` | Unique. The import identity key: this is what makes re-importing free.                                                                 |
-| `direction`                | `self` \| `other` \| `unknown`. Only `self` is evidence.                                                                               |
-| `channel`                  | Denormalized from the conversation so the channel voice layer is one index scan.                                                       |
-| `sequence_index`           | Position within the conversation, assigned at import. Ordering does not depend on timestamps, which exports lose.                      |
-| `body`, `body_hash`        | The cleaned text and its digest.                                                                                                       |
-| `word_count`, `char_count` | Computed once at insert; every length metric reads these rather than re-tokenizing a million rows.                                     |
-| `reply_to_message_id`      | Derived after the batch, because a reply can appear in an export before what it answers.                                               |
-| `response_latency_seconds` | Only when both timestamps exist and the reply crosses a direction boundary. Two of your own messages in a row are not a response time. |
+| Column                     | Why it exists                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `(source_id, external_id)` | Unique. The import identity key: this is what makes re-importing free.                                                                                                                                                                                                                                                                                          |
+| `direction`                | `self` \| `other` \| `unknown`. Only `self` is evidence.                                                                                                                                                                                                                                                                                                        |
+| `channel`                  | Denormalized from the conversation so the channel voice layer is one index scan.                                                                                                                                                                                                                                                                                |
+| `sequence_index`           | Position within the conversation, assigned at import. Ordering does not depend on timestamps, which exports lose.                                                                                                                                                                                                                                               |
+| `body`, `body_hash`        | The cleaned text and its digest.                                                                                                                                                                                                                                                                                                                                |
+| `word_count`, `char_count` | Computed once at insert; every length metric reads these rather than re-tokenizing a million rows.                                                                                                                                                                                                                                                              |
+| `reply_to_message_id`      | Derived after the batch, because a reply can appear in an export before what it answers.                                                                                                                                                                                                                                                                        |
+| `response_latency_seconds` | Only when both timestamps exist and the reply crosses a direction boundary. Two of your own messages in a row are not a response time.                                                                                                                                                                                                                          |
+| `metadata_json`            | What a connector knew that has no column. For email: `subject`, `refs` (the Message-IDs it answers, which is how a later reply finds its thread), and `automated` when the headers say a machine sent it — `newsletter`, `bulk`, `auto_reply`, `report` or `no_reply_address` (`sources::automated`). Headers are not kept, so this is decided once, at import. |
 
 **`message_embeddings`** keeps vectors out of the message row, keyed by `(message_id, embedding_version)` so two providers' vectors are never compared.
+
+## What needs a reply
+
+Whether a thread is waiting is computed, not stored (`db::repo_waiting`). A thread is decided by its _deciding message_: the last message with a known direction that does not look automated, if that came from someone else — so an out-of-office reply threaded in after a colleague's question does not hide the question — and otherwise the last message, so something automated that arrived after the user's own reply is counted as left out rather than lost. The thread is unanswered when its deciding message came from someone else. Two things can leave an unanswered thread out, in this order:
+
+**`thread_marks`** — at most one row per conversation: `no_reply_needed` or `needs_reply`, tied by `message_id` to the message the user was looking at when they said it. It applies only while that message is still the deciding one, so a thread taken off the list comes back when the person writes again without anything being cleared, and a click that arrives after they have written again changes nothing. It cascades from both the conversation and the message.
+
+Otherwise, the deciding message's `metadata_json.automated` — which it can carry only when the whole thread does. A reading from headers, never from the words; only a text value counts; and the user's mark outranks it in both directions.
 
 ## Situations
 
@@ -57,7 +66,7 @@ Keying on `analysis_version` means a new analysis version is computed alongside 
 
 ## Drafts and feedback
 
-**`drafts`** records what was asked for, what was generated, what was sent, which provider and model, the context, the `prompt_hash` and the evidence. **`draft_feedback`** records what the difference meant, one row per `(draft_id, kind)` so re-recording updates rather than accumulating. `weight` encodes the rule that a stated preference (3.0) outranks an inferred edit (1.0).
+**`drafts`** records what was asked for, what was generated, what was sent, which provider and model, the context, the `prompt_hash` and the evidence. `incoming_message_id` (0.10.0-alpha.4) is the stored message a draft answers, so the home screen shows a draft under that message and no other — two messages with the same words are two questions. Drafts made before it have only `incoming_message` and are matched by text; a draft made since with no id answered pasted text and matches nothing. Once a draft for a message has been used or dropped, no other draft for it is offered. **`draft_feedback`** records what the difference meant, one row per `(draft_id, kind)` so re-recording updates rather than accumulating. `weight` encodes the rule that a stated preference (3.0) outranks an inferred edit (1.0).
 
 ## Analysis and evaluation
 

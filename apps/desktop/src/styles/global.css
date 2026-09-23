@@ -332,6 +332,34 @@ p {
 .thread__when {
   white-space: nowrap;
 }
+/* The quiet way to say a message needs no answer: after the message, so it
+   is read after what it is about. */
+.thread__aside .linkish {
+  color: var(--text-muted);
+}
+
+/* What was left out: the same letter, smaller and shorter, because the point
+   is to recognize it and move on, not to read it. */
+.replies__leftout-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.thread--left-out {
+  gap: var(--space-2);
+}
+.thread--left-out .thread__subject {
+  margin-top: 0;
+}
+.thread__excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .thread__subject {
   font-size: var(--text-body-sm);
   color: var(--text-secondary);
