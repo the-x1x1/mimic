@@ -1,0 +1,63 @@
+From 1829341987234000001@xxx Mon Mar 02 09:00:00 +0000 2026
+X-GM-THRID: 1829341987234000001
+X-Gmail-Labels: Inbox,Important,Opened
+From: Ada Lovelace <ada@example.com>
+To: C at work <c@work.example>
+Subject: Offsite
+Date: Mon, 2 Mar 2026 09:00:00 +0000
+Message-ID: <offsite-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+Can you make the offsite on the 12th?
+
+From 1829341987234000002@xxx Mon Mar 02 09:40:00 +0000 2026
+X-GM-THRID: 1829341987234000001
+X-Gmail-Labels: Sent,Opened
+From: C at work <c@work.example>
+To: Ada Lovelace <ada@example.com>
+Subject: Re: Offsite
+Date: Mon, 2 Mar 2026 09:40:00 +0000
+Message-ID: <offsite-2@work.example>
+In-Reply-To: <offsite-1@example.com>
+References: <offsite-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+yes, I'll be there
+
+From 1829341987234000003@xxx Tue Mar 03 08:15:00 +0000 2026
+X-GM-THRID: 1829341987234000003
+X-Gmail-Labels: Inbox,Opened
+From: Bob <bob@example.com>
+To: C <c@example.com>
+Subject: Numbers
+Date: Tue, 3 Mar 2026 08:15:00 +0000
+Message-ID: <numbers-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+Are the numbers ready?
+
+From 1829341987234000004@xxx Tue Mar 03 08:30:00 +0000 2026
+X-GM-THRID: 1829341987234000003
+X-Gmail-Labels: Sent
+From: C <c@example.com>
+To: Bob <bob@example.com>
+Subject: Re: Numbers
+Date: Tue, 3 Mar 2026 08:30:00 +0000
+Message-ID: <numbers-2@example.com>
+In-Reply-To: <numbers-1@example.com>
+References: <numbers-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+sending them tonight
+
+From 1829341987234000005@xxx Wed Mar 04 16:00:00 +0000 2026
+X-GM-THRID: 1829341987234000005
+X-Gmail-Labels: Sent
+From: C at work <c@work.example>
+To: Bob <bob@example.com>
+Subject: Room for Thursday
+Date: Wed, 4 Mar 2026 16:00:00 +0000
+Message-ID: <room-1@work.example>
+Content-Type: text/plain; charset=utf-8
+
+booked the big room for thursday

@@ -5,9 +5,11 @@ import {
   IDENTIFIER_LABELS,
   IdentifierKind,
   describeFold,
+  describeSentFolder,
   type AddressAdded,
   type AddressOwner,
   type HeldAddress,
+  type SentFolderPerson,
 } from "@mimic/contracts";
 import { qk } from "@/app/queryClient";
 import {
@@ -16,6 +18,7 @@ import {
   useClaimHeldAddress,
   useKeepApart,
   usePreviewAddress,
+  useSentFolderPeople,
 } from "@/hooks/usePeople";
 
 /** Said when the question had to be asked again because its answer changed. */
@@ -340,4 +343,124 @@ export function HeldAddressQuestion({ held }: { held: HeldAddress }) {
       {keepApart.error ? <InlineError>{keepApart.error.message}</InlineError> : null}
     </div>
   );
+}
+
+/**
+ * Someone whose mail was in the user's Sent folder, under an address that is
+ * not the user's yet: what was found, and the question adding that address
+ * would ask. A yes adds it with the owner that was shown, so it folds exactly
+ * what the question said; a no is kept, and they are not asked about again.
+ *
+ * As with a held address, what the question shows is kept as it was when it
+ * opened: the list is read again after every job, and a question that changed
+ * under the user's eyes would have them agree to something they did not read.
+ * When it changes while open, the question shows the new version and says so.
+ */
+export function SentFolderQuestion({
+  person,
+  open = false,
+}: {
+  person: SentFolderPerson;
+  /** Open from the start, where it is the thing the screen is for. */
+  open?: boolean;
+}) {
+  const qc = useQueryClient();
+  const add = useAddIdentifier();
+  const keepApart = useKeepApart();
+  const [shown, setShown] = useState<AddressOwner | null>(open ? person.owner : null);
+  const [changed, setChanged] = useState(false);
+  // Answered: the list read again leaves them out, and until it has, the
+  // question isn't asked a second time.
+  const [answered, setAnswered] = useState(false);
+  const { owner } = person;
+  const said = describeSentFolder(person);
+
+  useEffect(() => {
+    if (shown && JSON.stringify(shown) !== JSON.stringify(owner)) {
+      setShown(owner);
+      setChanged(true);
+    }
+  }, [owner, shown]);
+
+  if (answered) return null;
+  if (!shown) {
+    return (
+      <p className="muted small row gap-2 wrap">
+        <span>{said.line}</span>
+        <Button size="sm" variant="ghost" onClick={() => setShown(owner)}>
+          Is that you?
+        </Button>
+      </p>
+    );
+  }
+
+  return (
+    <div className="stack gap-2">
+      <p className="neutral">{said.why}</p>
+      <FoldConfirm
+        address={person.address}
+        owner={shown}
+        pending={add.isPending || keepApart.isPending}
+        changed={changed}
+        onYes={async () => {
+          try {
+            await add.mutateAsync({
+              kind: person.kind,
+              value: person.address,
+              confirmedOwner: shown,
+            });
+            setAnswered(true);
+          } catch (e) {
+            // The list is read again, and the effect above puts the new
+            // version in front of the user.
+            if (isStaleConfirmation(e)) {
+              add.reset();
+              await qc.invalidateQueries({ queryKey: qk.sentFolderPeople });
+            }
+          }
+        }}
+        onNo={async () => {
+          try {
+            await keepApart.mutateAsync(shown.participantId);
+            setAnswered(true);
+          } catch (e) {
+            // Gone already — folded in by something that finished meanwhile —
+            // leaves nothing to keep apart; the list is read again.
+            if (isGone(e)) {
+              keepApart.reset();
+              setAnswered(true);
+              await qc.invalidateQueries({ queryKey: qk.identity });
+            }
+          }
+        }}
+      />
+      {add.error ? <InlineError>{add.error.message}</InlineError> : null}
+      {keepApart.error ? <InlineError>{keepApart.error.message}</InlineError> : null}
+    </div>
+  );
+}
+
+/**
+ * The likeliest of the people whose mail was in the user's Sent folder, for
+ * the home screen and the import step: one question at a time, the next once
+ * it is answered. Settings lists them all.
+ *
+ * The person asked about stays the one shown until they are answered, even if
+ * the list is read again in another order meanwhile — after a refused yes,
+ * say — so the question the user was reading doesn't turn into someone else's.
+ */
+export function SentFolderNotice({ open = false }: { open?: boolean }) {
+  const people = useSentFolderPeople();
+  const [asking, setAsking] = useState<string | null>(null);
+  const list = people.data ?? [];
+  const person = list.find((p) => p.owner.participantId === asking) ?? list[0];
+  const id = person?.owner.participantId ?? null;
+
+  useEffect(() => {
+    if (id !== asking) setAsking(id);
+  }, [id, asking]);
+
+  if (!person) return null;
+  // Keyed by the person: an answer that removes them shows the next one fresh.
+  return <SentFolderQuestion key={person.owner.participantId} person={person} open={open} />;
 }

@@ -2,6 +2,25 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.12] — 2026-09-23
+
+Your Sent folder knows your addresses.
+
+### Added
+
+- **I ask about the addresses your Sent folder shows you write from.** Mail in your Sent folder is usually yours, so when some of it came from an address you didn't give me — a work address, an alias, one you've since stopped using — it's often you. Until now I filed it under a person of its own, counted what you wrote from it as someone else's, and put your own replies on the home screen as people waiting on you. Now the home screen says how much of that person's mail was there and asks: "All 12 messages I have from C at work (c@work.example) were in your Sent folder. If that's you, I'm counting what you wrote as someone else's." **Is that you?** says why it might not be — someone else sends for you, you passed their mail on, or other people send from that address too — and shows exactly what saying yes would change, the same question adding the address by hand asks. A yes makes it yours and moves what was sent from it over. A no is kept, and I don't ask about them again. The likeliest is asked first; everyone found this way is listed under Settings → You.
+- **When nothing I read was written by you, the import step asks first about the address your Sent folder names**, instead of leaving you to guess which one you wrote from.
+- It works for a connected mailbox (its sent folder) and for a Gmail export (mail labelled "Sent"). Other exports don't say which folder a message came from. Mail you passed on to someone, which keeps its first writer's address, isn't counted.
+
+### Fixed
+
+- **A version is released once.** Two builds started for 0.10.0-alpha.9 and each made a release page, leaving an unfinished copy behind. A second build for the same version now waits for the first, and stops if the first made one.
+- **Your post to a mailing list counts as yours.** When a list sent your own message back to you with its own address as the sender, and I read both copies — the list's from your inbox, yours from your sent folder — I could keep the list's copy and file what you wrote under the list. I now keep the copy you sent, and make nobody up for the other.
+
+### Not in this release
+
+Only mail read from now on is marked as coming from your Sent folder: a mailbox isn't read again, and importing the same file again adds nothing, so mail you've already imported isn't asked about. You can still add an address under Settings → You, which asks the same question.
+
 ## [0.10.0-alpha.11] — 2026-09-22
 
 How close my drafts come — measured, not claimed.

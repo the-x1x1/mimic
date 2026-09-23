@@ -91,6 +91,7 @@ pub fn run() {
             commands::people::preview_user_address,
             commands::people::add_user_identifier,
             commands::people::held_user_addresses,
+            commands::people::sent_folder_people,
             commands::people::claim_held_address,
             commands::people::keep_person_apart,
             commands::people::remove_user_identifier,

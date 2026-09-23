@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AddressAdded, AddressPreview, Source, UserIdentity } from "@mimic/contracts";
+import type {
+  AddressAdded,
+  AddressPreview,
+  SentFolderPerson,
+  Source,
+  UserIdentity,
+} from "@mimic/contracts";
 import { ImportStep } from "../OnboardingFlow";
 
 // The real hooks run; only the native calls are replaced.
@@ -11,6 +17,7 @@ const native = vi.hoisted(() => ({
   previewUserAddress: vi.fn(),
   addUserIdentifier: vi.fn(),
   keepPersonApart: vi.fn(),
+  sentFolderPeople: vi.fn(),
   startSourceImport: vi.fn(),
   deleteSource: vi.fn(),
 }));
@@ -79,6 +86,54 @@ describe("when nothing read was the user's, adding the address is the fix", () =
     for (const f of Object.values(native)) f.mockReset();
     native.sources.mockResolvedValue([readButNoneOfYours]);
     native.userIdentity.mockResolvedValue(identity);
+    native.sentFolderPeople.mockResolvedValue([]);
+  });
+
+  it("asks first about the address the Sent folder names, and adds it on a yes", async () => {
+    const found: SentFolderPerson = {
+      kind: "email",
+      address: "c@work.example",
+      sent: 12,
+      owner: filedUnderTheAlias.owner!,
+    };
+    native.sentFolderPeople.mockResolvedValueOnce([found]).mockResolvedValue([]);
+    native.addUserIdentifier.mockResolvedValue(added(12));
+    renderStep();
+    const question = await screen.findByRole("group", { name: "Is C (work) you?" });
+    expect(
+      screen.getByText(
+        /^All 12 messages I have from C \(work\) \(c@work\.example\) were in your Sent folder\. Mail there is usually yours/,
+      ),
+    ).toBeInTheDocument();
+    expect(question).toHaveTextContent("the 12 messages filed under them become yours");
+    expect(native.previewUserAddress).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Yes, that's me" }));
+    await waitFor(() =>
+      expect(native.addUserIdentifier).toHaveBeenCalledWith(
+        "email",
+        "c@work.example",
+        filedUnderTheAlias.owner,
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("group")).toBeNull());
+  });
+
+  it("keeps a no about someone the Sent folder names, and doesn't ask again", async () => {
+    const found: SentFolderPerson = {
+      kind: "email",
+      address: "pat@example.com",
+      sent: 3,
+      owner: { ...filedUnderTheAlias.owner!, participantId: "p7", displayName: "Pat" },
+    };
+    native.sentFolderPeople.mockResolvedValueOnce([found]).mockResolvedValue([]);
+    native.keepPersonApart.mockResolvedValue(undefined);
+    renderStep();
+    await screen.findByRole("group", { name: "Is Pat you?" });
+    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    await waitFor(() => expect(native.keepPersonApart).toHaveBeenCalledWith("p7"));
+    await waitFor(() => expect(screen.queryByRole("group")).toBeNull());
+    expect(native.addUserIdentifier).not.toHaveBeenCalled();
   });
 
   it("asks whether the person it is filed under is the user, and moves it only on a yes", async () => {

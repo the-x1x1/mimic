@@ -712,7 +712,7 @@ fn sync_inner(
     // that follows.
     let (folders, sent) = choose_folders(&conn.list()?);
     config.folders = folders.clone();
-    config.sent_folder = sent;
+    config.sent_folder = sent.clone();
 
     let mut summary = SyncSummary::default();
     // What is new, per folder: (folder, uidvalidity, uids to read, highest uid seen).
@@ -786,7 +786,10 @@ fn sync_inner(
                 // One message that trips a bug in parsing is skipped, not
                 // allowed to fail this check and every one after it.
                 match std::panic::catch_unwind(|| parse_raw(bytes)) {
-                    Ok(Some(m)) => mails.push(m),
+                    Ok(Some(mut m)) => {
+                        m.sent |= sent.as_deref() == Some(folder.as_str());
+                        mails.push(m);
+                    }
                     Ok(None) => summary.without_text += 1,
                     Err(_) => summary.unreadable += 1,
                 }
@@ -1565,6 +1568,121 @@ mod tests {
         sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(db.count_conversations().unwrap(), 1);
         assert!(db.threads_awaiting_reply(10).unwrap().is_empty(), "the user replied last");
+    }
+
+    #[test]
+    fn whoever_wrote_what_is_in_the_sent_folder_is_asked_about_and_folded_in_on_a_yes() {
+        let with_subject = |raw: String, subject: &str| raw.replace("Subject: Offsite", &format!("Subject: {subject}"));
+        let at = |minute: u32| format!("Mon, 2 Mar 2026 09:{minute:02}:00 +0000");
+        // Pat sends some of the user's mail for them, and writes to them too.
+        let pat = |id: &str, subject: &str, minute: u32| {
+            with_subject(mail(id, "Pat <pat@example.com>", None, &at(minute), "booked it"), subject)
+        };
+        let (port, _) = serve(
+            vec![
+                Mailbox {
+                    name: "INBOX",
+                    validity: 1,
+                    messages: vec![
+                        (1, mail("q1@x", "Ada <ada@example.com>", None, &at(0), "can you make the offsite?")),
+                        (
+                            2,
+                            with_subject(
+                                mail("q2@x", "Grace <grace@example.com>", None, &at(1), "numbers?"),
+                                "Numbers",
+                            ),
+                        ),
+                        (3, pat("p1@x", "Keys", 2)),
+                        (4, pat("p2@x", "Plan", 3)),
+                        (5, pat("p3@x", "Hello", 4)),
+                    ],
+                },
+                Mailbox {
+                    name: "Sent",
+                    validity: 1,
+                    messages: vec![
+                        (1, mail("r1@x", "C at work <c@work.example>", Some("q1@x"), &at(30), "yes, see you there")),
+                        (
+                            2,
+                            with_subject(
+                                mail(
+                                    "r2@x",
+                                    "C at work <c@work.example>",
+                                    Some("q2@x"),
+                                    &at(40),
+                                    "sending them tonight",
+                                ),
+                                "Re: Numbers",
+                            ),
+                        ),
+                        (3, pat("d1@x", "Room", 50)),
+                        (4, pat("d2@x", "Taxi", 51)),
+                        (5, pat("d3@x", "Lunch", 52)),
+                        // From an address that is already the user's: nothing to ask.
+                        (6, with_subject(mail("s1@x", "C <c@example.com>", None, &at(55), "note to self"), "Note")),
+                    ],
+                },
+            ],
+            "pw",
+        );
+        let (db, source) = db_for(port);
+        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+
+        let people = db.sent_folder_people().unwrap();
+        let listed: Vec<(&str, usize, usize)> =
+            people.iter().map(|p| (p.address.as_str(), p.sent, p.owner.messages)).collect();
+        assert_eq!(
+            listed,
+            vec![("c@work.example", 2, 2), ("pat@example.com", 3, 6)],
+            "likeliest first: all of C at work's mail was in the Sent folder, half of Pat's"
+        );
+        assert_eq!(people[0].kind, "email");
+        assert_eq!(people[0].owner.display_name, "C at work");
+        assert_eq!(
+            db.threads_awaiting_reply(10).unwrap().len(),
+            8,
+            "until then, what the user sent from work reads as someone waiting"
+        );
+
+        // No: Pat is not the user, and is not asked about again.
+        db.keep_apart(&people[1].owner.participant_id).unwrap();
+        assert_eq!(db.sent_folder_people().unwrap().len(), 1);
+
+        // Yes, with what was shown: the work address is the user's, and so is what was sent from it.
+        let added =
+            db.add_user_address(crate::db::IdentifierKind::Email, &people[0].address, Some(&people[0].owner)).unwrap();
+        assert_eq!(added.claimed.messages, 2);
+        assert_eq!(added.claimed.people, 1);
+        assert!(db.sent_folder_people().unwrap().is_empty());
+        let waiting = db.threads_awaiting_reply(10).unwrap();
+        assert_eq!(waiting.len(), 6, "Ada's and Grace's threads were answered; Pat's are still Pat's");
+    }
+
+    #[test]
+    fn a_post_to_a_list_read_back_from_the_inbox_is_the_users_and_asks_about_nobody() {
+        let at = "Mon, 2 Mar 2026 09:00:00 +0000";
+        let (port, _) = serve(
+            vec![
+                Mailbox {
+                    name: "INBOX",
+                    validity: 1,
+                    // The list's copy: the same message, its sender rewritten.
+                    messages: vec![(1, mail("l1@x", "'C' via Team <team@lists.example>", None, at, "agenda attached"))],
+                },
+                Mailbox {
+                    name: "Sent",
+                    validity: 1,
+                    messages: vec![(1, mail("l1@x", "C <c@example.com>", None, at, "agenda attached"))],
+                },
+            ],
+            "pw",
+        );
+        let (db, source) = db_for(port);
+        let s = sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!((s.inserted, s.duplicates), (1, 1));
+        assert_eq!(db.count_self_messages(None, None).unwrap(), 1, "the copy the user sent is the one kept");
+        assert_eq!(db.count_participants().unwrap(), 0, "nobody is made up for the copy that was dropped");
+        assert!(db.sent_folder_people().unwrap().is_empty(), "the list's copy was never in the Sent folder");
     }
 
     #[test]

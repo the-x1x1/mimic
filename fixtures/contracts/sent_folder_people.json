@@ -1,0 +1,16 @@
+[
+  {
+    "kind": "email",
+    "address": "c@work.example",
+    "sent": 2,
+    "owner": {
+      "participantId": "dfef10ad-f070-4de5-9118-c520431d5800",
+      "displayName": "C at work",
+      "messages": 2,
+      "otherAddresses": [],
+      "relationship": null,
+      "hasNotes": false,
+      "preferences": 0
+    }
+  }
+]

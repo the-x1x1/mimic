@@ -734,3 +734,43 @@ fn someone_who_is_only_the_user_is_folded_back_without_a_question() {
     assert_eq!(db.count_self_messages(None, None).unwrap(), expected_own);
     assert!(db.held_user_addresses().unwrap().is_empty());
 }
+
+/// A Gmail export where the user answered from a work address Mimic wasn't
+/// told about. Gmail labels what the user sent "Sent", so whoever the work
+/// address is filed under is asked about by name — and a yes is the same
+/// fold adding the address by hand would be. Writes the fixture the zod suite
+/// parses for the question.
+#[test]
+fn mail_labelled_sent_from_an_unknown_address_is_asked_about() {
+    let db = Db::open_in_memory().unwrap();
+    db.set_setting(mimic_core::db::WITHIN_DAYS_SETTING, &0).unwrap();
+    db.set_user_identity("C").unwrap();
+    db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
+    let source = db
+        .create_source(&NewSource {
+            connector: "mbox".into(),
+            name: "Takeout".into(),
+            channel: "email".into(),
+            location: Some(fixture("import/takeout_sent_labels.mbox").to_string_lossy().into()),
+            config: Value::Null,
+        })
+        .unwrap();
+    let summary = run_import(&db, &source.id);
+    assert_eq!(summary.inserted, 5);
+    assert_eq!(summary.from_self, 1, "only what was sent from the address Mimic was told about");
+    assert_eq!(db.count_threads_awaiting_reply().unwrap(), 2, "the work replies read as someone else waiting");
+
+    let asked = db.sent_folder_people().unwrap();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].address, "c@work.example");
+    assert_eq!(asked[0].sent, 2);
+    assert_eq!(asked[0].owner.display_name, "C at work");
+    assert_eq!(asked[0].owner.messages, 2);
+    check_fixture("sent_folder_people.json", &serde_json::to_value(&asked).unwrap());
+
+    let added = db.add_user_address(IdentifierKind::Email, &asked[0].address, Some(&asked[0].owner)).unwrap();
+    assert_eq!((added.claimed.people, added.claimed.messages), (1, 2));
+    assert_eq!(db.count_self_messages(None, None).unwrap(), 3);
+    assert_eq!(db.count_threads_awaiting_reply().unwrap(), 0, "Ada was answered, and so was Bob");
+    assert!(db.sent_folder_people().unwrap().is_empty());
+}

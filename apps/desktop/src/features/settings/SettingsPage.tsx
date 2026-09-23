@@ -15,9 +15,14 @@ import {
   useHeldAddresses,
   useIdentity,
   useRemoveIdentifier,
+  useSentFolderPeople,
   useSetIdentity,
 } from "@/hooks/usePeople";
-import { AddAddressForm, HeldAddressQuestion } from "@/features/identity/AddAddressForm";
+import {
+  AddAddressForm,
+  HeldAddressQuestion,
+  SentFolderQuestion,
+} from "@/features/identity/AddAddressForm";
 import { useProviderState } from "@/hooks/useCompose";
 import { useSources } from "@/hooks/useSources";
 import { useUpdater } from "@/features/updater/useUpdater";
@@ -56,6 +61,7 @@ export function SettingsPage() {
 function IdentitySection() {
   const identity = useIdentity();
   const held = useHeldAddresses(Boolean(identity.data));
+  const sentFolder = useSentFolderPeople(Boolean(identity.data));
   const setIdentity = useSetIdentity();
   const remove = useRemoveIdentifier();
 
@@ -98,6 +104,16 @@ function IdentitySection() {
               </li>
             );
           })}
+        </ul>
+      ) : null}
+
+      {sentFolder.data && sentFolder.data.length > 0 ? (
+        <ul className="plain-list" aria-label="Found in your Sent folder">
+          {sentFolder.data.map((p) => (
+            <li key={p.owner.participantId}>
+              <SentFolderQuestion person={p} />
+            </li>
+          ))}
         </ul>
       ) : null}
 

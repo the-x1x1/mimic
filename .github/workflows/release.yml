@@ -10,6 +10,13 @@ on:
 permissions:
   contents: write
 
+# One run per tag at a time. GitHub started two runs for the one push of
+# v0.10.0-alpha.9, and each made a draft release. Now the second waits, then
+# finds the first one's release and stops ("No release for this tag yet").
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -36,6 +43,20 @@ jobs:
             PUB=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').plugins.updater.pubkey.trim()")
             DEV=$(tr -d '\n' < docs/DEV_UPDATER_PUBKEY.txt)
             [ "$PUB" != "$DEV" ] || { echo "development updater pubkey in tauri.conf.json"; exit 1; }
+          fi
+      - name: No release for this tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A second run for the tag stops here, before building anything.
+          # Only "not found" means there is none: any other failure to look
+          # stops the run too, rather than risk a second release.
+          if out=$(gh release view "${GITHUB_REF_NAME}" --json tagName 2>&1); then
+            echo "::error::A release for ${GITHUB_REF_NAME} already exists; not making a second one."
+            exit 1
+          elif ! echo "$out" | grep -q "release not found"; then
+            echo "::error::Couldn't check for a release for ${GITHUB_REF_NAME}: $out"
+            exit 1
           fi
 
   windows:
@@ -139,6 +160,16 @@ jobs:
           V="${{ needs.windows.outputs.version }}"
           PRE=""; echo "$V" | grep -qE "alpha|beta|rc" && PRE="--prerelease"
           awk -v v="$V" 'BEGIN{p=0} /^## \[/{p=($0 ~ "\\[" v "\\]")} p' CHANGELOG.md > notes.md
+          # A draft doesn't reserve its tag, so GitHub would take a second
+          # release for it. If one is there, from another run, stop; a broken
+          # draft from a failed run is deleted by hand before running again.
+          if out=$(gh release view "v$V" --json tagName 2>&1); then
+            echo "::error::A release for v$V already exists; not making a second one."
+            exit 1
+          elif ! echo "$out" | grep -q "release not found"; then
+            echo "::error::Couldn't check for a release for v$V: $out"
+            exit 1
+          fi
           gh release create "v$V" --draft $PRE --title "Mimic v$V" --notes-file notes.md release-artifacts/*
       - name: Verify uploaded metadata
         env:

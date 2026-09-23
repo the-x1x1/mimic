@@ -15,7 +15,7 @@ import { useSources, useStartImport, useDeleteSource } from "@/hooks/useSources"
 import { useStartAnalysis } from "@/hooks/useVoice";
 import { useJobs } from "@/hooks/useJobs";
 import { AddSourceDialog } from "@/features/sources/AddSourceDialog";
-import { AddAddressForm } from "@/features/identity/AddAddressForm";
+import { AddAddressForm, SentFolderNotice } from "@/features/identity/AddAddressForm";
 import { ModelStep } from "./ModelStep";
 import { ipc } from "@/lib/ipc";
 import { useQueryClient } from "@tanstack/react-query";
@@ -282,6 +282,8 @@ export function ImportStep() {
           wrote it from another address &mdash; add it here and I&rsquo;ll count what came from it
           as yours.
         </p>
+        {/* When the mail says which address that was, ask about it first. */}
+        <SentFolderNotice open />
         <AddAddressForm
           primary
           inputLabel="Another address of yours"

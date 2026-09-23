@@ -83,6 +83,49 @@ export const HeldAddress = z.object({
 });
 export type HeldAddress = z.infer<typeof HeldAddress>;
 
+/**
+ * Someone mail is filed under whose messages were in the user's own Sent
+ * folder — read from it over IMAP, or labelled "Sent" in a Gmail export.
+ * What is there is usually what the user sent, so this is often the user
+ * under an address Mimic wasn't given — but not always: mail sent for
+ * someone, and addresses several people send from, end up there too. So it
+ * is asked, never assumed, with the question adding `address` would ask
+ * (`owner` is that question's answer).
+ */
+export const SentFolderPerson = z.object({
+  kind: z.string(),
+  address: z.string(),
+  /** Their messages that were in the Sent folder, of `owner.messages`. */
+  sent: z.number(),
+  owner: AddressOwner,
+});
+export type SentFolderPerson = z.infer<typeof SentFolderPerson>;
+
+/**
+ * What to say about someone whose mail was in the Sent folder: `line` before
+ * the question is opened — how much of their mail was there, and what it
+ * costs while it goes unanswered — and `why` above the question itself: how
+ * much, and why that isn't proof.
+ */
+export function describeSentFolder(p: SentFolderPerson): { line: string; why: string } {
+  const name = p.owner.displayName;
+  const who = name.toLowerCase() === p.address.toLowerCase() ? p.address : `${name} (${p.address})`;
+  const n = p.sent;
+  const of = p.owner.messages;
+  const found =
+    n >= of
+      ? n === 1
+        ? `The one message I have from ${who} was in your Sent folder.`
+        : n === 2
+          ? `Both messages I have from ${who} were in your Sent folder.`
+          : `All ${n.toLocaleString()} messages I have from ${who} were in your Sent folder.`
+      : `${n.toLocaleString()} of the ${of.toLocaleString()} messages I have from ${who} ${n === 1 ? "was" : "were"} in your Sent folder.`;
+  return {
+    line: `${found} If that's you, I'm counting what you wrote as someone else's.`,
+    why: `${found} Mail there is usually yours, so ${name} may be you writing from another address — unless someone else sends for you, you passed their mail on, or other people send from that address too.`,
+  };
+}
+
 function listed(items: string[]): string {
   if (items.length <= 1) return items.join("");
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;

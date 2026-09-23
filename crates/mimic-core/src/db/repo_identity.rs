@@ -88,6 +88,24 @@ pub struct HeldAddress {
     pub kept_apart: bool,
 }
 
+/// Someone mail is filed under who sent mail found in the user's own Sent
+/// folder. What is there is usually the user's, so this is often the user
+/// under an address Mimic doesn't know yet — but mail sent for someone, and
+/// addresses several people send from, end up there too. Asked about, with
+/// how much of their mail was there, and never assumed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentFolderPerson {
+    /// One of their addresses, to add as the user's. Their others come with
+    /// it (`owner.other_addresses`).
+    pub kind: String,
+    pub address: String,
+    /// Their messages that were in the user's Sent folder.
+    pub sent: usize,
+    /// Everything saying yes would change, as adding `address` would.
+    pub owner: AddressOwner,
+}
+
 /// What `claim_user_mail` did, and what it left for the user.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -264,6 +282,57 @@ impl Db {
             }
         }
         Ok(held)
+    }
+
+    /// People mail is filed under whose messages were in the user's own Sent
+    /// folder — often the user under an address Mimic doesn't have yet, and
+    /// asked about (`add_user_address` with the owner shown, or `keep_apart`),
+    /// never assumed: a Sent folder can also hold mail sent for someone, or
+    /// from an address several people share. Likeliest first: the largest
+    /// share of their mail in the Sent folder, then the most. Not someone the
+    /// user said isn't them, not someone with no address to add, and not
+    /// someone holding an address that is already the user's:
+    /// `held_user_addresses` asks about them.
+    pub fn sent_folder_people(&self) -> DbResult<Vec<SentFolderPerson>> {
+        let conn = self.conn();
+        let counted: Vec<(String, i64)> = {
+            let mut stmt = conn.prepare(
+                "SELECT participant_id, sent FROM (
+                   SELECT m.participant_id AS participant_id, COUNT(*) AS sent,
+                          (SELECT COUNT(*) FROM messages a WHERE a.participant_id = m.participant_id) AS total
+                   FROM messages m
+                   JOIN participants p ON p.id = m.participant_id
+                   WHERE m.direction = 'other' AND p.is_self = 0 AND p.kept_apart = 0
+                     AND CASE WHEN instr(m.metadata_json, '\"sentFolder\"') > 0 AND json_valid(m.metadata_json)
+                              THEN json_type(m.metadata_json, '$.sentFolder') END = 'true'
+                     AND NOT EXISTS (SELECT 1 FROM participant_identifiers pi
+                                     JOIN user_identifiers u ON u.kind = pi.kind AND u.normalized_value = pi.normalized_value
+                                     WHERE pi.participant_id = p.id)
+                   GROUP BY m.participant_id)
+                 ORDER BY CAST(sent AS REAL) / total DESC, sent DESC, participant_id",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut out = Vec::new();
+        for (participant_id, sent) in counted {
+            // An email address first: that is what a Sent folder shows. A
+            // name they signed with is not an address to add.
+            let address: Option<(String, String, String)> = conn
+                .query_row(
+                    "SELECT kind, value, normalized_value FROM participant_identifiers
+                     WHERE participant_id = ?1 AND kind <> 'display_name'
+                     ORDER BY kind = 'email' DESC, normalized_value LIMIT 1",
+                    [&participant_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            let Some((kind, address, normalized)) = address else { continue };
+            if let Some(owner) = person(&conn, &participant_id, Some((kind.as_str(), normalized.as_str())))? {
+                out.push(SentFolderPerson { kind, address, sent: sent as usize, owner });
+            }
+        }
+        Ok(out)
     }
 
     /// Fold back into the user everyone whose every address is already one of
@@ -837,6 +906,42 @@ mod tests {
         assert_eq!(added.claimed, Claimed { messages: 2, people: 1 });
         assert_eq!(added.identity.identifiers.len(), 2, "the address as stored, not a second copy");
         assert!(matches!(db.claim_held_address("gone", &now.owner), Err(DbError::NotFound(_))));
+    }
+
+    #[test]
+    fn someone_whose_mail_was_in_the_sent_folder_is_asked_about_until_answered() {
+        let mark = |db: &Db| {
+            db.conn()
+                .execute(
+                    "UPDATE messages SET metadata_json = '{\"sentFolder\": true}' WHERE external_id IN ('l2', 'n1')",
+                    [],
+                )
+                .unwrap();
+            // Not a reading this code wrote.
+            db.conn()
+                .execute("UPDATE messages SET metadata_json = '{\"sentFolder\": \"yes\"}' WHERE external_id = 'l1'", [])
+                .unwrap();
+        };
+        let (db, _lunch, alias) = inbox_with_an_alias();
+        assert!(db.sent_folder_people().unwrap().is_empty(), "nothing was read from a Sent folder");
+        mark(&db);
+        let asked = db.sent_folder_people().unwrap();
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert_eq!((asked[0].kind.as_str(), asked[0].address.as_str(), asked[0].sent), ("email", "C@Work.example", 2));
+        assert_eq!(asked[0].owner.participant_id, alias);
+        assert_eq!(
+            Some(&asked[0].owner),
+            db.preview_user_address(IdentifierKind::Email, "c@work.example").unwrap().owner.as_ref(),
+            "the same question adding the address asks, so a yes to it is accepted"
+        );
+        db.keep_apart(&alias).unwrap();
+        assert!(db.sent_folder_people().unwrap().is_empty(), "a no is kept");
+
+        let (db, _lunch, _alias) = inbox_with_an_alias();
+        mark(&db);
+        db.add_user_identifier(IdentifierKind::Email, "c@work.example").unwrap();
+        assert!(db.sent_folder_people().unwrap().is_empty(), "an address already the user's is asked about as held");
+        assert_eq!(db.held_user_addresses().unwrap().len(), 1);
     }
 
     #[test]
