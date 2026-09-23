@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.10.0-alpha.9`
+## Current status — `0.10.0-alpha.10`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -18,6 +18,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Desktop shell: one screen, with People / How you write / Your mail / Settings in a drawer over it                        | Implemented                                                                                                                           |
 | The one screen: who is waiting, and use / change / drop on each reply                                                    | Implemented and tested                                                                                                                |
+| Each waiting thread's whole conversation, before and after the message on its card, a page at a time                     | Implemented and tested; only what has already been read, as plain text                                                                |
 | Assisted drafting in the background, off by default                                                                      | Implemented and tested; after an import or a mailbox check, and only for threads that need a reply                                    |
 | What's waiting leaves out newsletters, notifications and threads you said need no reply, and says how many               | Implemented and tested; decided from headers only, and your word outranks them                                                        |
 | What's waiting leaves out threads that have gone quiet (last message older than a window you choose, 30 days by default) | Implemented and tested; a reading of the date, counted and shown on request                                                           |

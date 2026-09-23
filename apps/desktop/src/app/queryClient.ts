@@ -10,6 +10,10 @@ export const queryClient = new QueryClient({
 export const qk = {
   appInfo: ["appInfo"] as const,
   dashboard: ["dashboard"] as const,
+  // Under "dashboard": whatever refreshes the home screen — a mailbox check,
+  // someone folded into the user — refreshes the conversation read from it.
+  conversation: (conversationId: string, fromMessageId: string, toward: string) =>
+    ["dashboard", "conversation", conversationId, fromMessageId, toward] as const,
   localModel: ["localModel"] as const,
   system: ["system"] as const,
   onboarding: ["onboarding"] as const,

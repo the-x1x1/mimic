@@ -174,6 +174,43 @@ export type CommandError = z.infer<typeof CommandError>;
  */
 export const AutomatedReason = z.string();
 
+/**
+ * One message of a conversation as the screen shows it. Whether the user
+ * wrote it is decided at import, by their addresses; nothing here guesses.
+ */
+export const ThreadMessage = z.object({
+  id: z.string(),
+  direction: z.enum(["self", "other", "unknown"]),
+  /** Who wrote it, when it was not the user and they could be named. */
+  author: z.string().nullable(),
+  sentAt: z.string().nullable(),
+  body: z.string(),
+  /** Why it looks automated, from its headers, when it does. A reading. */
+  automated: AutomatedReason.nullable(),
+});
+export type ThreadMessage = z.infer<typeof ThreadMessage>;
+
+/**
+ * Part of a conversation, oldest first, read from one of its messages toward
+ * the start or the end, and how many messages are further that way.
+ */
+export const ConversationPage = z.object({
+  messages: z.array(ThreadMessage),
+  more: z.number(),
+});
+export type ConversationPage = z.infer<typeof ConversationPage>;
+
+/** Which way from one of its messages a conversation is read. */
+export const Toward = z.enum(["earlier", "later"]);
+export type Toward = z.infer<typeof Toward>;
+
+/** Who wrote a message of a conversation, as its label says it. */
+export function writerOf(m: ThreadMessage): string {
+  if (m.direction === "self") return "You wrote";
+  if (m.direction === "unknown") return "I couldn't tell who wrote this";
+  return `${m.author ? m.author.split(" ")[0] : "Someone I couldn't name"} wrote`;
+}
+
 /** What the user said about whether a thread needs a reply. */
 export const ThreadMark = z.enum(["no_reply_needed", "needs_reply"]);
 export type ThreadMark = z.infer<typeof ThreadMark>;
@@ -193,6 +230,13 @@ export const DashboardThread = z.object({
   lastMessage: z.string(),
   lastMessageAt: z.string().nullable(),
   lastMessageId: z.string(),
+  /**
+   * Messages of the conversation before the one on screen, and after it.
+   * Those after it do not decide whether it is waiting — they look automated,
+   * or who wrote them could not be told — and are counted so they can be shown.
+   */
+  earlier: z.number(),
+  later: z.number(),
   participant: Participant.nullable(),
   hasRelationshipProfile: z.boolean(),
   /** A draft written for `lastMessage`, never one written for an earlier message. */

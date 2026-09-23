@@ -15,6 +15,21 @@ pub async fn get_dashboard(
     Ok(mimic_core::dashboard::dashboard(&state.db, limit.unwrap_or(25).min(200), auto, show_left_out.unwrap_or(false))?)
 }
 
+/// Up to `limit` messages of a conversation next to one of its messages,
+/// toward its start or its end, oldest first: the rest of a waiting thread,
+/// a page at a time.
+#[tauri::command]
+pub async fn get_conversation_page(
+    state: State<'_, SharedState>,
+    conversation_id: String,
+    from_message_id: String,
+    toward: mimic_core::db::Toward,
+    limit: Option<usize>,
+) -> CommandResult<mimic_core::db::ConversationPage> {
+    let limit = limit.unwrap_or(20).clamp(1, 200);
+    Ok(state.db.conversation_page(&conversation_id, &from_message_id, toward, limit)?)
+}
+
 /// Say whether a thread needs a reply: `no_reply_needed` takes it off the
 /// list, `needs_reply` keeps one Mimic read as automated on it, and no mark
 /// takes back whatever was said. The mark is about `message_id`, the message

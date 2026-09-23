@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Button, InlineError } from "@mimic/ui";
 import {
@@ -6,6 +7,7 @@ import {
   type DashboardThread,
   type Draft,
   type ThreadMark,
+  type Toward,
   SituationChoice,
   describeAutomated,
   describeLeftOut,
@@ -15,6 +17,7 @@ import {
   describeMailChecking,
   describeSituation,
   describeWaiting,
+  writerOf,
 } from "@mimic/contracts";
 import { useDashboard, useMarkThread, useStartAssistDrafts } from "@/hooks/useDashboard";
 import { useGenerateDraft, useResolveDraft } from "@/hooks/useCompose";
@@ -22,6 +25,7 @@ import { useSituations } from "@/hooks/useVoice";
 import { formatRelative } from "@/lib/format";
 import { toast } from "@/state/toast";
 import { ipc } from "@/lib/ipc";
+import { qk } from "@/app/queryClient";
 
 /**
  * The one screen: who is waiting, what they said, and what Mimic would say
@@ -431,6 +435,17 @@ export function Thread({
         <KeptOnTheList thread={thread} withinDays={withinDays} />
       ) : null}
 
+      {thread.earlier > 0 ? (
+        <RestOfThread
+          // Another message on screen is another place to read from.
+          key={`earlier:${thread.lastMessageId}`}
+          conversationId={thread.conversationId}
+          messageId={thread.lastMessageId}
+          toward="earlier"
+          count={thread.earlier}
+        />
+      ) : null}
+
       <div className="thread__part">
         <div className="letter-label">{saidLabel}</div>
         <p className="letter letter--theirs">{thread.lastMessage}</p>
@@ -438,6 +453,16 @@ export function Thread({
           <NoReplyNeeded thread={thread} who={who} />
         </div>
       </div>
+
+      {thread.later > 0 ? (
+        <RestOfThread
+          key={`later:${thread.lastMessageId}`}
+          conversationId={thread.conversationId}
+          messageId={thread.lastMessageId}
+          toward="later"
+          count={thread.later}
+        />
+      ) : null}
 
       {draft ? (
         <DraftReview
@@ -488,6 +513,150 @@ export function Thread({
       )}
       {generate.isError ? <InlineError>{(generate.error as Error).message}</InlineError> : null}
     </article>
+  );
+}
+
+/** Messages of the conversation read in at a time. */
+const PAGE = 20;
+
+/**
+ * Said when a message a page is read from is no longer there — its person or
+ * its mail was deleted while the conversation was open. Which one isn't
+ * known here (the card's message, or the far end of a page already shown),
+ * so it names neither, and what was shown is put away rather than left on
+ * screen under a line saying part of it is gone.
+ */
+export const GONE = "Part of this conversation isn't here any more.";
+
+function isGone(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === "not_found";
+}
+
+/**
+ * The rest of the conversation the message on screen is part of, on one side
+ * of it, when the user asks for it: oldest first, a page at a time. Closed by
+ * default, because the message itself is usually enough, and read only when
+ * opened. Before it is the history. After it is whatever came in that did not
+ * decide whether the thread is waiting — something that looks automated, or
+ * whose writer could not be told — shown so that the card hides nothing.
+ */
+export function RestOfThread({
+  conversationId,
+  messageId,
+  toward,
+  count,
+}: {
+  conversationId: string;
+  messageId: string;
+  toward: Toward;
+  /** How many messages are on that side, as the home screen counted them. */
+  count: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const earlier = toward === "earlier";
+  const pages = useInfiniteQuery({
+    queryKey: qk.conversation(conversationId, messageId, toward),
+    queryFn: ({ pageParam }) => ipc.conversationPage(conversationId, pageParam, toward, PAGE),
+    initialPageParam: messageId,
+    // Read on from the far end of the last page read.
+    getNextPageParam: (last) => {
+      const far = earlier ? last.messages[0] : last.messages.at(-1);
+      return last.more > 0 && far ? far.id : undefined;
+    },
+    enabled: open,
+  });
+  const side = earlier ? "before" : "after";
+
+  if (!open) {
+    return (
+      <div className="thread__rest">
+        <button type="button" className="linkish" onClick={() => setOpen(true)}>
+          {count === 1
+            ? `Show the message ${side} this one`
+            : `Show the ${count.toLocaleString()} messages ${side} this one`}
+        </button>
+      </div>
+    );
+  }
+
+  const read = pages.data?.pages ?? [];
+  // Pages before it come nearest first, so the furthest back goes on top.
+  const messages = (earlier ? [...read].reverse() : read).flatMap((p) => p.messages);
+  const more = read.at(-1)?.more ?? 0;
+  const further =
+    more > 0 ? (
+      <button
+        type="button"
+        className="linkish"
+        disabled={pages.isFetchingNextPage}
+        onClick={() => void pages.fetchNextPage()}
+      >
+        {pages.isFetchingNextPage
+          ? earlier
+            ? "Reading further back…"
+            : "Reading further on…"
+          : `Show ${more.toLocaleString()} ${earlier ? "earlier" : "later"} ${more === 1 ? "message" : "messages"}`}
+      </button>
+    ) : null;
+
+  const gone = pages.isError && isGone(pages.error);
+  if (gone) {
+    return (
+      <div className="thread__rest">
+        <button type="button" className="linkish" onClick={() => setOpen(false)}>
+          Hide what came {side}
+        </button>
+        <p className="muted small row gap-2">
+          <span>{GONE}</span>
+          <button
+            type="button"
+            className="linkish"
+            disabled={pages.isFetching}
+            onClick={() => void pages.refetch()}
+          >
+            Read it again
+          </button>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="thread__rest">
+      <button type="button" className="linkish" onClick={() => setOpen(false)}>
+        Hide what came {side}
+      </button>
+      {pages.isError ? <InlineError>{pages.error.message}</InlineError> : null}
+      {pages.isPending ? <p className="muted small">Reading it back…</p> : null}
+      {earlier ? further : null}
+      {messages.length > 0 ? (
+        <ol className={earlier ? "thread__history" : "thread__history thread__history--later"}>
+          {messages.map((m) => (
+            <li key={m.id} className="thread__history-item">
+              <div
+                className={
+                  m.direction === "self" ? "letter-label letter-label--mine" : "letter-label"
+                }
+              >
+                {writerOf(m)}
+                {m.sentAt ? <span className="muted"> · {formatRelative(m.sentAt)}</span> : null}
+              </div>
+              <p
+                className={m.direction === "self" ? "letter letter--mine" : "letter letter--theirs"}
+              >
+                {m.body}
+              </p>
+              {m.automated !== null ? (
+                <p className="muted small">
+                  It looks automated to me: {describeAutomated(m.automated)}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {earlier ? null : further}
+    </div>
   );
 }
 
