@@ -2,6 +2,28 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.4] — 2026-09-22
+
+Only what needs a reply. With a real mailbox connected, most of what arrives is not a person.
+
+### Added
+
+- **Newsletters, receipts and notifications are left out of what's waiting.** I decide from the headers the sending system put on the message, never from its words: a mailing list with nowhere to reply to the list, mail marked as junk, automatic replies and out-of-office messages, bounces and read receipts, and addresses that say "no-reply" outright. When I'm unsure, it stays on the list — a newsletter that gets through costs you a glance, while a person I filed away is a reply you never see. So a discussion list your team writes to stays in; so does mail a help desk marks as bulk, because its staff write those replies; so does a contact form's message when it names the person who filled it in; and so do `info@` and `support@`, because people read those.
+- **An automatic reply doesn't hide a question.** If a colleague's out-of-office lands in a thread after someone asked you something, the question is still waiting. And a notification that arrives after you replied — a comment on an issue you answered by email — is counted with what I left out, where you can put it back, rather than disappearing.
+- **I say how many I left out, and show them when you ask.** A line under the heading counts what I left out and why, with **Show them**. Each one says why it looks automated to me, and **It needs a reply** puts it back — for that message; a newer one is judged again.
+- **"Doesn't need a reply"** under every message. The thread comes off the list until that person writes again, and waits with what I left out in case you change your mind. If they wrote again while you were reading, nothing changes and I say so.
+- Replies prepared in advance skip everything left out, so a run spends its ten drafts on people rather than on newsletters.
+
+### Fixed
+
+- **A draft could sit under a message it was not written for.** When someone wrote again before you used a draft, the draft for their earlier message was shown under the new one — and one already on screen stayed there after the new message arrived — while a draft for the new message was never prepared. A draft now records the message it answers and appears only under that one; two messages with the same words are two questions.
+- **"Write the rest now" could not reach the rest.** Each run looked only at the ten newest waiting threads, so once those had drafts it found nothing to do, however many more were waiting. It now looks past the ones it has already written — and never writes again for a message you already used or turned down a draft for.
+- The home screen said "I've written a reply for each one" when it hadn't, and Settings described replies prepared in advance as covering every thread after an import. Both now say what happens.
+
+### Not in this release
+
+Mail already imported carries no reading of its headers, because the headers are not kept once a message is read: to have it sorted, remove the mailbox or export and add it again. Nothing is left out of **People** yet — a no-reply sender is still listed there. Nothing decides that a thread from a person needs no reply; that is yours to say. A draft left behind by a newer message stays unresolved; it no longer appears anywhere.
+
 ## [0.10.0-alpha.3] — 2026-09-22
 
 Real mail. Connect a mailbox, and read MIME properly wherever mail comes from.

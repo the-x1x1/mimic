@@ -48,4 +48,4 @@ On first launch after an update the app opens the database, and if the schema ve
 4. Start a folder scan; press _Install and restart_: the guard refuses with the active job named.
 5. Let the scan finish; press _Install and restart_: app relaunches as 0.1.0-alpha.2; Settings › Diagnostics shows the same schema version and asset counts; `data/backups/` gains a file only if the schema changed.
 6. Tamper test: replace `.sig` on a local mirror → the plugin rejects the download (signature error surfaces in _Last check failed_).
-   Record the outcome in PROJECT_STATUS (row _Tested update path_).
+   Record the outcome in PROJECT*STATUS (row \_Tested update path*).

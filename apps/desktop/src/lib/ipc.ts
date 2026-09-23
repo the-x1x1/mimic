@@ -39,6 +39,7 @@ import {
   CommandError,
   type ComposeRequest,
   type ImapAccount,
+  type ThreadMark,
 } from "@mimic/contracts";
 import { isTauri } from "./tauri";
 import { qk, queryClient } from "@/app/queryClient";
@@ -87,10 +88,19 @@ const z_void = {
 } as unknown as z.ZodType<void>;
 
 const z_string = AppInfo.shape.dataRoot;
+const z_bool = Dashboard.shape.showingLeftOut;
 
 export const ipc = {
   appInfo: () => call("get_app_info", AppInfo),
-  dashboard: (limit = 25) => call("get_dashboard", Dashboard, { limit }),
+  dashboard: (limit = 25, showLeftOut = false) =>
+    call("get_dashboard", Dashboard, { limit, showLeftOut }),
+  /**
+   * Say a thread does or does not need a reply, about the message on screen;
+   * null takes it back. Resolves to whether it applies — false when someone
+   * wrote again in the meantime.
+   */
+  markThread: (conversationId: string, messageId: string, mark: ThreadMark | null) =>
+    call("mark_thread", z_bool, { conversationId, messageId, mark }),
   startAssistDrafts: () => call("start_assist_drafts", Job),
   localModelStatus: () => call("local_model_status", LocalModelStatus),
   startModelPull: () => call("start_model_pull", Job),

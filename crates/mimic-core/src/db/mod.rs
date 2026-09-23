@@ -15,6 +15,7 @@ pub mod repo_people;
 mod repo_situations;
 mod repo_sources;
 mod repo_voice;
+mod repo_waiting;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -26,9 +27,10 @@ use crate::ids::now_rfc3339;
 
 pub use models::*;
 pub use repo_drafts::{DraftOutcomes, NewDraft};
-pub use repo_messages::{word_count, AwaitingReply, ImportCounts, NewMessage, SelfScope};
+pub use repo_messages::{word_count, ImportCounts, NewMessage, SelfScope};
 pub use repo_people::IdentifierInput;
 pub use repo_sources::channel_is_known;
+pub use repo_waiting::{AwaitingReply, LeftOut, ThreadMark};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {

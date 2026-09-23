@@ -25,6 +25,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 6, name: "themes", sql: include_str!("migrations/0006_themes.sql") },
     Migration { version: 7, name: "situations", sql: include_str!("migrations/0007_situations.sql") },
     Migration { version: 8, name: "message_ids", sql: include_str!("migrations/0008_message_ids.sql") },
+    Migration { version: 9, name: "thread_marks", sql: include_str!("migrations/0009_thread_marks.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -79,7 +80,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 8);
+        assert_eq!(latest_version(), 9);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -173,7 +174,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6, 7, 8]);
+        assert_eq!(applied, vec![5, 6, 7, 8, 9]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
 
         let tables = table_names(&conn);
@@ -288,14 +289,67 @@ mod tests {
             )
             .is_err());
 
+        // A thread mark is one of two words, and it goes with its message.
+        assert!(conn
+            .execute(
+                "INSERT INTO thread_marks(conversation_id, message_id, mark, marked_at) VALUES ('c','m1','maybe','t')",
+                [],
+            )
+            .is_err());
+        conn.execute(
+            "INSERT INTO thread_marks(conversation_id, message_id, mark, marked_at) VALUES ('c','m1','no_reply_needed','t')",
+            [],
+        )
+        .unwrap();
+
+        // A draft records the message it answers, and outlives it.
+        conn.execute(
+            "INSERT INTO drafts(id, conversation_id, channel, generated_text, provider, model, prompt_hash, created_at, incoming_message_id)
+             VALUES ('d1','c','email','hi','mock','m','h','t','m1')",
+            [],
+        )
+        .unwrap();
+
         // Deleting a participant takes their messages with them.
         conn.execute("DELETE FROM participants WHERE id='p'", []).unwrap();
         let left: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 0, "messages must cascade from their participant");
+        let marks: i64 = conn.query_row("SELECT COUNT(*) FROM thread_marks", [], |r| r.get(0)).unwrap();
+        assert_eq!(marks, 0, "a mark must not outlive the message it was made about");
+        let link: Option<String> =
+            conn.query_row("SELECT incoming_message_id FROM drafts WHERE id='d1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(link, None, "a draft loses its link to a deleted message, not its own row");
 
         // Deleting a source takes its conversations with them.
         conn.execute("DELETE FROM sources WHERE id='s'", []).unwrap();
         let convos: i64 = conn.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0)).unwrap();
         assert_eq!(convos, 0);
+    }
+
+    #[test]
+    fn existing_drafts_survive_the_upgrade_that_links_drafts_to_messages() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&mut conn, 8).unwrap();
+        conn.execute(
+            "INSERT INTO drafts(id, channel, generated_text, provider, model, prompt_hash, created_at, incoming_message)
+             VALUES ('d0','email','hi','mock','m','h','2026-09-01T00:00:00.000Z','can you?')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![9]);
+        let (text, link): (Option<String>, Option<String>) = conn
+            .query_row("SELECT incoming_message, incoming_message_id FROM drafts WHERE id='d0'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(text.as_deref(), Some("can you?"));
+        assert_eq!(link, None, "an old draft has no link and is matched by its text");
+        for index in ["idx_thread_marks_message", "idx_drafts_incoming_message"] {
+            let found: i64 = conn
+                .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1", [index], |r| r.get(0))
+                .unwrap();
+            assert_eq!(found, 1, "{index}");
+        }
     }
 }

@@ -9,13 +9,15 @@
 //! connected: every message it reports came from an import or a mailbox check,
 //! `last_import_at` says when, and `mail_checking` says whether anything
 //! arrives by itself, so the screen never implies mail is arriving when it is
-//! not. And a thread is "awaiting
-//! a reply" only because the last message in it came from someone else and was
-//! never answered — no heuristic about urgency, no inferred intent.
+//! not. And a thread is "awaiting a reply" because the last message in it came
+//! from someone else and was never answered — no heuristic about urgency, no
+//! inferred intent — unless the user said it needs none, or its headers say a
+//! machine sent it (`db::repo_waiting` has the order). What was left out is
+//! counted and can be shown, so leaving something out never hides it.
 
 use serde::Serialize;
 
-use crate::db::{Db, DbError, Draft, DraftOutcomes, Participant};
+use crate::db::{AwaitingReply, Db, DbError, Draft, DraftOutcomes, LeftOut, Participant, ThreadMark};
 
 /// One row of the feed: a conversation waiting on the user, the message it is
 /// waiting on, and the draft Mimic has for it, if any.
@@ -38,9 +40,15 @@ pub struct DashboardThread {
     /// the screen can say whether a draft would be shaped by how the user
     /// writes *to them* or only by how they write in general.
     pub has_relationship_profile: bool,
-    /// An unresolved draft for this conversation. Present only because one was
-    /// generated — never a placeholder.
+    /// An unresolved draft written for `last_message`. Present only because
+    /// one was generated — never a placeholder — and never a draft written for
+    /// an earlier message in the thread.
     pub draft: Option<Draft>,
+    /// Why the last message looks automated, from its headers, if it does. A
+    /// reading, and the screen words it as one.
+    pub automated: Option<String>,
+    /// What the user said about this thread, while it still applies.
+    pub mark: Option<ThreadMark>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,10 +58,19 @@ pub struct Dashboard {
     pub conversations: i64,
     pub messages: i64,
     pub own_messages: i64,
-    /// Threads whose last message came from someone else, newest first.
+    /// Threads that need a reply, newest first: unanswered, and neither
+    /// automated nor marked by the user as needing none (`db::repo_waiting`).
     pub awaiting: Vec<DashboardThread>,
     /// How many such threads exist in total, which may exceed `awaiting.len()`.
     pub awaiting_total: i64,
+    /// Unanswered threads that are not in `awaiting`, counted by reason.
+    pub left_out: LeftOut,
+    /// Those threads themselves, newest first — only when asked for, so the
+    /// home screen does not load a thousand newsletters to show a count.
+    pub left_out_threads: Vec<DashboardThread>,
+    /// Whether `left_out_threads` was asked for. Empty and not asked for are
+    /// different answers.
+    pub showing_left_out: bool,
     /// Unresolved drafts, including any not attached to a conversation.
     pub pending_drafts: Vec<Draft>,
     pub outcomes: DraftOutcomes,
@@ -68,45 +85,57 @@ pub struct Dashboard {
     pub mail_checking: Option<crate::sources::imap::MailChecking>,
 }
 
-pub fn dashboard(db: &Db, limit: usize, auto_draft: bool) -> Result<Dashboard, DbError> {
-    let awaiting_rows = db.threads_awaiting_reply(limit)?;
-    let mut awaiting = Vec::with_capacity(awaiting_rows.len());
-    for row in awaiting_rows {
-        let participant = match row.participant_id.as_deref() {
-            Some(id) => db.get_participant(id)?,
-            None => None,
-        };
-        let has_relationship_profile = match participant.as_ref() {
-            Some(p) => db.has_relationship_profile(&p.id)?,
-            None => false,
-        };
-        awaiting.push(DashboardThread {
-            conversation_id: row.conversation.id.clone(),
-            channel: row.conversation.channel.clone(),
-            subject: row.conversation.subject.clone(),
-            is_group: row.conversation.is_group,
-            message_count: row.conversation.message_count,
-            last_message: row.last_message,
-            last_message_at: row.last_message_at,
-            last_message_id: row.last_message_id,
-            participant,
-            has_relationship_profile,
-            draft: db.pending_draft_for_conversation(&row.conversation.id)?,
-        });
-    }
+pub fn dashboard(db: &Db, limit: usize, auto_draft: bool, show_left_out: bool) -> Result<Dashboard, DbError> {
+    let awaiting =
+        db.threads_awaiting_reply(limit)?.into_iter().map(|row| thread(db, row)).collect::<Result<Vec<_>, _>>()?;
+    let left_out_threads = if show_left_out {
+        db.threads_left_out(limit)?.into_iter().map(|row| thread(db, row)).collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
 
+    let (awaiting_total, left_out) = db.waiting_counts()?;
     Ok(Dashboard {
         people: db.count_participants()?,
         conversations: db.count_conversations()?,
         messages: db.count_messages()?,
         own_messages: db.count_self_messages(None, None)?,
-        awaiting_total: db.count_threads_awaiting_reply()?,
+        awaiting_total,
         awaiting,
+        left_out,
+        left_out_threads,
+        showing_left_out: show_left_out,
         pending_drafts: db.pending_drafts(limit)?,
         outcomes: db.measured_draft_outcomes()?,
         last_import_at: db.last_import_at()?,
         auto_draft,
         mail_checking: crate::sources::imap::checking(db)?,
+    })
+}
+
+fn thread(db: &Db, row: AwaitingReply) -> Result<DashboardThread, DbError> {
+    let participant = match row.participant_id.as_deref() {
+        Some(id) => db.get_participant(id)?,
+        None => None,
+    };
+    let has_relationship_profile = match participant.as_ref() {
+        Some(p) => db.has_relationship_profile(&p.id)?,
+        None => false,
+    };
+    Ok(DashboardThread {
+        draft: db.pending_draft_for_message(&row.conversation.id, &row.last_message_id, &row.last_message)?,
+        conversation_id: row.conversation.id,
+        channel: row.conversation.channel,
+        subject: row.conversation.subject,
+        is_group: row.conversation.is_group,
+        message_count: row.conversation.message_count,
+        last_message: row.last_message,
+        last_message_at: row.last_message_at,
+        last_message_id: row.last_message_id,
+        participant,
+        has_relationship_profile,
+        automated: row.automated,
+        mark: row.mark,
     })
 }
 
@@ -191,7 +220,7 @@ mod tests {
     #[test]
     fn the_dashboard_counts_what_is_there_and_claims_nothing_else() {
         let (db, source, convo, ada) = db_with_thread();
-        let empty = dashboard(&db, 10, false).unwrap();
+        let empty = dashboard(&db, 10, false, false).unwrap();
         assert_eq!(empty.messages, 0);
         assert!(empty.awaiting.is_empty());
         assert!(empty.pending_drafts.is_empty());
@@ -206,7 +235,7 @@ mod tests {
         .unwrap();
         db.refresh_conversation_stats(&convo).unwrap();
 
-        let view = dashboard(&db, 10, true).unwrap();
+        let view = dashboard(&db, 10, true, false).unwrap();
         assert_eq!(view.messages, 2);
         assert_eq!(view.own_messages, 1);
         assert_eq!(view.conversations, 1);

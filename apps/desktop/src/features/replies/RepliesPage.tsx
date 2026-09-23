@@ -5,12 +5,15 @@ import {
   type Dashboard,
   type DashboardThread,
   type Draft,
+  type ThreadMark,
   SituationChoice,
+  describeAutomated,
+  describeLeftOut,
   describeMailChecking,
   describeSituation,
   describeWaiting,
 } from "@mimic/contracts";
-import { useDashboard, useStartAssistDrafts } from "@/hooks/useDashboard";
+import { useDashboard, useMarkThread, useStartAssistDrafts } from "@/hooks/useDashboard";
 import { useGenerateDraft, useResolveDraft } from "@/hooks/useCompose";
 import { useSituations } from "@/hooks/useVoice";
 import { formatRelative } from "@/lib/format";
@@ -25,9 +28,14 @@ import { ipc } from "@/lib/ipc";
  * arrived through an import, and the first sentence says so before it says
  * anything else. And a draft is a draft: using one copies it and records what
  * you sent. Nothing here sends.
+ *
+ * What is waiting leaves out mail that looks automated and threads the user
+ * said need no reply. It always says how many it left out, and shows them when
+ * asked, so leaving something out never becomes hiding it.
  */
 export function RepliesPage() {
-  const dashboard = useDashboard();
+  const [showLeftOut, setShowLeftOut] = useState(false);
+  const dashboard = useDashboard(25, showLeftOut);
   const data = dashboard.data;
 
   if (dashboard.isError) {
@@ -44,10 +52,13 @@ export function RepliesPage() {
         <h1 className="replies__title">{describeWaiting(data)}</h1>
         {data.awaitingTotal > 0 ? (
           <p className="replies__lede">
-            I&rsquo;ve written a reply for each one, in your words. Read it, change anything you
-            like, then send it yourself &mdash; I never send anything.
+            {data.awaiting.every((t) => t.draft !== null)
+              ? "I've written a reply for each one, in your words."
+              : "Tell me roughly what you want to say, and I'll put it in your words."}{" "}
+            Read it, change anything you like, then send it yourself &mdash; I never send anything.
           </p>
         ) : null}
+        <LeftOutLine data={data} showing={showLeftOut} onToggle={() => setShowLeftOut((v) => !v)} />
       </div>
 
       {data.messages === 0 ? <NothingYet data={data} /> : null}
@@ -55,12 +66,145 @@ export function RepliesPage() {
 
       <div className="replies__list">
         {data.awaiting.map((t) => (
-          <Thread key={t.conversationId} thread={t} />
+          // Keyed by the message as well as the thread: when they write again,
+          // everything this card remembered was about the old message.
+          <Thread key={`${t.conversationId}:${t.lastMessageId}`} thread={t} />
         ))}
       </div>
 
+      {showLeftOut && data.showingLeftOut && data.leftOutThreads.length > 0 ? (
+        <LeftOutList
+          threads={data.leftOutThreads}
+          total={data.leftOut.automated + data.leftOut.notNeeded}
+        />
+      ) : null}
+
       {data.awaiting.length > 0 ? <Footer data={data} /> : null}
     </div>
+  );
+}
+
+/** How many were left out and why, with the way to see them. Absent when none were. */
+function LeftOutLine({
+  data,
+  showing,
+  onToggle,
+}: {
+  data: Dashboard;
+  showing: boolean;
+  onToggle: () => void;
+}) {
+  const line = describeLeftOut(data);
+  if (!line) return null;
+  return (
+    <p className="muted small">
+      {line}{" "}
+      <button
+        type="button"
+        className="linkish"
+        onClick={onToggle}
+        aria-expanded={showing}
+        aria-controls={showing ? "left-out" : undefined}
+      >
+        {showing ? "Hide them" : "Show them"}
+      </button>
+    </p>
+  );
+}
+
+function LeftOutList({ threads, total }: { threads: DashboardThread[]; total: number }) {
+  return (
+    <section id="left-out" className="replies__leftout-list" aria-label="What I left out">
+      <h2 className="card-subhead">What I left out</h2>
+      <p className="muted small">
+        As far as I can tell, none of these is waiting on you. If one is, say so and it goes back on
+        the list.
+        {threads.length < total ? ` Here are the ${threads.length} most recent.` : null}
+      </p>
+      {threads.map((t) => (
+        <LeftOutThread key={`${t.conversationId}:${t.lastMessageId}`} thread={t} />
+      ))}
+    </section>
+  );
+}
+
+function LeftOutThread({ thread }: { thread: DashboardThread }) {
+  const mark = useMarkThread();
+  const who = thread.participant?.displayName ?? "Someone I couldn't put a name to";
+  const address = thread.participant?.identifiers?.[0]?.value ?? null;
+  const why =
+    thread.mark === "no_reply_needed"
+      ? "You said this one doesn't need a reply."
+      : `It looks automated to me: ${describeAutomated(thread.automated) ?? ""}`;
+  // Putting back a thread that also looks automated has to say it needs a
+  // reply: taking the mark away alone would leave it out for the other reason.
+  const back: ThreadMark | null = thread.automated ? "needs_reply" : null;
+  return (
+    <article className="thread thread--left-out">
+      <header className="thread__head">
+        <div className="thread__who">
+          <span className="thread__name">{who}</span>
+          {address ? <span className="thread__address">{address}</span> : null}
+        </div>
+        <span className="thread__when">{formatRelative(thread.lastMessageAt)}</span>
+      </header>
+      {thread.subject ? <p className="thread__subject">{thread.subject}</p> : null}
+      <p className="letter letter--theirs thread__excerpt">{thread.lastMessage}</p>
+      <p className="muted small">{why}</p>
+      <div className="row gap-3">
+        <Button
+          size="sm"
+          disabled={mark.isPending}
+          aria-label={`${thread.mark === "no_reply_needed" ? "Put it back" : "It needs a reply"}: ${who}`}
+          onClick={() =>
+            mark.mutate({
+              conversationId: thread.conversationId,
+              messageId: thread.lastMessageId,
+              mark: back,
+            })
+          }
+        >
+          {thread.mark === "no_reply_needed" ? "Put it back" : "It needs a reply"}
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * The quiet way to say a thread needs no answer. It is tied to the message on
+ * screen, so the thread comes back by itself if they write again.
+ */
+function NoReplyNeeded({ thread, who }: { thread: DashboardThread; who: string }) {
+  const mark = useMarkThread();
+  return (
+    <button
+      type="button"
+      className="linkish"
+      disabled={mark.isPending}
+      aria-label={`Doesn't need a reply: ${who}`}
+      onClick={() =>
+        mark.mutate(
+          {
+            conversationId: thread.conversationId,
+            messageId: thread.lastMessageId,
+            mark: "no_reply_needed",
+          },
+          {
+            onSuccess: (applied) => {
+              if (applied) {
+                toast.info(
+                  "Taken off the list.",
+                  "It comes back if they write again. Until then it's with what I left out.",
+                );
+              }
+            },
+          },
+        )
+      }
+    >
+      Doesn&rsquo;t need a reply
+    </button>
   );
 }
 
@@ -115,7 +259,9 @@ function CaughtUp({ data }: { data: Dashboard }) {
     <section className="note">
       <h2 className="note__title">You&rsquo;re all caught up.</h2>
       <p className="note__body">
-        Nothing in the mail I&rsquo;ve read ends with someone else waiting on you.{" "}
+        {data.leftOut.automated + data.leftOut.notNeeded > 0
+          ? "Everything I've read either ends with you, or is one of the threads I left out."
+          : "Nothing in the mail I've read ends with someone else waiting on you."}{" "}
         {checking && data.mailChecking?.failing
           ? checking
           : checking && data.mailChecking?.everyMinutes
@@ -166,9 +312,15 @@ function Footer({ data }: { data: Dashboard }) {
  * One person waiting. The message is shown in full rather than as a teaser:
  * deciding whether a prepared reply is right is impossible without it.
  */
-function Thread({ thread }: { thread: DashboardThread }) {
+export function Thread({ thread }: { thread: DashboardThread }) {
   const generate = useGenerateDraft();
-  const [draft, setDraft] = useState<Draft | null>(thread.draft);
+  // A draft written here shows at once; one prepared in the background shows
+  // when the screen next loads it; one the user has used or dropped stays
+  // gone until the screen catches up.
+  const [written, setWritten] = useState<Draft | null>(null);
+  const [doneWith, setDoneWith] = useState<string | null>(null);
+  const candidate = written ?? thread.draft;
+  const draft = candidate && candidate.id !== doneWith ? candidate : null;
   const [intent, setIntent] = useState("");
   // Empty means "work it out from my note", which is the default: most people
   // will never touch this, and the note is read the same way either way.
@@ -187,10 +339,11 @@ function Thread({ thread }: { thread: DashboardThread }) {
       conversationId: thread.conversationId,
       channel: thread.channel,
       incomingMessage: thread.lastMessage,
+      incomingMessageId: thread.lastMessageId,
       intent: intent.trim() || null,
       situationId: situationId || null,
     });
-    setDraft(result);
+    setWritten(result);
   }
 
   return (
@@ -205,13 +358,27 @@ function Thread({ thread }: { thread: DashboardThread }) {
 
       {thread.subject ? <p className="thread__subject">{thread.subject}</p> : null}
 
+      {thread.mark === "needs_reply" && thread.automated ? <KeptOnTheList thread={thread} /> : null}
+
       <div className="thread__part">
         <div className="letter-label">{saidLabel}</div>
         <p className="letter letter--theirs">{thread.lastMessage}</p>
+        <div className="thread__aside">
+          <NoReplyNeeded thread={thread} who={who} />
+        </div>
       </div>
 
       {draft ? (
-        <DraftReview draft={draft} onDone={() => setDraft(null)} />
+        <DraftReview
+          // Its text and buttons must be about the same draft, so a different
+          // draft is a different panel.
+          key={draft.id}
+          draft={draft}
+          onDone={() => {
+            setDoneWith(draft.id);
+            setWritten(null);
+          }}
+        />
       ) : (
         <div className="thread__part thread__part--ruled">
           <div className="letter-label">I haven&rsquo;t written this one yet</div>
@@ -250,6 +417,33 @@ function Thread({ thread }: { thread: DashboardThread }) {
       )}
       {generate.isError ? <InlineError>{(generate.error as Error).message}</InlineError> : null}
     </article>
+  );
+}
+
+/** A thread the user kept on the list although it looks automated, and the way to undo that. */
+function KeptOnTheList({ thread }: { thread: DashboardThread }) {
+  const mark = useMarkThread();
+  const who = thread.participant?.displayName ?? "Someone I couldn't put a name to";
+  return (
+    <p className="muted small">
+      You said this one needs a reply, though it looks automated to me:{" "}
+      {describeAutomated(thread.automated)}{" "}
+      <button
+        type="button"
+        className="linkish"
+        aria-label={`Take that back: ${who}`}
+        disabled={mark.isPending}
+        onClick={() =>
+          mark.mutate({
+            conversationId: thread.conversationId,
+            messageId: thread.lastMessageId,
+            mark: null,
+          })
+        }
+      >
+        Take that back
+      </button>
+    </p>
   );
 }
 

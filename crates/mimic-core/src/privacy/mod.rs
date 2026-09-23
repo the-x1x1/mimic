@@ -407,6 +407,7 @@ mod tests {
             channel: "chat".into(),
             situation_id: None,
             incoming_message: None,
+            incoming_message_id: None,
             intent: None,
             generated_text: "a draft to Ada".into(),
             provider: "mock".into(),

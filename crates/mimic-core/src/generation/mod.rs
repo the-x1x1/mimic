@@ -58,6 +58,10 @@ pub struct ComposeRequest {
     pub channel: String,
     /// What the user is replying to. Empty when starting a conversation.
     pub incoming_message: Option<String>,
+    /// The stored message being replied to, when it is one — the id the
+    /// draft is recorded against, so it is shown under that message and no
+    /// other. `None` for pasted text.
+    pub incoming_message_id: Option<String>,
     /// What the user wants to say. This is the load-bearing input.
     pub intent: Option<String>,
     pub situation_id: Option<String>,
@@ -479,6 +483,19 @@ fn one_line(text: &str, limit: usize) -> String {
 
 /// Build the context, run the provider, record the draft.
 pub fn compose(db: &Db, provider: &dyn ModelProvider, req: &ComposeRequest) -> Result<Draft, GenerationError> {
+    // The message a draft will be recorded against has to be there, in this
+    // conversation, before anything is paid for: a mailbox removed while the
+    // screen was open must not cost a model call and then fail to store.
+    if let Some(id) = &req.incoming_message_id {
+        let here =
+            db.get_message(id)?.is_some_and(|m| req.conversation_id.as_deref().is_none_or(|c| c == m.conversation_id));
+        if !here {
+            return Err(GenerationError::Db(DbError::Invalid(
+                "That message isn't here any more, so there is nothing to answer. Nothing was sent to the writing model."
+                    .into(),
+            )));
+        }
+    }
     let ctx = build_context(db, req)?;
     let prompt = assemble(&ctx, req);
     let prompt_hash = crate::ids::stable_json_hash(&serde_json::to_value(&prompt).unwrap_or(json!({})));
@@ -490,6 +507,7 @@ pub fn compose(db: &Db, provider: &dyn ModelProvider, req: &ComposeRequest) -> R
         channel: ctx.channel.clone(),
         situation_id: ctx.situation.as_ref().map(|s| s.id.clone()),
         incoming_message: req.incoming_message.clone(),
+        incoming_message_id: req.incoming_message_id.clone(),
         intent: req.intent.clone(),
         generated_text: response.text.clone(),
         provider: info.id,
@@ -711,6 +729,15 @@ mod tests {
         assert!(statements.iter().any(|s| s.as_str().unwrap().contains("messages to this person")), "{statements:?}");
         assert!(!draft.evidence["examples"].as_array().unwrap().is_empty());
         assert_eq!(db.recent_drafts(5).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_message_that_is_gone_is_refused_before_the_model_is_asked() {
+        let (db, ada) = seeded(25, "sounds good, see you then");
+        let provider = MockProvider::default();
+        let req = ComposeRequest { incoming_message_id: Some("no-such-message".into()), ..request(&ada) };
+        assert!(matches!(compose(&db, &provider, &req), Err(GenerationError::Db(DbError::Invalid(_)))));
+        assert_eq!(provider.call_count(), 0, "nothing is paid for a draft that cannot be stored");
     }
 
     #[test]

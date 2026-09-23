@@ -1481,6 +1481,56 @@ mod tests {
     }
 
     #[test]
+    fn newsletters_in_the_inbox_are_read_but_not_left_waiting() {
+        let newsletter = mail(
+            "n@brand.example",
+            "Brand <news@brand.example>",
+            None,
+            "Mon, 2 Mar 2026 10:00:00 +0000",
+            "this week only: twenty percent off",
+        )
+        .replacen("MIME-Version", "List-Unsubscribe: <https://brand.example/u>\nMIME-Version", 1);
+        let receipt = mail(
+            "r@shop.example",
+            "Shop <no-reply@shop.example>",
+            None,
+            "Mon, 2 Mar 2026 11:00:00 +0000",
+            "order 1234 shipped",
+        );
+        let (port, _) = serve(
+            vec![
+                Mailbox {
+                    name: "INBOX",
+                    validity: 1,
+                    messages: vec![
+                        (
+                            1,
+                            mail(
+                                "q@x",
+                                "Ada <ada@example.com>",
+                                None,
+                                "Mon, 2 Mar 2026 09:00:00 +0000",
+                                "free for a call?",
+                            ),
+                        ),
+                        (2, newsletter),
+                        (3, receipt),
+                    ],
+                },
+                Mailbox { name: "Sent", validity: 1, messages: vec![] },
+            ],
+            "pw",
+        );
+        let (db, source) = db_for(port);
+        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(db.count_messages().unwrap(), 3, "everything is read; nothing is thrown away");
+        let waiting = db.threads_awaiting_reply(10).unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].last_message, "free for a call?");
+        assert_eq!(db.count_left_out().unwrap().automated, 2);
+    }
+
+    #[test]
     fn an_oversized_message_is_skipped_unfetched_and_does_not_stall_the_folder() {
         let huge = mail("big@x", "Ada <ada@example.com>", None, "Mon, 2 Mar 2026 09:00:00 +0000", "photos attached")
             .replacen("MIME-Version", "X-Test-Huge: yes\nMIME-Version", 1);

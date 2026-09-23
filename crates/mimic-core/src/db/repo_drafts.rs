@@ -11,7 +11,18 @@ use super::models::{json_col, json_obj};
 use super::{Db, DbError, DbResult, Draft, DraftFeedback};
 use crate::ids::{new_id, now_rfc3339};
 
-const COLS: &str = "id, participant_id, conversation_id, channel, situation_id, incoming_message, intent, generated_text, final_text, provider, model, context_json, prompt_hash, evidence_json, created_at, resolved_at, outcome";
+const COLS: &str = "id, participant_id, conversation_id, channel, situation_id, incoming_message, intent, generated_text, final_text, provider, model, context_json, prompt_hash, evidence_json, created_at, resolved_at, outcome, incoming_message_id";
+
+/// A draft answers message `?2` (text `?3`): by its recorded id, or — only
+/// for drafts written before migration 9 recorded ids — by the text it
+/// answered. A draft written since with no id answered pasted text, or a
+/// message that has been deleted, and matches nothing.
+const FOR_MESSAGE: &str = "(d.incoming_message_id = ?2
+      OR (d.incoming_message_id IS NULL AND d.incoming_message = ?3
+          AND d.created_at < (SELECT applied_at FROM schema_migrations WHERE version = 9)))";
+const FOR_MESSAGE_D2: &str = "(d2.incoming_message_id = ?2
+      OR (d2.incoming_message_id IS NULL AND d2.incoming_message = ?3
+          AND d2.created_at < (SELECT applied_at FROM schema_migrations WHERE version = 9)))";
 
 fn map(r: &Row<'_>) -> rusqlite::Result<Draft> {
     Ok(Draft {
@@ -32,6 +43,7 @@ fn map(r: &Row<'_>) -> rusqlite::Result<Draft> {
         created_at: r.get(14)?,
         resolved_at: r.get(15)?,
         outcome: r.get(16)?,
+        incoming_message_id: r.get(17)?,
     })
 }
 
@@ -42,6 +54,8 @@ pub struct NewDraft {
     pub channel: String,
     pub situation_id: Option<String>,
     pub incoming_message: Option<String>,
+    /// The message this draft answers, when it answers a stored one.
+    pub incoming_message_id: Option<String>,
     pub intent: Option<String>,
     pub generated_text: String,
     pub provider: String,
@@ -73,8 +87,9 @@ impl Db {
         let id = new_id();
         self.conn().execute(
             "INSERT INTO drafts(id, participant_id, conversation_id, channel, situation_id, incoming_message,
-                                intent, generated_text, provider, model, context_json, prompt_hash, evidence_json, created_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                                intent, generated_text, provider, model, context_json, prompt_hash, evidence_json, created_at,
+                                incoming_message_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
             params![
                 id,
                 new.participant_id,
@@ -89,7 +104,8 @@ impl Db {
                 new.context.to_string(),
                 new.prompt_hash,
                 new.evidence.to_string(),
-                now_rfc3339()
+                now_rfc3339(),
+                new.incoming_message_id
             ],
         )?;
         self.get_draft(&id)?.ok_or(DbError::NotFound(id))
@@ -186,19 +202,51 @@ impl Db {
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
-    /// The newest unresolved draft for a conversation, if there is one.
-    pub fn pending_draft_for_conversation(&self, conversation_id: &str) -> DbResult<Option<Draft>> {
+    /// The newest unresolved draft written for this message, unless a draft
+    /// for it was used or dropped after this one was written — then the
+    /// message has been dealt with, and an older duplicate (one prepared in
+    /// the background while the user wrote their own) is not offered again. A
+    /// draft the user writes after dropping one is newer than the drop, and is
+    /// offered. A draft answers the message it was written for: once someone
+    /// writes again, a draft for their earlier message is no longer a reply to
+    /// anything on screen.
+    pub fn pending_draft_for_message(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        message_text: &str,
+    ) -> DbResult<Option<Draft>> {
         Ok(self
             .conn()
             .query_row(
                 &format!(
-                    "SELECT {COLS} FROM drafts WHERE conversation_id = ?1 AND outcome IS NULL
-                     ORDER BY created_at DESC, id DESC LIMIT 1"
+                    "SELECT {COLS} FROM drafts d
+                     WHERE d.conversation_id = ?1 AND d.outcome IS NULL AND {FOR_MESSAGE}
+                       AND NOT EXISTS (
+                         SELECT 1 FROM drafts d2
+                         WHERE d2.conversation_id = ?1
+                           AND d2.outcome IN ('sent_unedited','sent_edited','discarded')
+                           AND d2.resolved_at > d.created_at
+                           AND {FOR_MESSAGE_D2})
+                     ORDER BY d.created_at DESC, d.id DESC LIMIT 1"
                 ),
-                [conversation_id],
+                params![conversation_id, message_id, message_text],
                 map,
             )
             .optional()?)
+    }
+
+    /// Whether any draft, resolved or not, was ever written for this message.
+    /// Assisted drafting asks this rather than "is one pending": a draft the
+    /// user already used or turned down is an answer too, and writing another
+    /// for the same message would spend a model call on a question they dealt
+    /// with.
+    pub fn any_draft_for_message(&self, conversation_id: &str, message_id: &str, message_text: &str) -> DbResult<bool> {
+        Ok(self.conn().query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM drafts d WHERE d.conversation_id = ?1 AND {FOR_MESSAGE})"),
+            params![conversation_id, message_id, message_text],
+            |r| r.get(0),
+        )?)
     }
 
     /// Every draft the user sent, with who it went to, what Mimic wrote and
@@ -277,6 +325,7 @@ mod tests {
             channel: "email".into(),
             situation_id: None,
             incoming_message: Some("can you send the deck?".into()),
+            incoming_message_id: None,
             intent: Some("say yes, tomorrow".into()),
             generated_text: text.into(),
             provider: "mock".into(),

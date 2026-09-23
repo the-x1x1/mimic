@@ -26,7 +26,10 @@ import {
   composeReadiness,
   describeDeletion,
   describeWaiting,
+  describeAutomated,
+  describeLeftOut,
   describeMailChecking,
+  ThreadMark,
   describeImport,
   describeMetric,
   describeSituation,
@@ -74,6 +77,14 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(withDraft!.draft!.outcome).toBeNull();
     expect(withDraft!.lastMessage.length).toBeGreaterThan(0);
     expect(view.outcomes.uneditedRate).toBeNull();
+    // A person is waiting; the newsletter the fixture adds is left out,
+    // counted, and carried with its reason because the fixture asked for it.
+    expect(withDraft!.automated).toBeNull();
+    expect(view.leftOut).toEqual({ automated: 1, notNeeded: 0 });
+    expect(view.showingLeftOut).toBe(true);
+    expect(view.leftOutThreads).toHaveLength(1);
+    expect(view.leftOutThreads[0]!.automated).toBe("newsletter");
+    expect(view.leftOutThreads[0]!.mark).toBeNull();
   });
 
   it("parses the situation vocabulary, all six, with counts rather than scores", () => {
@@ -378,6 +389,43 @@ describe("the home screen speaks for itself, and does not pretend to be an inbox
         awaiting: [person!, { ...person!, participant: null }],
       }),
     ).toBe("2 conversations are waiting on you.");
+  });
+});
+
+describe("what was left out is said, and said as a reading", () => {
+  const base = Dashboard.parse(read(contractFixture("dashboard.json")));
+
+  it("says nothing when nothing was left out", () => {
+    expect(describeLeftOut({ ...base, leftOut: { automated: 0, notNeeded: 0 } })).toBeNull();
+  });
+
+  it("counts each reason, and gets one right", () => {
+    expect(describeLeftOut({ ...base, leftOut: { automated: 1, notNeeded: 0 } })).toBe(
+      "I left out one thread that looks automated.",
+    );
+    expect(describeLeftOut({ ...base, leftOut: { automated: 0, notNeeded: 2 } })).toBe(
+      "I left out 2 you said don't need a reply.",
+    );
+    const both = describeLeftOut({ ...base, leftOut: { automated: 12, notNeeded: 1 } });
+    expect(both).toBe(
+      "I left out 12 threads that look automated (newsletters, notifications and the like) and one you said doesn't need a reply.",
+    );
+  });
+
+  it("words every reason Rust stores, and something true for one it does not know", () => {
+    for (const reason of ["newsletter", "bulk", "auto_reply", "report", "no_reply_address"]) {
+      const line = describeAutomated(reason);
+      expect(line).toBeTruthy();
+      expect(line).not.toMatch(/headers say a machine/);
+    }
+    expect(describeAutomated("something_new")).toBe("its headers say a machine sent it.");
+    expect(describeAutomated(null)).toBeNull();
+  });
+
+  it("accepts the two marks and nothing else", () => {
+    expect(ThreadMark.parse("no_reply_needed")).toBe("no_reply_needed");
+    expect(ThreadMark.parse("needs_reply")).toBe("needs_reply");
+    expect(() => ThreadMark.parse("snoozed")).toThrow();
   });
 });
 
