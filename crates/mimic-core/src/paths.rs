@@ -62,8 +62,9 @@ impl AppPaths {
     pub fn logs_dir(&self) -> PathBuf {
         self.root.join("logs")
     }
-    /// Provider credentials. Owner-only; see `secrets.rs` in the desktop crate
-    /// for what that does and does not guarantee.
+    /// Provider keys and mailbox passwords, sealed to the user's account on
+    /// Windows; see `secrets.rs` in the desktop crate for what that does and
+    /// does not guarantee.
     pub fn credentials_dir(&self) -> PathBuf {
         self.root.join("credentials")
     }

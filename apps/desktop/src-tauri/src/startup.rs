@@ -43,6 +43,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     }
 
     let secrets = std::sync::Arc::new(FileSecretStore::open(&paths.credentials_dir())?);
+    log_secrets(&db, &secrets);
     let providers =
         std::sync::Arc::new(RwLock::new(ProviderRegistry::new(crate::providers_config::build(&db, secrets.as_ref()))));
 
@@ -128,6 +129,41 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         schema_report,
         log_dir,
     })
+}
+
+/// What opening the credential store did, as counts and reasons: never a
+/// value.
+fn log_secrets(db: &Db, store: &FileSecretStore) {
+    let report = store.report();
+    let protection = store.protection();
+    if report.moved > 0 {
+        tracing::info!(target: "secrets", moved = report.moved, ?protection, "old credentials file moved in");
+        let _ = db.log_event(&NewEvent::info(
+            "secrets",
+            "moved",
+            json!({ "moved": report.moved, "protection": protection }),
+        ));
+    }
+    if report.removed_damaged_old_file {
+        tracing::warn!(target: "secrets", "the old credentials file was damaged and has been deleted");
+        let _ = db.log_event(&NewEvent::warn("secrets", "damaged_old_file_deleted", json!({})));
+    }
+    if let Some(why) = &report.old_file_kept {
+        tracing::warn!(target: "secrets", reason = %why, "the old unsealed credentials file is still there");
+        let _ = db.log_event(&NewEvent::warn("secrets", "old_file_kept", json!({ "reason": why })));
+    }
+    if let Some(why) = &report.left_alone {
+        tracing::warn!(target: "secrets", reason = %why, "the credentials file is left alone and nothing is saved over it");
+        let _ = db.log_event(&NewEvent::warn("secrets", "left_alone", json!({ "reason": why })));
+    }
+    if report.set_aside.is_some() {
+        tracing::warn!(target: "secrets", "the credentials file could not be read and was set aside");
+        let _ = db.log_event(&NewEvent::warn("secrets", "set_aside", json!({})));
+    }
+    if report.locked > 0 {
+        tracing::warn!(target: "secrets", locked = report.locked, "saved credentials that do not open on this account");
+        let _ = db.log_event(&NewEvent::warn("secrets", "locked", json!({ "count": report.locked })));
+    }
 }
 
 fn engine_config(state: &crate::SharedState) -> serde_json::Value {

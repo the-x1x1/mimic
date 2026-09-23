@@ -44,7 +44,7 @@ packages/contracts/      zod contracts mirroring every IPC payload
 packages/ui/             design tokens + primitives
 packages/test-fixtures/  fixture path helpers
 fixtures/import/         conversation exports used by the importer's tests
-fixtures/contracts/      read models written by the Rust e2e test, parsed by the zod suite
+fixtures/contracts/      read models written by the Rust e2e test (provider_state.json by the desktop crate), parsed by the zod suite
 models/manifests/        text-encoder manifests (SHA-256 pinned); no binaries committed
 scripts/                 bootstrap/dev/test/build/validate/package-engine/verify-release/sync-version
 docs/                    PRODUCT, ARCHITECTURE, DATA_MODEL, VOICE_ENGINE, IMPORT_PIPELINE, MODEL_PROVIDERS,
@@ -66,11 +66,13 @@ node scripts/sync-version.mjs 0.7.0     # bump the single version everywhere (th
 
 Per stack: `pnpm typecheck|lint|test|build`, `cargo fmt/clippy/test --workspace`, `cd engine && uv run ruff check . && uv run pytest`.
 
-Regenerating the contract fixtures after a deliberate shape change: `MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e`.
+Regenerating the contract fixtures after a deliberate shape change: `MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e`, and `MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-desktop provider_state` for `provider_state.json`, which the desktop crate writes; then `pnpm format`, since the fixtures are checked by prettier.
 
-## What is implemented (0.10.0-alpha.5)
+## What is implemented (0.10.0-alpha.6)
 
 Phase 0 (migration) is complete; Phase 1 (Mimic Core) is partial. Working end to end: schema v9 with a clean upgrade from the photography schema; the `CommunicationSource` contract with `mbox` and `mimic_json` connectors; streaming import with identity-based direction, dedupe, cancellation and free resume; the layered voice engine (global, channel, relationship, situational) with deterministic metrics, a 20-message floor and deterministic representative examples; metadata-filtered lexical retrieval; the generation context builder and pure prompt assembler; the model-provider abstraction with a local endpoint and Anthropic; real cascading deletion with an honest preview; the one-screen interface, with People / How you write / Your mail / Settings in a drawer over it; and the learning loop, from what was sent to what the next draft does differently. As of 0.7.0 the first run is the part that has had attention: onboarding subscribes to native job events above the gate, names the state where an import matched none of the user's addresses, and lets someone with fewer than twenty own messages leave anyway; the provider badge and the Compose button follow a real reachability check instead of assuming the local endpoint is up.
+
+0.10.0-alpha.6 seals saved credentials to the user's Windows account: `secrets.rs` in the desktop crate writes each value through DPAPI (`CryptProtectData`, current user, no prompt, Mimic's own entropy) to `credentials/secrets.json`, and never writes unsealed when sealing fails. The unsealed `credentials.json` of earlier versions is moved in value by value — each not already dealt with, marked by a sealed hash of key and value only once it has been written and read back — and deleted only after that, so a value that opens is never lost with it and one changed or cleared since is not brought back, even by a restored copy; every save starts from the file on disk. A value that does not open here is kept and reported as locked, and an unreadable file is set aside or left alone, never overwritten. `ProviderState.credentials` carries what the store did, and the Privacy card and the mailbox dialog say only that. `sources::imap::replace_password` gives a connected mailbox its password again (login first; nothing imported is touched), behind **New password** under Your mail. A program running as the same user, or an administrator, can still unseal — `docs/SECURITY_MODEL.md` keeps that out of scope.
 
 0.10.0-alpha.5 leaves senders whose mail all looks automated out of People and of every person picker (`Db::list_people`, `PeopleView`), by the same header reading — unless the user has written to them, set how they know them, or kept one of their threads on the list. They are counted and shown on request, and one ordinary message makes a sender a person.
 

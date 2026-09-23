@@ -48,7 +48,7 @@ None of these are recoverable. `Db::open` writes a database backup before a sche
 
 ## Credentials
 
-Provider API keys and mailbox app passwords (under `imap:<source id>`) are stored in `credentials/credentials.json` with owner-only permissions, not in the OS credential store. This is a known limitation with a name and a place on the roadmap; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth.
+Provider API keys and mailbox app passwords (under `imap:<source id>`) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth.
 
 ## What Mimic will not do
 

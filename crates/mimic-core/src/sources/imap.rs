@@ -659,6 +659,45 @@ pub fn record_failure(db: &Db, source_id: &str, message: &str) -> Result<(), DbE
     Ok(())
 }
 
+/// Why a mailbox's password could not be given again.
+#[derive(Debug, thiserror::Error)]
+pub enum PasswordError {
+    #[error("That mailbox isn't connected any more.")]
+    NotAMailbox,
+    #[error("I can't read this mailbox's settings; remove it and connect it again.")]
+    UnreadableSettings,
+    #[error(transparent)]
+    Login(#[from] ImapError),
+    #[error("I couldn't save the password: {0}")]
+    Save(String),
+    #[error(transparent)]
+    Db(#[from] DbError),
+}
+
+/// Give a connected mailbox its password again — the provider's app password
+/// was replaced, or the saved one can no longer be unlocked — without
+/// removing it and everything imported through it. The login is tried first,
+/// and `save` is called only when it worked; a mailbox whose last check
+/// failed is then ready to be checked again. Nothing imported is touched.
+pub fn replace_password(
+    db: &Db,
+    source_id: &str,
+    password: &str,
+    save: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), PasswordError> {
+    let source = db.get_source(source_id)?.filter(|s| s.connector == CONNECTOR).ok_or(PasswordError::NotAMailbox)?;
+    let config: ImapSourceConfig =
+        serde_json::from_value(source.config).map_err(|_| PasswordError::UnreadableSettings)?;
+    probe(&config.account, password)?;
+    save(password).map_err(PasswordError::Save)?;
+    // Only a failure is cleared: a mailbox being read, or read fine, keeps
+    // saying so.
+    if source.status == "failed" {
+        db.set_source_status(source_id, "ready", None)?;
+    }
+    Ok(())
+}
+
 fn sync_inner(
     db: &Db,
     source_id: &str,
@@ -928,7 +967,7 @@ impl crate::jobs::JobExecutor for CheckMailboxExecutor {
                 .map(str::to_string)
                 .ok_or_else(|| crate::jobs::JobError::Failed("no mailbox was named".into()))?;
             let Some(password) = password_for(&secret_key(&source_id)) else {
-                let why = "I don't have a password for this mailbox any more. Remove it and connect it again.";
+                let why = "I don't have a password I can use for this mailbox. Give it to me again with New password, under Your mail.";
                 record_failure(&ctx.db, &source_id, why)?;
                 return Err(crate::jobs::JobError::Failed(why.into()));
             };
@@ -1353,6 +1392,51 @@ mod tests {
         let s = db.get_source(&source).unwrap().unwrap();
         assert_eq!(s.status, "failed");
         assert!(!s.last_error.unwrap().to_string().contains("wrong"), "the password never reaches an error");
+    }
+
+    #[test]
+    fn a_new_password_is_kept_only_when_it_logs_in_and_nothing_imported_is_touched() {
+        let inbox = vec![(1, mail("a@x", "Ada <ada@x>", None, "Mon, 1 Sep 2026 09:00:00 +0000", "Lunch?"))];
+        let (port, _) = serve(vec![Mailbox { name: "INBOX", validity: 1, messages: inbox }], "right");
+        let (db, source) = db_for(port);
+        sync(&db, &source, "right", &mut |_, _| {}, &|| false).unwrap();
+        let before = db.refresh_source_counts(&source).unwrap();
+        assert_eq!(before, 1);
+        record_failure(&db, &source, "I don't have a password I can use for this mailbox.").unwrap();
+
+        let mut saved: Option<String> = None;
+        let err = replace_password(&db, &source, "wrong", |pw| {
+            saved = Some(pw.to_string());
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(matches!(err, PasswordError::Login(_)), "{err}");
+        assert!(!err.to_string().contains("wrong"), "the password never reaches an error");
+        assert_eq!(saved, None, "a password that does not log in is not kept");
+        assert_eq!(db.get_source(&source).unwrap().unwrap().status, "failed");
+
+        replace_password(&db, &source, "right", |pw| {
+            saved = Some(pw.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(saved.as_deref(), Some("right"));
+        let s = db.get_source(&source).unwrap().unwrap();
+        assert_eq!(s.status, "ready");
+        assert!(s.last_error.is_none());
+        assert_eq!(db.refresh_source_counts(&source).unwrap(), before, "nothing imported was touched");
+
+        // A mailbox that was fine stays as it was.
+        db.set_source_status(&source, "imported", None).unwrap();
+        replace_password(&db, &source, "right", |_| Ok(())).unwrap();
+        assert_eq!(db.get_source(&source).unwrap().unwrap().status, "imported");
+
+        let err = replace_password(&db, &source, "right", |_| Err("disk full".into())).unwrap_err();
+        assert_eq!(err.to_string(), "I couldn't save the password: disk full");
+        assert!(matches!(
+            replace_password(&db, "no-such-source", "right", |_| Ok(())),
+            Err(PasswordError::NotAMailbox)
+        ));
     }
 
     #[test]

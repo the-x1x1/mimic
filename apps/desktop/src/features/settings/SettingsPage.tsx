@@ -4,6 +4,7 @@ import {
   ANTHROPIC_SECRET_KEY,
   IDENTIFIER_LABELS,
   IdentifierKind,
+  describeCredentials,
   type Theme,
 } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
@@ -178,7 +179,9 @@ function ProviderSection() {
                 placeholder={
                   providers.data?.configuredSecrets.includes(ANTHROPIC_SECRET_KEY)
                     ? "A key is saved — type a new one to replace it"
-                    : "API key"
+                    : providers.data?.credentials.locked.includes(ANTHROPIC_SECRET_KEY)
+                      ? "The saved key can't be unlocked here — type it again"
+                      : "API key"
                 }
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
@@ -186,10 +189,17 @@ function ProviderSection() {
               <Button
                 size="sm"
                 onClick={async () => {
-                  await ipc.setProviderSecret(ANTHROPIC_SECRET_KEY, key);
-                  setKey("");
-                  qc.invalidateQueries({ queryKey: qk.providers });
-                  toast.success("Saved");
+                  // A key Windows will not lock to the account is not saved
+                  // at all, and the command says why.
+                  try {
+                    await ipc.setProviderSecret(ANTHROPIC_SECRET_KEY, key);
+                    setKey("");
+                    toast.success("Saved");
+                  } catch (e) {
+                    toast.danger("That key wasn't saved", (e as Error).message);
+                  } finally {
+                    void qc.invalidateQueries({ queryKey: qk.providers });
+                  }
                 }}
               >
                 Save
@@ -437,6 +447,7 @@ function UpdatesSection() {
 
 function PrivacySection() {
   const settings = useSettings();
+  const providers = useProviderState();
   const [confirming, setConfirming] = useState(false);
   const [bundle, setBundle] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
@@ -447,6 +458,9 @@ function PrivacySection() {
         exception is drafting: the provider you chose above sees the message you are replying to,
         your intent, and a handful of your own past messages.
       </p>
+      {providers.data ? (
+        <p className="neutral">{describeCredentials(providers.data.credentials)}</p>
+      ) : null}
       <label className="row gap-2">
         <input
           type="checkbox"

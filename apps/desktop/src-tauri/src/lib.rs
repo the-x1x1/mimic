@@ -62,6 +62,7 @@ pub fn run() {
             commands::sources::delete_source,
             commands::sources::probe_mailbox,
             commands::sources::connect_mailbox,
+            commands::sources::set_mailbox_password,
             commands::sources::pick_source_file,
             commands::people::get_user_identity,
             commands::people::set_user_identity,

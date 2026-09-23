@@ -171,6 +171,44 @@ pub async fn connect_mailbox(
     Ok(state.db.get_source(&source.id)?.unwrap_or(source))
 }
 
+/// Give a connected mailbox its password again — after the provider's app
+/// password was replaced, or when the saved one cannot be unlocked on this
+/// Windows account — without removing the mailbox and everything imported
+/// through it. The login is tried first, and nothing is saved if it fails.
+#[tauri::command]
+pub async fn set_mailbox_password(
+    state: State<'_, SharedState>,
+    source_id: String,
+    password: String,
+) -> CommandResult<mimic_core::db::Source> {
+    use mimic_core::sources::imap;
+    let (db, secrets, id) = (state.db.clone(), state.secrets.clone(), source_id.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        imap::replace_password(&db, &id, &password, |pw| {
+            secrets.set(&imap::secret_key(&id), pw).map_err(|e| e.to_string())
+        })
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", e.to_string()))?
+    .map_err(|e| match e {
+        imap::PasswordError::Login(e) => mailbox_error(e),
+        other => CommandError::new("mailbox", other.to_string()),
+    })?;
+    // Checked with the new password straight away — unless a check is
+    // already waiting to start, which will read it. One already running read
+    // the old one, so another is queued behind it.
+    let queued = state.db.list_jobs(500, true)?.iter().any(|j| {
+        j.kind == imap::JOB_KIND && j.status == "queued" && j.payload["sourceId"].as_str() == Some(source_id.as_str())
+    });
+    if !queued {
+        state.jobs.enqueue(imap::JOB_KIND, json!({ "sourceId": source_id }))?;
+    }
+    state
+        .db
+        .get_source(&source_id)?
+        .ok_or_else(|| CommandError::new("not_found", "That mailbox isn't connected any more."))
+}
+
 /// Remove a source and everything imported through it.
 #[tauri::command]
 pub async fn delete_source(
@@ -178,8 +216,12 @@ pub async fn delete_source(
     source_id: String,
 ) -> CommandResult<mimic_core::privacy::DeletionReport> {
     let report = state.db.delete_source_and_contents(&source_id)?;
-    // A disconnected mailbox's password goes with it.
-    let _ = state.secrets.remove(&mimic_core::sources::imap::secret_key(&source_id));
+    // A disconnected mailbox's password goes with it. The mail is already
+    // gone, so a failure here does not undo that; it is logged, never with
+    // the password.
+    if let Err(e) = state.secrets.remove(&mimic_core::sources::imap::secret_key(&source_id)) {
+        tracing::warn!(target: "secrets", error = %e, "a removed mailbox's password could not be removed");
+    }
     Ok(report)
 }
 

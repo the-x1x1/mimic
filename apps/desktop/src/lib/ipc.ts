@@ -139,6 +139,12 @@ export const ipc = {
     call("probe_mailbox", ImapProbe, { account, password }),
   connectMailbox: (account: ImapAccount, password: string, isMine: boolean) =>
     call("connect_mailbox", Source, { account, password, isMine }),
+  /**
+   * Give a connected mailbox its password again, keeping everything imported
+   * through it. The login is tried first; nothing is saved if it fails.
+   */
+  setMailboxPassword: (sourceId: string, password: string) =>
+    call("set_mailbox_password", Source, { sourceId, password }),
   deleteSource: (sourceId: string) => call("delete_source", DeletionReport, { sourceId }),
   pickSourceFile: (title: string, extensions: string[]) =>
     call("pick_source_file", z_string.nullable(), { title, extensions }),
