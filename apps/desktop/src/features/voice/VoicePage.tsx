@@ -13,6 +13,7 @@ import {
 } from "@/hooks/useVoice";
 import { useDraftOutcomes } from "@/hooks/useCompose";
 import { countOf, formatRelative } from "@/lib/format";
+import { HowClose } from "./HowClose";
 
 const HABITS = [
   "medianWordsPerMessage",
@@ -94,6 +95,8 @@ export function VoicePage() {
       </div>
 
       <Learned />
+
+      <HowClose />
 
       {(o?.profiles ?? []).map((p) => {
         const key = `${p.layer}|${p.scopeKey}`;

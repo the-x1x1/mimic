@@ -34,6 +34,16 @@ import {
   AddressPreview,
   ConversationPage,
   writerOf,
+  EvaluationSystem,
+  EvaluationView,
+  MEASURE_LABELS,
+  MEASURES,
+  SYSTEM_LABELS,
+  describeEncoder,
+  describeEvaluation,
+  describeGone,
+  describeSplitWarning,
+  formatShare,
   HeldAddress,
   describeClaimed,
   describeFold,
@@ -249,11 +259,13 @@ describe("deletion is described in consequences, not counts", () => {
     drafts: 2,
     profilesInvalidated: 3,
     conversationsKept: 1,
+    evaluations: 1,
   };
 
   it("warns that the user's own messages go too", () => {
     const lines = describeDeletion(base);
     expect(lines.some((l) => l.includes("20 of those are messages you wrote"))).toBe(true);
+    expect(lines.some((l) => l.includes("measurement of how close my drafts come"))).toBe(true);
     expect(lines.some((l) => l.includes("group conversations will be kept"))).toBe(true);
     expect(lines[lines.length - 1]).toBe("This cannot be undone.");
   });
@@ -266,9 +278,11 @@ describe("deletion is described in consequences, not counts", () => {
       drafts: 0,
       conversationsKept: 0,
       profilesInvalidated: 0,
+      evaluations: 0,
     };
     const lines = describeDeletion(empty);
     expect(lines.some((l) => l.includes("messages you wrote"))).toBe(false);
+    expect(lines.some((l) => l.includes("measurement"))).toBe(false);
     expect(lines.some((l) => l.includes("drafts"))).toBe(false);
   });
 });
@@ -901,5 +915,57 @@ describe("the rest of the conversation a waiting message is part of", () => {
     expect(writerOf({ ...m, direction: "unknown", author: null })).toBe(
       "I couldn't tell who wrote this",
     );
+  });
+});
+
+describe("the drafts measured against what the user wrote", () => {
+  it("parses a measurement, with every way of answering and no headline number", () => {
+    const view = EvaluationView.parse(read(contractFixture("evaluation.json")));
+    expect(view.remaining).toBeGreaterThan(0);
+    expect(view.remaining).toBeLessThanOrEqual(view.measured);
+    expect(view.systems.map((s) => s.system)).toEqual(["mimic", "generic", "common_reply"]);
+    for (const s of view.systems) {
+      expect(s.cases).toBe(view.remaining);
+      expect(s.length!.p10).toBeLessThanOrEqual(s.length!.mean);
+    }
+    expect(view.cases.every((c) => c.answers.length === view.systems.length)).toBe(true);
+    // Measured by the Rust stand-in, which has no encoder: no wording
+    // measure, and nothing that pretends to be one.
+    expect(view.embeddingProvider).toBeNull();
+    expect(Object.keys(view)).not.toContain("score");
+    expect(describeEvaluation(view)).toMatch(/^Measured on \d+ of your replies, from /);
+    expect(describeGone(view)).toBeNull();
+  });
+
+  it("labels every way of answering and every measure", () => {
+    for (const s of EvaluationSystem.options) expect(SYSTEM_LABELS[s]).toBeTruthy();
+    for (const m of MEASURES) expect(MEASURE_LABELS[m].label).toBeTruthy();
+    expect(formatShare(0.724)).toBe("72%");
+  });
+
+  it("says a lexical encoder compares wording, not meaning", () => {
+    expect(describeEncoder(null)).toBeNull();
+    expect(describeEncoder("lexical_v1")).toContain("not what they mean");
+    expect(describeEncoder("minilm-l6")).not.toContain("not what they mean");
+  });
+
+  it("puts the engine's notes on the split in the screen's words", () => {
+    expect(
+      describeSplitWarning(
+        "only two conversations: one trains, one is held out, so the score rests on a single thread",
+      ),
+    ).not.toMatch(/score/);
+    expect(describeSplitWarning("something new")).toBe("something new");
+  });
+
+  it("says when replies it was measured on no longer count", () => {
+    const view = EvaluationView.parse(read(contractFixture("evaluation.json")));
+    expect(describeGone({ ...view, measured: 5, remaining: 3 })).toBe(
+      "2 replies it was measured on don't count any more: the mail has changed since. The figures are from the 3 left.",
+    );
+    expect(describeGone({ ...view, measured: 5, remaining: 4 })).toMatch(
+      /^1 reply it was measured on doesn't count/,
+    );
+    expect(describeGone({ ...view, measured: 5, remaining: 0 })).toMatch(/^None of the replies/);
   });
 });

@@ -137,21 +137,52 @@ pub struct GenerationContext {
     pub evidence: Vec<String>,
 }
 
+/// What a draft written to be measured must not see. Empty for every draft
+/// the user asks for.
+#[derive(Clone, Default)]
+pub struct HeldOut<'a> {
+    /// Conversations whose messages may not be used as examples: the ones
+    /// held out of the measurement, among them the reply being predicted.
+    pub conversations: Vec<String>,
+    /// Read the conversation only up to this message, not including it: what
+    /// came after it — the user's actual reply among it — is not shown.
+    pub before_message: Option<String>,
+    /// How the user writes, measured without the held-out conversations.
+    /// When it is given, habits learned from edits to earlier drafts are left
+    /// out too: they come from drafts, and some may be drafts of the very
+    /// replies being predicted.
+    pub voice: Option<&'a voice::LeavingOut<'a>>,
+}
+
 pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext, DbError> {
+    build_context_holding_out(db, req, &HeldOut::default())
+}
+
+/// `build_context`, with what `held` names kept from the model.
+pub fn build_context_holding_out(
+    db: &Db,
+    req: &ComposeRequest,
+    held: &HeldOut<'_>,
+) -> Result<GenerationContext, DbError> {
     let channel = if crate::db::channel_is_known(&req.channel) { req.channel.clone() } else { "other".to_string() };
     let participant = match &req.participant_id {
         Some(id) => db.get_participant(id)?,
         None => None,
     };
     let situation = choose_situation(req)?;
-    let voice = voice::resolve(db, &channel, req.participant_id.as_deref(), situation.as_ref().map(|s| s.id.as_str()))?;
+    let situation_id = situation.as_ref().map(|s| s.id.as_str());
+    let voice = match held.voice {
+        Some(fresh) => fresh.resolve(&channel, req.participant_id.as_deref(), situation_id)?,
+        None => voice::resolve(db, &channel, req.participant_id.as_deref(), situation_id)?,
+    };
     let effective = voice::effective_metrics(&voice);
 
     let incoming = req.incoming_message.as_deref().unwrap_or_default();
+    let anywhere = RetrievalFilter { exclude_conversations: held.conversations.clone(), ..Default::default() };
     let base = RetrievalFilter {
         participant_id: req.participant_id.clone(),
         channel: Some(channel.clone()),
-        ..Default::default()
+        ..anywhere.clone()
     };
     let mut examples: Vec<RetrievedExchange> = Vec::new();
     if let Some(sit) = &situation {
@@ -162,7 +193,7 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
         let narrow = RetrievalFilter { situation_id: Some(sit.id.clone()), ..base.clone() };
         let mut found = retrieval::retrieve(db, incoming, &narrow, EXAMPLES)?;
         if found.len() < 2 {
-            let wide = RetrievalFilter { situation_id: Some(sit.id.clone()), ..Default::default() };
+            let wide = RetrievalFilter { situation_id: Some(sit.id.clone()), ..anywhere.clone() };
             found.extend(retrieval::retrieve(db, incoming, &wide, 2)?);
         }
         for mut e in found {
@@ -180,7 +211,7 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
     // With nothing written to this person on this channel, widen rather than
     // hand the model nothing: the global voice is still the user's voice.
     if examples.is_empty() {
-        examples = retrieval::retrieve(db, incoming, &RetrievalFilter::default(), EXAMPLES)?;
+        examples = retrieval::retrieve(db, incoming, &anywhere, EXAMPLES)?;
     }
 
     let conversation_id = match (&req.conversation_id, &req.participant_id) {
@@ -188,9 +219,10 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
         (None, Some(p)) => db.latest_conversation_with(p)?.map(|c| c.id),
         _ => None,
     };
-    let transcript = match &conversation_id {
-        Some(c) => db.conversation_tail(c, TRANSCRIPT)?,
-        None => Vec::new(),
+    let transcript = match (&conversation_id, &held.before_message) {
+        (Some(c), Some(before)) => db.messages_before(c, before, TRANSCRIPT)?,
+        (Some(c), None) => db.conversation_tail(c, TRANSCRIPT)?,
+        (None, _) => Vec::new(),
     };
 
     let mut evidence = Vec::new();
@@ -236,7 +268,10 @@ pub fn build_context(db: &Db, req: &ComposeRequest) -> Result<GenerationContext,
     if !examples.is_empty() {
         evidence.push(format!("{} past replies of yours, chosen by similarity", examples.len()));
     }
-    let learned = crate::learning::applicable(db, req.participant_id.as_deref())?;
+    let learned = match held.voice {
+        Some(_) => Vec::new(),
+        None => crate::learning::applicable(db, req.participant_id.as_deref())?,
+    };
     if !learned.is_empty() {
         evidence.push(format!(
             "{} you've made to my drafts before: {}",

@@ -75,3 +75,16 @@ export function useDeleteVoicePreference(layer: string, scopeKey: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.voicePreferences(layer, scopeKey) }),
   });
 }
+
+/** The latest measurement of the drafts against what you wrote. */
+export function useEvaluation() {
+  return useQuery({ queryKey: qk.evaluation, queryFn: ipc.evaluation });
+}
+
+export function useStartEvaluation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => ipc.startEvaluation(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.jobs }),
+  });
+}

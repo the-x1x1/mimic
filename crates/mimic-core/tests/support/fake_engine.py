@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Minimal stand-in for mimic_engine used by mimic-core protocol tests.
 
-Speaks the NDJSON protocol exactly: hello, echo, slow, progress, fail, huge,
-crash, shutdown. Kept dependency-free so CI never needs the real engine to
+Speaks the NDJSON protocol exactly: hello, echo, deaf, slow, progress, fail,
+huge, crash, shutdown. Kept dependency-free so CI never needs the real engine to
 prove the transport.
 """
 import json
@@ -41,6 +41,11 @@ for line in sys.stdin:
         break
     elif method == "echo":
         reply(req, params)
+    elif method == "deaf":
+        # Answer, then stop reading: what an engine stuck in a long
+        # computation looks like from the other end of its input.
+        reply(req, {"deaf": True})
+        time.sleep(params.get("seconds", 60))
     elif method == "slow":
         time.sleep(params.get("seconds", 1))
         reply(req, {"slept": params.get("seconds", 1)})

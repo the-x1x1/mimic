@@ -1,9 +1,9 @@
 //! Engine sidecar transport tests against a dependency-free fake engine.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use mimic_core::engine::{EngineClient, EngineCommand, EngineConfig, EngineEvent};
+use mimic_core::engine::{EngineClient, EngineCommand, EngineConfig, EngineError, EngineEvent};
 use serde_json::json;
 
 fn python() -> Option<PathBuf> {
@@ -124,6 +124,70 @@ async fn oversized_message_kills_engine() {
         too_big,
         Err(mimic_core::engine::EngineError::Protocol(_)) | Err(mimic_core::engine::EngineError::NotRunning(_))
     ));
+}
+
+/// Far more than a pipe holds, so writing it to an engine that no longer
+/// reads cannot finish.
+fn more_than_a_pipe_holds() -> serde_json::Value {
+    json!({ "blob": "x".repeat(4 << 20) })
+}
+
+#[tokio::test]
+async fn an_engine_that_stops_reading_cannot_hold_a_request_forever() {
+    let Some(engine) = fake_engine(8 << 20) else { return };
+    engine.start().await.unwrap();
+    engine.call("deaf", json!({"seconds": 60})).await.unwrap();
+    let mut events = engine.subscribe();
+
+    let started = Instant::now();
+    let err = engine.call_with_timeout("echo", more_than_a_pipe_holds(), Duration::from_millis(500)).await.unwrap_err();
+    assert!(matches!(err, EngineError::Timeout(_)), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(5), "the timeout covers the write: {:?}", started.elapsed());
+
+    // Part of that line may be in the engine's input, and nothing after it
+    // would be read right, so that engine is stopped, and says so.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_ne!(engine.status().state, "ready");
+    let mut exited = false;
+    while let Ok(ev) = events.try_recv() {
+        exited |= matches!(ev, EngineEvent::Exited { .. });
+    }
+    assert!(exited, "the exit is reported, so the app starts another");
+    assert!(
+        matches!(engine.call("echo", json!({})).await, Err(EngineError::NotRunning(_))),
+        "nothing more is written into the old one"
+    );
+
+    let st = engine.restart().await.unwrap();
+    assert_eq!(st.state, "ready");
+    assert_eq!(engine.call("echo", json!({"x": 1})).await.unwrap()["x"], 1);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn stopping_does_not_wait_for_a_write_that_cannot_finish() {
+    let Some(engine) = fake_engine(8 << 20) else { return };
+    engine.start().await.unwrap();
+    engine.call("deaf", json!({"seconds": 60})).await.unwrap();
+    let writing = {
+        let engine = engine.clone();
+        tokio::spawn(async move {
+            engine.call_with_timeout("echo", more_than_a_pipe_holds(), Duration::from_secs(60)).await
+        })
+    };
+    // The write is under way, and stuck.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!writing.is_finished());
+
+    let started = Instant::now();
+    engine.stop().await;
+    assert!(started.elapsed() < Duration::from_secs(6), "stop took {:?}", started.elapsed());
+    assert_eq!(engine.status().state, "stopped");
+    let stuck = tokio::time::timeout(Duration::from_secs(5), writing)
+        .await
+        .expect("the stuck write ends once its engine is gone")
+        .unwrap();
+    assert!(stuck.is_err(), "{stuck:?}");
 }
 
 #[tokio::test]

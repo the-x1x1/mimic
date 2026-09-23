@@ -1,0 +1,111 @@
+{
+  "id": "4187e3fb-d870-4b8d-834f-86531f796c2b",
+  "createdAt": "2026-09-23T08:54:38.920Z",
+  "provider": "mock",
+  "model": "mock-1",
+  "measured": 2,
+  "remaining": 2,
+  "strategy": "conversation_grouped",
+  "conversations": 2,
+  "heldOutConversations": 1,
+  "measuredConversations": 1,
+  "warnings": [],
+  "embeddingProvider": null,
+  "commonReply": {
+    "text": "any time, let me know what's next",
+    "times": 1
+  },
+  "systems": [
+    {
+      "system": "mimic",
+      "cases": 2,
+      "length": {
+        "mean": 0.4,
+        "p10": 0.24
+      },
+      "vocabulary": {
+        "mean": 0.0,
+        "p10": 0.0
+      },
+      "punctuation": {
+        "mean": 1.0,
+        "p10": 1.0
+      },
+      "embedding": null
+    },
+    {
+      "system": "generic",
+      "cases": 2,
+      "length": {
+        "mean": 0.4,
+        "p10": 0.24
+      },
+      "vocabulary": {
+        "mean": 0.0,
+        "p10": 0.0
+      },
+      "punctuation": {
+        "mean": 1.0,
+        "p10": 1.0
+      },
+      "embedding": null
+    },
+    {
+      "system": "common_reply",
+      "cases": 2,
+      "length": {
+        "mean": 0.2858,
+        "p10": 0.1715
+      },
+      "vocabulary": {
+        "mean": 0.0,
+        "p10": 0.0
+      },
+      "punctuation": {
+        "mean": 1.0,
+        "p10": 1.0
+      },
+      "embedding": null
+    }
+  ],
+  "cases": [
+    {
+      "incoming": "7?",
+      "from": "Bob",
+      "reply": "works",
+      "answers": [
+        {
+          "system": "mimic",
+          "text": "echo: Reply to this message:"
+        },
+        {
+          "system": "generic",
+          "text": "echo: Reply to this message:"
+        },
+        {
+          "system": "common_reply",
+          "text": "any time, let me know what's next"
+        }
+      ]
+    },
+    {
+      "incoming": "pub friday?",
+      "from": "Bob",
+      "reply": "yeah im in",
+      "answers": [
+        {
+          "system": "mimic",
+          "text": "echo: Reply to this message:"
+        },
+        {
+          "system": "generic",
+          "text": "echo: Reply to this message:"
+        },
+        {
+          "system": "common_reply",
+          "text": "any time, let me know what's next"
+        }
+      ]
+    }
+  ]
+}

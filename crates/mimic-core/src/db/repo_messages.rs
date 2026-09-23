@@ -476,6 +476,23 @@ impl Db {
         Ok(ConversationPage { messages: page.into_iter().map(|(m, _)| m).collect(), more })
     }
 
+    /// The `limit` messages of a conversation just before one of its
+    /// messages, oldest first — what was on screen when it arrived. Measuring
+    /// the drafts gives a model this and nothing later: what the user
+    /// actually replied comes after.
+    pub fn messages_before(&self, conversation_id: &str, message_id: &str, limit: usize) -> DbResult<Vec<Message>> {
+        let conn = self.conn();
+        let at = position(&conn, conversation_id, message_id)?;
+        let (side, order) = (Toward::Earlier.side(), Toward::Earlier.nearest_first());
+        let sql = format!(
+            "SELECT * FROM (SELECT {COLS} FROM messages m WHERE m.conversation_id = ?1 AND {side}
+             ORDER BY {order} LIMIT {limit}) ORDER BY sequence_index, id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![conversation_id, at, message_id], map)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
     /// How many messages of its conversation come before one message and how
     /// many after it, in the order `conversation_page` reads them.
     pub fn place_in_conversation(&self, conversation_id: &str, message_id: &str) -> DbResult<(i64, i64)> {
@@ -704,6 +721,11 @@ mod tests {
         assert_eq!(back.messages[2].automated.as_deref(), Some("auto_reply"));
         let start = db.conversation_page(&convo, &back.messages[0].id, Earlier, 3).unwrap();
         assert!(start.messages.is_empty() && start.more == 0);
+
+        // The same messages, whole, for a prompt: just before it, and nothing after.
+        let before: Vec<String> =
+            db.messages_before(&convo, &on_screen.id, 2).unwrap().into_iter().map(|m| m.body).collect();
+        assert_eq!(before, ["message 4", "message 5"]);
 
         // After it, oldest first as well, read on from the last one shown.
         let after = db.conversation_page(&convo, &on_screen.id, Later, 1).unwrap();

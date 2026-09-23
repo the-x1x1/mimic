@@ -193,6 +193,7 @@ pub async fn delete_person(
     state: State<'_, SharedState>,
     participant_id: String,
 ) -> CommandResult<mimic_core::privacy::DeletionReport> {
+    crate::commands::voice::stop_measuring(&state);
     Ok(state.db.delete_participant(&participant_id)?)
 }
 
@@ -200,6 +201,7 @@ pub async fn delete_person(
 pub async fn delete_all_communication_data(
     state: State<'_, SharedState>,
 ) -> CommandResult<mimic_core::privacy::DeletionReport> {
+    crate::commands::voice::stop_measuring(&state);
     Ok(state.db.delete_all_communication_data()?)
 }
 

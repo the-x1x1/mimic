@@ -32,6 +32,10 @@ pub struct RetrievalFilter {
     /// Inclusive RFC 3339 bounds.
     pub since: Option<String>,
     pub until: Option<String>,
+    /// Conversations whose messages may not be used. Measuring the drafts
+    /// hides the conversations it holds out, so no reply it is trying to
+    /// predict can be shown to the model as an example of how to write it.
+    pub exclude_conversations: Vec<String>,
 }
 
 /// One retrieved exchange: something someone said, and how the user answered.
@@ -43,6 +47,10 @@ pub struct RetrievedExchange {
     pub reply: String,
     /// What they were answering, when the reply was linked to one.
     pub incoming: Option<String>,
+    /// Which message that was. Measuring the drafts keeps a case only while
+    /// every message it was written from is still there; nothing shows it.
+    #[serde(skip_serializing, default)]
+    pub incoming_message_id: Option<String>,
     pub participant_id: Option<String>,
     pub channel: String,
     pub sent_at: Option<String>,
@@ -93,6 +101,7 @@ pub fn retrieve(
                 reply_message_id: c.reply_message_id,
                 reply: c.reply,
                 incoming: c.incoming,
+                incoming_message_id: c.incoming_message_id,
                 participant_id: c.participant_id,
                 channel: c.channel,
                 sent_at: c.sent_at,
@@ -150,6 +159,7 @@ pub struct CandidateExchange {
     pub reply_message_id: String,
     pub reply: String,
     pub incoming: Option<String>,
+    pub incoming_message_id: Option<String>,
     pub participant_id: Option<String>,
     pub channel: String,
     pub sent_at: Option<String>,
@@ -164,7 +174,7 @@ impl Db {
         limit: usize,
     ) -> Result<Vec<CandidateExchange>, DbError> {
         let mut sql = String::from(
-            "SELECT m.id, m.body, prev.body, cp.participant_id, m.channel, m.sent_at
+            "SELECT m.id, m.body, prev.body, cp.participant_id, m.channel, m.sent_at, prev.id
              FROM messages m
              LEFT JOIN messages prev ON prev.id = m.reply_to_message_id
              LEFT JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
@@ -207,6 +217,12 @@ impl Db {
             sql.push_str(" AND m.sent_at <= ?");
             args.push(Box::new(until.clone()));
         }
+        if !filter.exclude_conversations.is_empty() {
+            // One parameter however many there are: a held-out set of a
+            // large mailbox runs to thousands of conversations.
+            sql.push_str(" AND m.conversation_id NOT IN (SELECT value FROM json_each(?))");
+            args.push(Box::new(serde_json::to_string(&filter.exclude_conversations).unwrap_or_else(|_| "[]".into())));
+        }
         sql.push_str(&format!(" ORDER BY m.sent_at DESC, m.id LIMIT {limit}"));
 
         let conn = self.conn();
@@ -216,6 +232,7 @@ impl Db {
                 reply_message_id: r.get(0)?,
                 reply: r.get(1)?,
                 incoming: r.get(2)?,
+                incoming_message_id: r.get(6)?,
                 participant_id: r.get(3)?,
                 channel: r.get(4)?,
                 sent_at: r.get(5)?,
@@ -366,6 +383,17 @@ mod tests {
         assert_eq!(by(RetrievalFilter { participant_id: Some(f.bob.clone()), ..Default::default() }), 1);
         assert_eq!(by(RetrievalFilter { since: Some("2026-01-06T00:00:00Z".into()), ..Default::default() }), 2);
         assert_eq!(by(RetrievalFilter { until: Some("2026-01-05T23:59:59Z".into()), ..Default::default() }), 1);
+        // A conversation held out is not there at all, however well it matches.
+        let ada_thread = f.db.latest_conversation_with(&f.ada).unwrap().unwrap().id;
+        assert_eq!(by(RetrievalFilter { exclude_conversations: vec![ada_thread.clone()], ..Default::default() }), 1);
+        assert_eq!(
+            by(RetrievalFilter {
+                participant_id: Some(f.ada.clone()),
+                exclude_conversations: vec!["not-a-thread".into(), ada_thread],
+                ..Default::default()
+            }),
+            0
+        );
         assert_eq!(
             by(RetrievalFilter {
                 since: Some("2026-01-06T00:00:00Z".into()),

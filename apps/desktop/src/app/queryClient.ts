@@ -30,6 +30,9 @@ export const qk = {
   // analysis refreshes the situation counts with it.
   situations: ["voice", "situations"] as const,
   learning: ["voice", "learning"] as const,
+  // Under "voice", so a finished job — the measurement itself, or anything
+  // that deleted mail it was measured on — refreshes it.
+  evaluation: ["voice", "evaluation"] as const,
   voiceExamples: (layer: string, scope: string) => ["voiceExamples", layer, scope] as const,
   voicePreferences: (layer: string, scope: string) => ["voicePrefs", layer, scope] as const,
   generationContext: (key: string) => ["generationContext", key] as const,

@@ -253,9 +253,14 @@ impl JobRunner {
 
     /// Process a single job to completion. Public for tests.
     pub async fn run_one(&self, job: Job) {
-        if let Err(e) = self.db.mark_job_running(&job.id) {
-            tracing::error!("cannot start job {}: {e}", job.id);
-            return;
+        match self.db.mark_job_running(&job.id) {
+            Ok(true) => {}
+            // Canceled while it waited to start: there is nothing to run.
+            Ok(false) => return,
+            Err(e) => {
+                tracing::error!("cannot start job {}: {e}", job.id);
+                return;
+            }
         }
         let _ = self.events.send(JobEvent {
             job_id: job.id.clone(),

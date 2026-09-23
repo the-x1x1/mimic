@@ -106,8 +106,13 @@ const READS_MAIL: [&str; 2] = [crate::import::JOB_KIND, crate::sources::imap::JO
 
 /// Jobs that hold people's ids while they run. Folding someone they hold
 /// makes their next write fail, or bring the person back.
-const HOLDS_PEOPLE: [&str; 4] =
-    [crate::import::JOB_KIND, crate::sources::imap::JOB_KIND, crate::voice::JOB_KIND, crate::assist::JOB_KIND];
+const HOLDS_PEOPLE: [&str; 5] = [
+    crate::import::JOB_KIND,
+    crate::sources::imap::JOB_KIND,
+    crate::voice::JOB_KIND,
+    crate::assist::JOB_KIND,
+    crate::evaluation::JOB_KIND,
+];
 
 impl Db {
     /// The single user identity row, with its identifiers.
@@ -507,6 +512,7 @@ fn refuse_while(conn: &Connection, kinds: &[&str]) -> DbResult<()> {
         crate::import::JOB_KIND => "reading your mail",
         crate::sources::imap::JOB_KIND => "checking your mail",
         crate::voice::JOB_KIND => "working out how you write",
+        crate::evaluation::JOB_KIND => "measuring how close my drafts come",
         _ => "writing replies",
     };
     Err(DbError::Busy(format!("I'm {doing} right now. Try again when that's finished.")))

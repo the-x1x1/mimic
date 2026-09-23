@@ -219,6 +219,7 @@ pub async fn delete_source(
     state: State<'_, SharedState>,
     source_id: String,
 ) -> CommandResult<mimic_core::privacy::DeletionReport> {
+    crate::commands::voice::stop_measuring(&state);
     let report = state.db.delete_source_and_contents(&source_id)?;
     // A disconnected mailbox's password goes with it. The mail is already
     // gone, so a failure here does not undo that; it is logged, never with

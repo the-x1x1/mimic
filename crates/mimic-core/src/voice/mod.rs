@@ -375,6 +375,100 @@ pub fn effective_metrics(voice: &ResolvedVoice) -> VoiceMetrics {
     out
 }
 
+/// The voice worked out afresh from the user's own messages outside some
+/// conversations. Measuring the drafts uses it, so that no layer a model is
+/// shown was measured on a reply it is trying to predict — the stored
+/// profiles were measured over everything. Layers are folded as `resolve`
+/// folds them; each scope is computed once per measurement and kept.
+/// Representative examples are not carried: a prompt never shows them.
+pub struct LeavingOut<'a> {
+    db: &'a Db,
+    held: std::collections::HashSet<String>,
+    cache: std::cell::RefCell<std::collections::HashMap<(&'static str, String), Option<ResolvedLayer>>>,
+}
+
+impl<'a> LeavingOut<'a> {
+    pub fn new(db: &'a Db, conversations: &[String]) -> Self {
+        Self { db, held: conversations.iter().cloned().collect(), cache: Default::default() }
+    }
+
+    /// `resolve`, over the messages outside the held-out conversations.
+    pub fn resolve(
+        &self,
+        channel: &str,
+        participant_id: Option<&str>,
+        situation_id: Option<&str>,
+    ) -> Result<ResolvedVoice, DbError> {
+        let mut layers = Vec::new();
+        let mut scopes: Vec<(VoiceLayer, String)> = vec![(VoiceLayer::Global, String::new())];
+        if let Some(l) = self.layer(VoiceLayer::Global, "", SelfScope::default(), "Everything you write")? {
+            layers.push(l);
+        }
+        let over = format!("What you write over {channel}");
+        if let Some(l) =
+            self.layer(VoiceLayer::Channel, channel, SelfScope { channel: Some(channel), ..Default::default() }, &over)?
+        {
+            layers.push(l);
+            scopes.push((VoiceLayer::Channel, channel.to_string()));
+        }
+        if let Some(pid) = participant_id {
+            let name = self.db.get_participant(pid)?.map(|p| p.display_name).unwrap_or_default();
+            let to = format!("What you write to {name}");
+            let scope = SelfScope { participant_id: Some(pid), ..Default::default() };
+            if let Some(l) = self.layer(VoiceLayer::Relationship, pid, scope, &to)? {
+                layers.push(l);
+                scopes.push((VoiceLayer::Relationship, pid.to_string()));
+            }
+        }
+        if let Some((sid, b)) = situation_id.and_then(|sid| crate::situations::builtin(sid).map(|b| (sid, b))) {
+            let scope = SelfScope { situation_id: Some(sid), ..Default::default() };
+            if let Some(l) = self.layer(VoiceLayer::Situational, sid, scope, b.layer_label)? {
+                layers.push(l);
+                scopes.push((VoiceLayer::Situational, sid.to_string()));
+            }
+        }
+        // What the user told Mimic directly is theirs, not measured from any
+        // message, so it stands as it does for every draft.
+        let overrides =
+            self.db.voice_preferences_for(&scopes)?.into_iter().map(|p| (p.key, p.value)).collect::<Vec<_>>();
+        Ok(ResolvedVoice { layers, overrides, examples: Vec::new() })
+    }
+
+    /// One scope's layer over the messages outside the held-out
+    /// conversations; none when no message is left in it.
+    fn layer(
+        &self,
+        layer: VoiceLayer,
+        key: &str,
+        scope: SelfScope<'_>,
+        label: &str,
+    ) -> Result<Option<ResolvedLayer>, DbError> {
+        if let Some(hit) = self.cache.borrow().get(&(layer.as_str(), key.to_string())) {
+            return Ok(hit.clone());
+        }
+        let kept: Vec<Message> =
+            collect(self.db, scope)?.into_iter().filter(|m| !self.held.contains(&m.conversation_id)).collect();
+        let computed = (!kept.is_empty()).then(|| {
+            let samples: Vec<Sample<'_>> = kept
+                .iter()
+                .map(|m| Sample { body: &m.body, response_latency_seconds: m.response_latency_seconds })
+                .collect();
+            let metrics = metrics::compute(&samples);
+            ResolvedLayer {
+                layer: layer.as_str().to_string(),
+                scope_key: key.to_string(),
+                label: label.to_string(),
+                sample_size: metrics.sample_size as i64,
+                measurable: metrics.measurable,
+                metrics,
+                stale: false,
+            }
+        });
+        self.cache.borrow_mut().insert((layer.as_str(), key.to_string()), computed.clone());
+        Ok(computed)
+    }
+}
+
 pub struct AnalyzeExecutor;
 
 impl AnalyzeExecutor {

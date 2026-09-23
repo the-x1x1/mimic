@@ -39,6 +39,10 @@ pub struct DeletionReport {
     /// Conversations kept because other people are in them, with this
     /// person's own messages removed from them.
     pub conversations_kept: usize,
+    /// Measurements of the drafts removed. Every one goes: what was written
+    /// for a case was written from the conversation before it and from
+    /// examples across the user's mail, so any of it may be theirs.
+    pub evaluations: usize,
 }
 
 impl Db {
@@ -132,6 +136,7 @@ impl Db {
                 "SELECT COUNT(*) FROM voice_profiles WHERE participant_id IS NOT ?1 AND scope_key <> ?1",
                 participant_id,
             )?;
+            report.evaluations = count0(&conn, "SELECT COUNT(*) FROM evaluations")?;
         }
         if !commit {
             return Ok(report);
@@ -149,6 +154,8 @@ impl Db {
             )?;
             tx.execute("DELETE FROM voice_profiles WHERE participant_id = ?1 OR scope_key = ?1", [participant_id])?;
             tx.execute("DELETE FROM voice_preferences WHERE scope_key = ?1", [participant_id])?;
+            // Every measurement of the drafts: their mail may be in any of it.
+            tx.execute("DELETE FROM evaluations", [])?;
             // Conversations that were only with this person, and everything in
             // them, including the user's own half of the exchange.
             tx.execute(&format!("DELETE FROM conversations WHERE id IN ({solo_list})"), [])?;
@@ -195,6 +202,7 @@ impl Db {
                     "SELECT COUNT(*) FROM representative_examples WHERE message_id IN (SELECT id FROM messages WHERE source_id = ?1)",
                     source_id,
                 )?,
+                evaluations: count0(&conn, "SELECT COUNT(*) FROM evaluations")?,
                 ..Default::default()
             }
         };
@@ -223,7 +231,12 @@ impl Db {
             let ids = stmt.query_map([source_id], |r| r.get::<_, String>(0))?;
             ids.collect::<Result<_, _>>()?
         };
-        self.conn().execute("DELETE FROM messages WHERE source_id = ?1", [source_id])?;
+        {
+            let conn = self.conn();
+            // Every measurement of the drafts: this mail may be in any of it.
+            conn.execute("DELETE FROM evaluations", [])?;
+            conn.execute("DELETE FROM messages WHERE source_id = ?1", [source_id])?;
+        }
         self.delete_source(source_id)?;
         for conversation_id in &affected {
             {
@@ -274,6 +287,7 @@ impl Db {
                 voice_profiles: count0(&conn, "SELECT COUNT(*) FROM voice_profiles")?,
                 voice_preferences: count0(&conn, "SELECT COUNT(*) FROM voice_preferences")?,
                 drafts: count0(&conn, "SELECT COUNT(*) FROM drafts")?,
+                evaluations: count0(&conn, "SELECT COUNT(*) FROM evaluations")?,
                 ..Default::default()
             }
         };

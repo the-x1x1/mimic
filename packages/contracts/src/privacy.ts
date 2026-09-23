@@ -14,6 +14,8 @@ export const DeletionReport = z.object({
   drafts: z.number(),
   profilesInvalidated: z.number(),
   conversationsKept: z.number(),
+  /** Measurements of the drafts removed: any of them may hold this mail. */
+  evaluations: z.number(),
 });
 export type DeletionReport = z.infer<typeof DeletionReport>;
 
@@ -45,6 +47,11 @@ export function describeDeletion(r: DeletionReport): string[] {
   }
   if (r.drafts > 0) {
     lines.push(`${r.drafts} drafts written to them will be removed.`);
+  }
+  if (r.evaluations > 0) {
+    lines.push(
+      "My measurement of how close my drafts come will be deleted too: it was written partly from this mail. You can measure again afterwards.",
+    );
   }
   if (r.profilesInvalidated > 0) {
     lines.push(
