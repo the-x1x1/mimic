@@ -5,13 +5,68 @@
 //! rather than offset-paged, and no call materializes a whole conversation
 //! unless the caller asked for it by id.
 
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
 
 use super::models::json_obj;
 use super::repo_sources::CHANNELS;
 use super::{Conversation, Db, DbError, DbResult, Message};
 use crate::ids::{new_id, now_rfc3339, sha256_hex};
+
+/// One message of a conversation, as the screen shows it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadMessage {
+    pub id: String,
+    /// `self`, `other` or `unknown`: whether the user wrote it is decided at
+    /// import, by their addresses, and nothing here guesses.
+    pub direction: String,
+    /// Who wrote it, when it was not the user and they could be named.
+    pub author: Option<String>,
+    pub sent_at: Option<String>,
+    pub body: String,
+    /// Why it looks automated, from its headers, when it does. A reading.
+    pub automated: Option<String>,
+}
+
+/// Part of a conversation, oldest first, read from one of its messages
+/// toward the start or toward the end, and how much is further that way.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationPage {
+    pub messages: Vec<ThreadMessage>,
+    /// Messages further on in the direction read, past the last one here.
+    /// Zero means this page reaches the start (or the end).
+    pub more: i64,
+}
+
+/// Which way from one of its messages a conversation is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Toward {
+    Earlier,
+    Later,
+}
+
+impl Toward {
+    /// The messages on this side of the one at position `?2` with id `?3`,
+    /// in the conversation's order: position, then id — the way the waiting
+    /// list breaks ties — so every other message is on exactly one side.
+    fn side(self) -> &'static str {
+        match self {
+            Toward::Earlier => "(m.sequence_index < ?2 OR (m.sequence_index = ?2 AND m.id < ?3))",
+            Toward::Later => "(m.sequence_index > ?2 OR (m.sequence_index = ?2 AND m.id > ?3))",
+        }
+    }
+
+    /// Nearest to the message read from first.
+    fn nearest_first(self) -> &'static str {
+        match self {
+            Toward::Earlier => "m.sequence_index DESC, m.id DESC",
+            Toward::Later => "m.sequence_index, m.id",
+        }
+    }
+}
 
 /// A message as an importer produces it, before it has an id.
 #[derive(Debug, Clone)]
@@ -368,6 +423,70 @@ impl Db {
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
+    /// Up to `limit` messages of a conversation next to one of its messages,
+    /// toward its start or its end, oldest first — what the home screen shows
+    /// when the user asks to see the rest of the conversation a waiting
+    /// message is part of, a page at a time. Reading on from the far end of a
+    /// page gives the next one; no two pages share or skip a message. The
+    /// user's own messages carry no one's name.
+    pub fn conversation_page(
+        &self,
+        conversation_id: &str,
+        from_message_id: &str,
+        toward: Toward,
+        limit: usize,
+    ) -> DbResult<ConversationPage> {
+        let conn = self.conn();
+        let at = position(&conn, conversation_id, from_message_id)?;
+        let (side, order) = (toward.side(), toward.nearest_first());
+        let automated = super::repo_waiting::automated_of("m");
+        let sql = format!(
+            "SELECT m.id, m.direction, CASE WHEN m.direction = 'self' THEN NULL ELSE p.display_name END,
+                    m.sent_at, m.body, {automated}, m.sequence_index
+             FROM messages m LEFT JOIN participants p ON p.id = m.participant_id
+             WHERE m.conversation_id = ?1 AND {side}
+             ORDER BY {order} LIMIT {limit}"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![conversation_id, at, from_message_id], |r| {
+            Ok((
+                ThreadMessage {
+                    id: r.get(0)?,
+                    direction: r.get(1)?,
+                    author: r.get(2)?,
+                    sent_at: r.get(3)?,
+                    body: r.get(4)?,
+                    automated: r.get(5)?,
+                },
+                r.get::<_, i64>(6)?,
+            ))
+        })?;
+        let mut page: Vec<(ThreadMessage, i64)> = rows.collect::<Result<_, _>>()?;
+        if toward == Toward::Earlier {
+            page.reverse();
+        }
+        let far = match toward {
+            Toward::Earlier => page.first(),
+            Toward::Later => page.last(),
+        };
+        let more = match far {
+            Some((m, at)) => count_side(&conn, conversation_id, *at, &m.id, toward)?,
+            None => 0,
+        };
+        Ok(ConversationPage { messages: page.into_iter().map(|(m, _)| m).collect(), more })
+    }
+
+    /// How many messages of its conversation come before one message and how
+    /// many after it, in the order `conversation_page` reads them.
+    pub fn place_in_conversation(&self, conversation_id: &str, message_id: &str) -> DbResult<(i64, i64)> {
+        let conn = self.conn();
+        let at = position(&conn, conversation_id, message_id)?;
+        Ok((
+            count_side(&conn, conversation_id, at, message_id, Toward::Earlier)?,
+            count_side(&conn, conversation_id, at, message_id, Toward::Later)?,
+        ))
+    }
+
     /// The conversation with this participant that was most recently active.
     pub fn latest_conversation_with(&self, participant_id: &str) -> DbResult<Option<Conversation>> {
         Ok(self
@@ -481,6 +600,28 @@ pub(crate) fn refresh_conversation_stats(conn: &rusqlite::Connection, conversati
     Ok(())
 }
 
+/// Where a message sits in its conversation; not found when it is not one
+/// of that conversation's messages.
+fn position(conn: &Connection, conversation_id: &str, message_id: &str) -> DbResult<i64> {
+    conn.query_row(
+        "SELECT sequence_index FROM messages WHERE id = ?1 AND conversation_id = ?2",
+        params![message_id, conversation_id],
+        |r| r.get(0),
+    )
+    .optional()?
+    .ok_or_else(|| DbError::NotFound(format!("message {message_id} in {conversation_id}")))
+}
+
+/// Messages of the conversation on one side of the message at `at`.
+fn count_side(conn: &Connection, conversation_id: &str, at: i64, message_id: &str, toward: Toward) -> DbResult<i64> {
+    let side = toward.side();
+    Ok(conn.query_row(
+        &format!("SELECT COUNT(*) FROM messages m WHERE m.conversation_id = ?1 AND {side}"),
+        params![conversation_id, at, message_id],
+        |r| r.get(0),
+    )?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +660,99 @@ mod tests {
             reply_to_external_id: None,
             metadata: Value::Null,
         }
+    }
+
+    #[test]
+    fn a_conversation_is_read_a_page_at_a_time_either_side_of_the_message_on_screen() {
+        use Toward::{Earlier, Later};
+        let (db, source, convo, ada) = setup();
+        let mut batch = Vec::new();
+        for i in 0..9 {
+            let (dir, who) = if i % 2 == 0 { ("other", Some(ada.clone())) } else { ("self", None) };
+            let mut m = msg(
+                &source,
+                &convo,
+                &format!("m{i}"),
+                dir,
+                i,
+                &format!("2026-01-0{}T10:00:00Z", i + 1),
+                &format!("message {i}"),
+            );
+            m.participant_id = who;
+            batch.push(m);
+        }
+        // An automatic reply, read as one from its headers.
+        batch[2].metadata = serde_json::json!({ "automated": "auto_reply" });
+        db.insert_messages(&batch).unwrap();
+        let all = db.conversation_tail(&convo, 9).unwrap();
+        let on_screen = &all[6];
+        assert_eq!(on_screen.body, "message 6");
+        assert_eq!(db.place_in_conversation(&convo, &on_screen.id).unwrap(), (6, 2));
+
+        let page = db.conversation_page(&convo, &on_screen.id, Earlier, 3).unwrap();
+        let bodies: Vec<&str> = page.messages.iter().map(|m| m.body.as_str()).collect();
+        assert_eq!(bodies, ["message 3", "message 4", "message 5"], "the nearest before it, oldest first");
+        assert_eq!(page.more, 3);
+        assert_eq!(page.messages[0].direction, "self");
+        assert_eq!(page.messages[0].author, None, "the user is not named as someone else");
+        assert_eq!(page.messages[1].author.as_deref(), Some("Ada"));
+
+        let back = db.conversation_page(&convo, &page.messages[0].id, Earlier, 3).unwrap();
+        let bodies: Vec<&str> = back.messages.iter().map(|m| m.body.as_str()).collect();
+        assert_eq!(bodies, ["message 0", "message 1", "message 2"]);
+        assert_eq!(back.more, 0, "that is the start");
+        assert_eq!(back.messages[2].automated.as_deref(), Some("auto_reply"));
+        let start = db.conversation_page(&convo, &back.messages[0].id, Earlier, 3).unwrap();
+        assert!(start.messages.is_empty() && start.more == 0);
+
+        // After it, oldest first as well, read on from the last one shown.
+        let after = db.conversation_page(&convo, &on_screen.id, Later, 1).unwrap();
+        assert_eq!(after.messages.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), ["message 7"]);
+        assert_eq!(after.more, 1);
+        let end = db.conversation_page(&convo, &after.messages[0].id, Later, 5).unwrap();
+        assert_eq!(end.messages.iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), ["message 8"]);
+        assert_eq!(end.more, 0, "that is the end");
+        assert_eq!(db.place_in_conversation(&convo, &all[8].id).unwrap(), (8, 0));
+
+        // A message from another conversation is not a place in this one.
+        let other = db.upsert_conversation(&source, "thread-2", "chat", None).unwrap();
+        assert!(matches!(db.conversation_page(&other, &on_screen.id, Earlier, 3), Err(DbError::NotFound(_))));
+        assert!(matches!(db.place_in_conversation(&other, &on_screen.id), Err(DbError::NotFound(_))));
+
+        // Messages that share a place in the order — a batch not renumbered
+        // by time — are read by id, as the waiting list picks among them:
+        // each shows once, on one side, and none is skipped.
+        let tied = db.upsert_conversation(&source, "thread-3", "chat", None).unwrap();
+        let batch: Vec<_> = (0..5)
+            .map(|i| msg(&source, &tied, &format!("t{i}"), "other", 0, "2026-01-01T10:00:00Z", &format!("tied {i}")))
+            .collect();
+        db.insert_messages(&batch).unwrap();
+        let mut ids: Vec<String> = db.conversation_tail(&tied, 5).unwrap().into_iter().map(|m| m.id).collect();
+        ids.sort();
+        assert_eq!(db.place_in_conversation(&tied, &ids[2]).unwrap(), (2, 2));
+        let mut at = ids.last().unwrap().clone();
+        let mut seen: Vec<String> = Vec::new();
+        loop {
+            let page = db.conversation_page(&tied, &at, Earlier, 2).unwrap();
+            if page.messages.is_empty() {
+                break;
+            }
+            assert_eq!(page.more as usize, ids.len() - 1 - seen.len() - page.messages.len());
+            at = page.messages[0].id.clone();
+            let mut older: Vec<String> = page.messages.into_iter().map(|m| m.id).collect();
+            older.append(&mut seen);
+            seen = older;
+        }
+        assert_eq!(seen, ids[..4], "every message before the last, once, in order");
+        let mut at = ids[0].clone();
+        let mut ahead: Vec<String> = Vec::new();
+        loop {
+            let page = db.conversation_page(&tied, &at, Later, 2).unwrap();
+            let Some(last) = page.messages.last() else { break };
+            at = last.id.clone();
+            ahead.extend(page.messages.into_iter().map(|m| m.id));
+        }
+        assert_eq!(ahead, ids[1..], "and every message after the first");
     }
 
     #[test]

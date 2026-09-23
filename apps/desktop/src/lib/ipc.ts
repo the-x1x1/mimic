@@ -12,6 +12,7 @@ import {
   type AddressOwner,
   AppInfo,
   ConnectorInfo,
+  ConversationPage,
   Dashboard,
   DeletionReport,
   DiagnosticsBundle,
@@ -44,6 +45,7 @@ import {
   type ComposeRequest,
   type ImapAccount,
   type ThreadMark,
+  type Toward,
 } from "@mimic/contracts";
 import { isTauri } from "./tauri";
 import { qk, queryClient } from "@/app/queryClient";
@@ -98,6 +100,17 @@ export const ipc = {
   appInfo: () => call("get_app_info", AppInfo),
   dashboard: (limit = 25, showLeftOut = false) =>
     call("get_dashboard", Dashboard, { limit, showLeftOut }),
+  /**
+   * Up to `limit` messages of a conversation next to one of its messages,
+   * toward its start or its end, oldest first.
+   */
+  conversationPage: (conversationId: string, fromMessageId: string, toward: Toward, limit = 20) =>
+    call("get_conversation_page", ConversationPage, {
+      conversationId,
+      fromMessageId,
+      toward,
+      limit,
+    }),
   /**
    * Say a thread does or does not need a reply, about the message on screen;
    * null takes it back. Resolves to whether it applies — false when someone

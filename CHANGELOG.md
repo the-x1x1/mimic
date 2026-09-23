@@ -2,6 +2,19 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.10] — 2026-09-22
+
+The whole conversation.
+
+### Added
+
+- **Each card on the home screen can show the rest of its conversation.** A card showed the one message someone is waiting on, and nothing of what led up to it, so answering meant finding the thread somewhere else first. Now **Show the 80 messages before this one** reads what came before it back in order, oldest first — who wrote each one, when, and your own side marked as yours — the nearest twenty first, with **Show 60 earlier messages** reading further back. Nothing is read until you ask, and **Hide what came before** puts it away.
+- **What came in after the message on a card is shown too.** When something that looks automated — an out-of-office reply, a read receipt — arrives after someone's question, the question stays the one on the card, as before. Until now what came after it wasn't shown anywhere. Now the card says there's more after it, and **Show the message after this one** lists it with why it looks automated, or that I couldn't tell who wrote it.
+
+### Not in this release
+
+Only what's already been read is shown; nothing is fetched from the mailbox to fill in a conversation. Messages are shown as plain text, the way they were read, so formatting, pictures and attachments aren't there.
+
 ## [0.10.0-alpha.9] — 2026-09-22
 
 One Mimic at a time.

@@ -17,6 +17,8 @@ const left = (over: Partial<DashboardThread> = {}): DashboardThread => ({
   lastMessage: "any news on the lease?",
   lastMessageAt: "2026-06-01T09:00:00Z",
   lastMessageId: "m1",
+  earlier: 0,
+  later: 0,
   participant: null,
   hasRelationshipProfile: false,
   draft: null,

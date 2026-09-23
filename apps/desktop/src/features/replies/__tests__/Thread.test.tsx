@@ -35,6 +35,8 @@ const thread = (over: Partial<DashboardThread> = {}): DashboardThread => ({
   lastMessage: "can you confirm Friday?",
   lastMessageAt: "2026-09-20T09:00:00Z",
   lastMessageId: "m2",
+  earlier: 1,
+  later: 0,
   participant: null,
   hasRelationshipProfile: false,
   draft,
@@ -100,5 +102,21 @@ describe("a thread kept on the list against its age says so", () => {
   it("says nothing about age on an ordinary thread", () => {
     setup(thread());
     expect(screen.queryByText(/days old/)).toBeNull();
+  });
+});
+
+describe("a card offers the rest of its conversation where there is any", () => {
+  it("offers what came before and after the message, each on its own side of it", () => {
+    setup(thread({ earlier: 1, later: 3 }));
+    const message = screen.getByText("can you confirm Friday?");
+    const before = screen.getByRole("button", { name: "Show the message before this one" });
+    const after = screen.getByRole("button", { name: "Show the 3 messages after this one" });
+    expect(message.compareDocumentPosition(before) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(message.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("offers nothing when the message is all there is", () => {
+    setup(thread({ earlier: 0, later: 0 }));
+    expect(screen.queryByRole("button", { name: /^Show the .* this one$/ })).toBeNull();
   });
 });

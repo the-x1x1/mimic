@@ -1,0 +1,37 @@
+{
+  "messages": [
+    {
+      "id": "be235123-9130-464f-86eb-08de21df5527",
+      "direction": "other",
+      "author": "Bob",
+      "sentAt": "2026-01-25T18:00:00Z",
+      "body": "pub friday?",
+      "automated": null
+    },
+    {
+      "id": "f35b710b-a7c1-4c01-9180-551d7644ba82",
+      "direction": "self",
+      "author": null,
+      "sentAt": "2026-01-25T18:02:00Z",
+      "body": "yeah im in",
+      "automated": null
+    },
+    {
+      "id": "42ddbdd7-8d4a-43c5-b830-317b5b1637f9",
+      "direction": "other",
+      "author": "Bob",
+      "sentAt": "2026-01-25T18:10:00Z",
+      "body": "7?",
+      "automated": null
+    },
+    {
+      "id": "eabe2b84-9a01-4959-8fa3-914ab3fc61be",
+      "direction": "self",
+      "author": null,
+      "sentAt": "2026-01-25T18:11:00Z",
+      "body": "works",
+      "automated": null
+    }
+  ],
+  "more": 0
+}

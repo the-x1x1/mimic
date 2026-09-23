@@ -34,6 +34,12 @@ pub struct DashboardThread {
     pub last_message: String,
     pub last_message_at: Option<String>,
     pub last_message_id: String,
+    /// Messages of the conversation before the one on screen, and after it.
+    /// Those after it are ones that do not decide whether it is waiting —
+    /// something that looks automated, or whose writer could not be told —
+    /// and they are counted so the screen can show them, never dropped.
+    pub earlier: i64,
+    pub later: i64,
     /// Who it is from. `None` when the import could not attribute it; the row
     /// still appears, named as unattributed, rather than being hidden.
     pub participant: Option<Participant>,
@@ -138,6 +144,13 @@ fn thread(db: &Db, row: AwaitingReply) -> Result<DashboardThread, DbError> {
         Some(p) => db.has_relationship_profile(&p.id)?,
         None => false,
     };
+    let (earlier, later) = match db.place_in_conversation(&row.conversation.id, &row.last_message_id) {
+        Ok(place) => place,
+        // Deleted since the list was read — the user removed its person or
+        // its mail. The card goes on the next read; the screen doesn't fail.
+        Err(DbError::NotFound(_)) => (0, 0),
+        Err(e) => return Err(e),
+    };
     Ok(DashboardThread {
         draft: db.pending_draft_for_message(&row.conversation.id, &row.last_message_id, &row.last_message)?,
         conversation_id: row.conversation.id,
@@ -148,6 +161,8 @@ fn thread(db: &Db, row: AwaitingReply) -> Result<DashboardThread, DbError> {
         last_message: row.last_message,
         last_message_at: row.last_message_at,
         last_message_id: row.last_message_id,
+        earlier,
+        later,
         participant,
         has_relationship_profile,
         automated: row.automated,
@@ -235,6 +250,11 @@ mod tests {
         let waiting = db.threads_awaiting_reply(10).unwrap();
         assert_eq!(waiting.len(), 1, "the last message with a known direction is theirs");
         assert_eq!(waiting[0].last_message, "you around?");
+
+        // What came after it is counted on the card, so the screen can show
+        // it rather than lose it.
+        let card = &dashboard(&db, 10, false, false).unwrap().awaiting[0];
+        assert_eq!((card.earlier, card.later), (0, 1));
     }
 
     #[test]

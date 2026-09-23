@@ -358,6 +358,18 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     let waiting = before.awaiting.len();
     assert!(waiting > 0, "the sample export ends on messages from other people");
 
+    // What came before a waiting message: the rest of its conversation,
+    // oldest first, the user's side included and labelled as theirs.
+    let bob = before.awaiting.iter().find(|t| t.earlier > 0).expect("a waiting thread with a history");
+    assert_eq!(bob.earlier + 1 + bob.later, bob.message_count, "every message is on one side of it or is it");
+    let page =
+        db.conversation_page(&bob.conversation_id, &bob.last_message_id, mimic_core::db::Toward::Earlier, 20).unwrap();
+    assert_eq!(page.messages.len() as i64, bob.earlier, "everything before the message on screen");
+    assert_eq!(page.more, 0, "one page holds all of it");
+    assert!(page.messages.iter().any(|m| m.direction == "self" && m.author.is_none()));
+    assert!(page.messages.iter().any(|m| m.direction == "other" && m.author.is_some()));
+    check_fixture("conversation_page.json", &serde_json::to_value(&page).unwrap());
+
     // Turning it on is what allows a model to see an incoming message the user
     // did not hand over itself.
     db.set_setting(mimic_core::assist::SETTING, &true).unwrap();

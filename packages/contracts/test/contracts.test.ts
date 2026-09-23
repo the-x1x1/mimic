@@ -32,6 +32,8 @@ import {
   describeCredentials,
   AddressAdded,
   AddressPreview,
+  ConversationPage,
+  writerOf,
   HeldAddress,
   describeClaimed,
   describeFold,
@@ -867,6 +869,37 @@ describe("an address filed under someone is the user's only once they say who", 
     );
     expect(describeClaimed({ messages: 1200, people: 1 })).toBe(
       `${(1200).toLocaleString()} messages I'd already read are yours now. I'll look at how you write again so they count.`,
+    );
+  });
+});
+
+describe("the rest of the conversation a waiting message is part of", () => {
+  it("counts what is either side of the message on each card", () => {
+    const view = Dashboard.parse(read(contractFixture("dashboard.json")));
+    expect(view.awaiting.some((t) => t.earlier > 0)).toBe(true);
+    for (const t of view.awaiting) {
+      expect(t.earlier + 1 + t.later).toBe(t.messageCount);
+    }
+  });
+
+  it("parses a page of it, oldest first, with the user's side labelled as theirs", () => {
+    const page = ConversationPage.parse(read(contractFixture("conversation_page.json")));
+    expect(page.messages.length).toBeGreaterThan(1);
+    expect(page.more).toBe(0);
+    const times = page.messages.map((m) => m.sentAt ?? "");
+    expect([...times].sort()).toEqual(times);
+    expect(page.messages.some((m) => writerOf(m) === "You wrote")).toBe(true);
+  });
+
+  it("names who wrote each message without guessing", () => {
+    const m = { id: "m", sentAt: null, body: "hi", automated: null };
+    expect(writerOf({ ...m, direction: "self", author: null })).toBe("You wrote");
+    expect(writerOf({ ...m, direction: "other", author: "Ada Lovelace" })).toBe("Ada wrote");
+    expect(writerOf({ ...m, direction: "other", author: null })).toBe(
+      "Someone I couldn't name wrote",
+    );
+    expect(writerOf({ ...m, direction: "unknown", author: null })).toBe(
+      "I couldn't tell who wrote this",
     );
   });
 });
