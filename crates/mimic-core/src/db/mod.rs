@@ -27,6 +27,7 @@ use crate::ids::now_rfc3339;
 
 pub use models::*;
 pub use repo_drafts::{DraftOutcomes, NewDraft};
+pub use repo_identity::{AddressAdded, AddressOwner, AddressPreview, Claimed, HeldAddress, Reconciled};
 pub use repo_messages::{word_count, ImportCounts, NewMessage, SelfScope};
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
 pub use repo_sources::channel_is_known;
@@ -46,6 +47,14 @@ pub enum DbError {
     NotFound(String),
     #[error("{0}")]
     Invalid(String),
+    /// Refused because work that holds on to what this would change is
+    /// running; the same call succeeds once it has finished.
+    #[error("{0}")]
+    Busy(String),
+    /// Refused because it would change more than the caller has seen and
+    /// agreed to: preview first, then pass back what the preview named.
+    #[error("{0}")]
+    Unconfirmed(String),
 }
 
 pub type DbResult<T> = Result<T, DbError>;

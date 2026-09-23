@@ -607,3 +607,91 @@ fn people_are_listed_and_the_senders_of_automated_mail_are_counted_apart() {
     assert!(shown.automated_senders[0].automated);
     check_fixture("people.json", &serde_json::to_value(&shown).unwrap());
 }
+
+/// The sample export imported with only the user's phone declared: what they
+/// wrote from their email was filed under a person called "C", as someone
+/// else's.
+fn imported_without_the_email() -> Db {
+    let db = Db::open_in_memory().unwrap();
+    db.set_setting(mimic_core::db::WITHIN_DAYS_SETTING, &0).unwrap();
+    db.set_user_identity("C").unwrap();
+    db.add_user_identifier(IdentifierKind::Phone, "+1 (555) 010-1111").unwrap();
+    let source = db
+        .create_source(&NewSource {
+            connector: "mimic_json".into(),
+            name: "Sample export".into(),
+            channel: "chat".into(),
+            location: Some(fixture("import/sample_export.json").to_string_lossy().into()),
+            config: Value::Null,
+        })
+        .unwrap();
+    run_import(&db, &source.id);
+    db
+}
+
+/// The user forgot one of their addresses before importing. Adding it
+/// afterwards shows who the mail from it is filed under and what saying it
+/// is theirs would change; once they confirm, it is exactly as if both
+/// addresses had been declared before the import. Writes the fixtures the
+/// zod suite parses for the preview and the result.
+#[test]
+fn an_address_added_after_the_import_claims_back_what_was_written_from_it() {
+    let (full, full_source) = setup();
+    run_import(&full, &full_source);
+    let expected_own = full.count_self_messages(None, None).unwrap();
+
+    let db = imported_without_the_email();
+    let before_own = db.count_self_messages(None, None).unwrap();
+    let before_people = db.count_participants().unwrap();
+    assert!(before_own < expected_own, "the email half of the user's writing was filed as someone else's");
+    let messages_before = db.count_messages().unwrap();
+
+    let preview = db.preview_user_address(IdentifierKind::Email, "c@example.com").unwrap();
+    let owner = preview.owner.clone().expect("the mail from it is filed under someone");
+    assert_eq!(owner.display_name, "C");
+    assert_eq!(owner.messages as i64, expected_own - before_own, "the preview counts what the fold moves");
+    assert!(owner.other_addresses.is_empty());
+    check_fixture("address_preview.json", &serde_json::to_value(&preview).unwrap());
+    assert!(
+        db.add_user_address(IdentifierKind::Email, "c@example.com", None).is_err(),
+        "not without the user having seen who"
+    );
+    assert_eq!(db.count_self_messages(None, None).unwrap(), before_own);
+
+    let added = db.add_user_address(IdentifierKind::Email, "c@example.com", Some(&owner)).unwrap();
+    assert_eq!(added.claimed.people, 1, "one person, 'C', was the user all along");
+    assert_eq!(added.claimed.messages, owner.messages);
+    assert_eq!(db.count_self_messages(None, None).unwrap(), expected_own, "the same as importing with both addresses");
+    assert_eq!(db.count_participants().unwrap(), before_people - 1);
+    assert_eq!(db.count_messages().unwrap(), messages_before, "no message went anywhere");
+    assert_eq!(
+        db.count_threads_awaiting_reply().unwrap(),
+        full.count_threads_awaiting_reply().unwrap(),
+        "what is waiting is what it would have been"
+    );
+    check_fixture("address_added.json", &serde_json::to_value(&added).unwrap());
+}
+
+/// The address declared without looking — by connecting the mailbox, or by
+/// a version before 0.10.0-alpha.8. "C" holds nothing but the user's own
+/// addresses and the user said nothing about them, so the fold needs no
+/// question; until it runs, Settings lists the address as still held.
+#[test]
+fn someone_who_is_only_the_user_is_folded_back_without_a_question() {
+    let (full, full_source) = setup();
+    run_import(&full, &full_source);
+    let expected_own = full.count_self_messages(None, None).unwrap();
+
+    let db = imported_without_the_email();
+    db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
+    let held = db.held_user_addresses().unwrap();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].identifier.normalized_value, "c@example.com");
+    assert_eq!(held[0].owner.display_name, "C");
+    check_fixture("held_addresses.json", &serde_json::to_value(&held).unwrap());
+
+    let reconciled = db.claim_user_mail().unwrap();
+    assert_eq!((reconciled.claimed.people, reconciled.left), (1, 0));
+    assert_eq!(db.count_self_messages(None, None).unwrap(), expected_own);
+    assert!(db.held_user_addresses().unwrap().is_empty());
+}

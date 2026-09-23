@@ -2,6 +2,25 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.8] — 2026-09-22
+
+Your own mail, whichever address it came from.
+
+### Fixed
+
+- **An address you add now counts for mail I've already read.** If you wrote from an address you hadn't told me about, what you sent from it was filed under a person and read as someone else's: your replies didn't count as answers, your own notes looked like someone waiting on you, and none of it was learned from. Adding the address used to change only mail read afterwards, and reading the mail again changed nothing, because I keep the first copy of every message. Now, when mail from the address you add is filed under someone, I ask first — "Is C (work) you?" — and say how many messages would become yours, which of their other addresses would become yours too, and what you told me about them that would go. It can't be undone, and I say that too. Say yes and it happens in one step: the messages are yours, that person is gone from People, reply times are worked out again, and I look at how you write again. Say no and nothing changes. If anything I told you changed before you answered — more mail filed under them, say — I don't act on the old answer; I ask again, as it is now.
+- **Someone whose every address is yours is folded back without a question**, as long as you've set no relationship, notes or preferences for them. That happens the first time this version starts (for an address you added in an earlier version after its mail was read), when you connect a mailbox of yours, and whenever something I was doing in the background finishes. Anyone else still under one of your addresses is listed under Settings → You, with the same question — and if you say they aren't you, I remember that, and never fold them in without asking.
+- **Setup's "nothing in that file was written by you" had a fix that didn't work.** It asked for the missing address and read the file again, which kept everything as it was. Now adding the address is the fix, with nothing read again, and if nothing came from that address either I say so.
+- **An address isn't added while I'm reading mail.** One added mid-read was missed by that read. Now I say what I'm busy with and ask you to try again when it's finished — and moving someone's messages over also waits while I'm working out how you write or writing replies. A reply being drafted for someone who is folded back meanwhile is kept, addressed to nobody, rather than failing.
+- Adding an address that is already yours says so, instead of nothing.
+- The database moves to schema 10: a person can now carry your answer that they aren't you. A backup is written before the upgrade, as always.
+- The same text as two kinds of address — a phone number and a handle that read alike — is two addresses, not one.
+- Setup's last step shows "Analyzing…" while an analysis runs. It was looking for a job that doesn't exist, so it never did.
+
+### Not in this release
+
+Removing an address changes only mail read after that. Which of your addresses an older message came from isn't kept, so it can't be handed back to someone else; Settings says so.
+
 ## [0.10.0-alpha.7] — 2026-09-22
 
 Only what is still waiting. A connected mailbox brings in years of mail, and every thread that ended with someone else looked like someone waiting on you — a question from two summers ago counted the same as one from this morning.

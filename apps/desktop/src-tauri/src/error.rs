@@ -26,6 +26,8 @@ impl From<mimic_core::db::DbError> for CommandError {
         let code = match &e {
             mimic_core::db::DbError::NotFound(_) => "not_found",
             mimic_core::db::DbError::Invalid(_) => "invalid",
+            mimic_core::db::DbError::Busy(_) => "busy",
+            mimic_core::db::DbError::Unconfirmed(_) => "confirm",
             _ => "database",
         };
         Self::new(code, e.to_string())

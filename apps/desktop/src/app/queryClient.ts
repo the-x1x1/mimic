@@ -17,6 +17,8 @@ export const qk = {
   connectors: ["connectors"] as const,
   sources: ["sources"] as const,
   identity: ["identity"] as const,
+  // Under "identity" so that anything refreshing the identity refreshes it.
+  heldAddresses: ["identity", "held"] as const,
   people: ["people"] as const,
   person: (id: string) => ["person", id] as const,
   voice: ["voice"] as const,

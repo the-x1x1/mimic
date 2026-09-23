@@ -1,6 +1,6 @@
 {
   "name": "mimic-workspace",
-  "version": "0.10.0-alpha.7",
+  "version": "0.10.0-alpha.8",
   "private": true,
   "description": "Mimic — drafts that sound like you. Formicaria product family.",
   "packageManager": "pnpm@10.28.0",

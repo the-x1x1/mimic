@@ -1,0 +1,20 @@
+[
+  {
+    "identifier": {
+      "id": "1d3f72a6-7e25-4775-a58e-617d131253d1",
+      "kind": "email",
+      "value": "c@example.com",
+      "normalizedValue": "c@example.com"
+    },
+    "owner": {
+      "participantId": "4442b410-41f3-4981-882b-0b70f2c27e63",
+      "displayName": "C",
+      "messages": 20,
+      "otherAddresses": [],
+      "relationship": null,
+      "hasNotes": false,
+      "preferences": 0
+    },
+    "keptApart": false
+  }
+]

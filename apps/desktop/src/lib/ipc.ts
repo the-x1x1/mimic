@@ -6,6 +6,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { z } from "zod";
 import {
+  AddressAdded,
+  AddressPreview,
+  HeldAddress,
+  type AddressOwner,
   AppInfo,
   ConnectorInfo,
   Dashboard,
@@ -152,8 +156,22 @@ export const ipc = {
   userIdentity: () => call("get_user_identity", UserIdentity.nullable()),
   setUserIdentity: (displayName: string) =>
     call("set_user_identity", UserIdentity, { displayName }),
-  addUserIdentifier: (kind: string, value: string) =>
-    call("add_user_identifier", UserIdentity, { kind, value }),
+  /** What adding an address would do. Changes nothing. */
+  previewUserAddress: (kind: string, value: string) =>
+    call("preview_user_address", AddressPreview, { kind, value }),
+  /**
+   * Add an address. When the preview named someone the mail from it is filed
+   * under, `confirmedOwner` must be that preview's owner, exactly as it still
+   * is, or nothing changes (code `confirm`).
+   */
+  addUserIdentifier: (kind: string, value: string, confirmedOwner: AddressOwner | null = null) =>
+    call("add_user_identifier", AddressAdded, { kind, value, confirmedOwner }),
+  heldUserAddresses: () => call("held_user_addresses", HeldAddress.array()),
+  /** Fold in the holder of a held address, when `confirmedOwner` is what the list shows now. */
+  claimHeldAddress: (identifierId: string, confirmedOwner: AddressOwner) =>
+    call("claim_held_address", AddressAdded, { identifierId, confirmedOwner }),
+  /** The person under one of the user's addresses is not them: nothing moves, and it is remembered. */
+  keepPersonApart: (participantId: string) => call("keep_person_apart", z_void, { participantId }),
   removeUserIdentifier: (identifierId: string) =>
     call("remove_user_identifier", UserIdentity, { identifierId }),
 

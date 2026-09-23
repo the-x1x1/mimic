@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { describeClaimed, type AddressAdded, type AddressOwner } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
@@ -19,17 +20,81 @@ export function useSetIdentity() {
   });
 }
 
+/**
+ * Add an address of the user's. When someone was folded back into the user,
+ * who wrote what changed everywhere — people, threads, drafts, how the user
+ * writes — so everything is read again, and the user is told how many
+ * messages moved. A failure is shown where the address was typed, not in a
+ * toast as well.
+ */
 export function useAddIdentifier() {
+  const onAdded = useOnAddressAdded();
+  return useMutation({
+    mutationFn: ({
+      kind,
+      value,
+      confirmedOwner = null,
+    }: {
+      kind: string;
+      value: string;
+      confirmedOwner?: AddressOwner | null;
+    }) => ipc.addUserIdentifier(kind, value, confirmedOwner),
+    onSuccess: onAdded,
+  });
+}
+
+/** Settle a held address by folding its holder in, as adding it would have. */
+export function useClaimHeldAddress() {
+  const onAdded = useOnAddressAdded();
+  return useMutation({
+    mutationFn: ({ identifierId, owner }: { identifierId: string; owner: AddressOwner }) =>
+      ipc.claimHeldAddress(identifierId, owner),
+    onSuccess: onAdded,
+  });
+}
+
+/** The person under one of the user's addresses is not them. */
+export function useKeepApart() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ kind, value }: { kind: string; value: string }) =>
-      ipc.addUserIdentifier(kind, value),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.identity });
-      qc.invalidateQueries({ queryKey: qk.onboarding });
-    },
-    onError: (e: Error) => toast.danger("Could not add that address", e.message),
+    mutationFn: (participantId: string) => ipc.keepPersonApart(participantId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.heldAddresses }),
   });
+}
+
+function useOnAddressAdded() {
+  const qc = useQueryClient();
+  return (added: AddressAdded) => {
+    if (added.claimed.people > 0) {
+      void qc.invalidateQueries();
+    } else {
+      void qc.invalidateQueries({ queryKey: qk.identity });
+      void qc.invalidateQueries({ queryKey: qk.onboarding });
+    }
+    const said = describeClaimed(added.claimed);
+    if (said) toast.info("That address is yours", said);
+  };
+}
+
+/**
+ * Refused because what the user was shown is not what is there now — a check
+ * filed more mail under the person, or something was written about them.
+ */
+export function isStaleConfirmation(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === "confirm";
+}
+
+/** What adding an address would do, asked before adding it. Changes nothing. */
+export function usePreviewAddress() {
+  return useMutation({
+    mutationFn: ({ kind, value }: { kind: string; value: string }) =>
+      ipc.previewUserAddress(kind, value),
+  });
+}
+
+/** The user's addresses that mail already read is still filed under someone else by. */
+export function useHeldAddresses(enabled = true) {
+  return useQuery({ queryKey: qk.heldAddresses, queryFn: ipc.heldUserAddresses, enabled });
 }
 
 export function useRemoveIdentifier() {

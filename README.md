@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.10.0-alpha.7`
+## Current status — `0.10.0-alpha.8`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -23,9 +23,10 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | What's waiting leaves out threads that have gone quiet (last message older than a window you choose, 30 days by default) | Implemented and tested; a reading of the date, counted and shown on request                                                           |
 | People leaves out senders of nothing but automated mail, and says how many                                               | Implemented and tested; the same header reading                                                                                       |
 | Sending a reply                                                                                                          | Deliberately not built                                                                                                                |
-| SQLite schema v9, migrations, backup before upgrade, resumable jobs                                                      | Implemented and tested                                                                                                                |
+| SQLite schema v10, migrations, backup before upgrade, resumable jobs                                                     | Implemented and tested                                                                                                                |
 | Source connectors: standard `.mbox` (now decoding MIME), Mimic's own JSON format, and IMAP                               | Implemented and tested; IMAP only against a scripted server — no real provider exercised yet                                          |
 | Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume                                | Implemented and tested                                                                                                                |
+| An address you add later counts for mail already read, once you've said whose it was filed under                         | Implemented and tested; removing an address changes only mail read afterwards                                                         |
 | Voice engine: deterministic metrics, global / channel / relationship layers, representative examples                     | Implemented and tested                                                                                                                |
 | Situational voice layer: six situations, your own messages filed by rule, a layer per situation                          | Implemented and tested; rules rather than a model                                                                                     |
 | Retrieval: metadata filter, then lexical ranking                                                                         | Implemented; embedding-backed ranking is Phase 2                                                                                      |
@@ -90,7 +91,7 @@ MIMIC_REGEN_FIXTURES=1 cargo test -p mimic-core --test pipeline_e2e
 | ------------------------------------------ | -------------------------------------------------------------------------- |
 | [PRODUCT](docs/PRODUCT.md)                 | What this is, what it is not, the core interaction, the autonomy modes     |
 | [ARCHITECTURE](docs/ARCHITECTURE.md)       | The three layers, why they are split that way, the rules that shape them   |
-| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v9, and why each table is shaped the way it is                      |
+| [DATA_MODEL](docs/DATA_MODEL.md)           | Schema v10, and why each table is shaped the way it is                     |
 | [VOICE_ENGINE](docs/VOICE_ENGINE.md)       | Every metric, how layers resolve, and how accuracy would have to be earned |
 | [IMPORT_PIPELINE](docs/IMPORT_PIPELINE.md) | The connector contract, the shipped connectors, the JSON format            |
 | [MODEL_PROVIDERS](docs/MODEL_PROVIDERS.md) | The provider boundary, credentials, and a known limitation                 |

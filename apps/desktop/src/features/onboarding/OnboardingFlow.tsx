@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Card, Field, InlineError, ProgressBar } from "@mimic/ui";
+import { Button, Card, Field, ProgressBar } from "@mimic/ui";
 import {
-  IDENTIFIER_LABELS,
-  IdentifierKind,
+  JOB_KINDS,
   JOB_LABELS,
   type OnboardingState,
   canFinishOnboarding,
@@ -11,11 +10,12 @@ import {
   nextOnboardingStep,
 } from "@mimic/contracts";
 import { useOnboardingState } from "@/hooks/useSystem";
-import { useAddIdentifier, useIdentity, useSetIdentity } from "@/hooks/usePeople";
+import { useIdentity, useSetIdentity } from "@/hooks/usePeople";
 import { useSources, useStartImport, useDeleteSource } from "@/hooks/useSources";
 import { useStartAnalysis } from "@/hooks/useVoice";
 import { useJobs } from "@/hooks/useJobs";
 import { AddSourceDialog } from "@/features/sources/AddSourceDialog";
+import { AddAddressForm } from "@/features/identity/AddAddressForm";
 import { ModelStep } from "./ModelStep";
 import { ipc } from "@/lib/ipc";
 import { useQueryClient } from "@tanstack/react-query";
@@ -162,18 +162,15 @@ function ActiveWork() {
 function IdentityStep({ onContinue }: { onContinue: () => void }) {
   const identity = useIdentity();
   const setIdentity = useSetIdentity();
-  const add = useAddIdentifier();
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<IdentifierKind>("email");
-  const [value, setValue] = useState("");
   const identifiers = identity.data?.identifiers ?? [];
 
   return (
     <Card title="First, your email address">
       <p className="neutral">
         This is how I tell the mail you wrote apart from the mail you were sent &mdash; I only learn
-        from yours. Add every address you have written from, or the mail you sent from the missing
-        ones will read to me like someone else&rsquo;s.
+        from yours. Add every address you have written from: until you do, what you sent from a
+        missing one reads to me like someone else&rsquo;s.
       </p>
       {!identity.data ? (
         <>
@@ -190,38 +187,13 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
         </>
       ) : (
         <>
-          <div className="row gap-2">
-            <select value={kind} onChange={(e) => setKind(e.target.value as IdentifierKind)}>
-              {IdentifierKind.options.map((k) => (
-                <option key={k} value={k}>
-                  {IDENTIFIER_LABELS[k]}
-                </option>
-              ))}
-            </select>
-            <input
-              value={value}
-              placeholder="you@example.com"
-              onChange={(e) => setValue(e.target.value)}
-              autoFocus
-            />
-            <Button
-              variant="primary"
-              disabled={!value.trim() || add.isPending}
-              onClick={async () => {
-                await add.mutateAsync({ kind, value });
-                setValue("");
-              }}
-            >
-              Add
-            </Button>
-          </div>
+          <AddAddressForm primary autoFocus />
           {identifiers.length > 0 ? (
             <p className="muted small">
               Added: {identifiers.map((i) => i.value).join(", ")}. You can add more later under
               Settings.
             </p>
           ) : null}
-          {add.isError ? <InlineError>{(add.error as Error).message}</InlineError> : null}
           <Button variant="primary" disabled={identifiers.length === 0} onClick={onContinue}>
             {identifiers.length === 0 ? "Add an address to continue" : "Continue"}
           </Button>
@@ -251,14 +223,13 @@ function SourceStep() {
   );
 }
 
-function ImportStep() {
+export function ImportStep() {
   const sources = useSources();
   const startImport = useStartImport();
   const deleteSource = useDeleteSource();
   const identity = useIdentity();
-  const add = useAddIdentifier();
-  const [kind, setKind] = useState<IdentifierKind>("email");
-  const [value, setValue] = useState("");
+  // The last address added here that nothing already read came from.
+  const [tried, setTried] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const list = sources.data ?? [];
   const state = importStepState(list);
@@ -297,48 +268,35 @@ function ImportStep() {
   }
 
   if (state === "none-of-yours") {
-    // The file was read and not one message in it matched an address Mimic
+    // The mail was read and not one message in it matched an address Mimic
     // knows about. Saying "importing" here, forever, was the single worst
-    // thing this screen did.
+    // thing this screen did. What was written from the missing address was
+    // filed under a person; adding it asks whether that person is the user
+    // and moves their messages over, so nothing needs reading again.
     return (
-      <Card title="Nothing in that file was written by you">
+      <Card title="Nothing I read was written by you">
         <p className="neutral">
-          Mimic read the file but could not find a single message sent from{" "}
-          {identity.data?.identifiers.map((i) => i.value).join(", ") || "any address you gave it"}.
-          It only learns from messages you wrote, so it has nothing to work with yet. Usually this
-          means the export was sent from another address.
+          I read it, but not one message came from{" "}
+          {identity.data?.identifiers.map((i) => i.value).join(", ") || "any address you gave me"}.
+          I only learn from mail you wrote, so I have nothing to go on yet. Usually that means you
+          wrote it from another address &mdash; add it here and I&rsquo;ll count what came from it
+          as yours.
         </p>
-        <div className="row gap-2">
-          <select value={kind} onChange={(e) => setKind(e.target.value as IdentifierKind)}>
-            {IdentifierKind.options.map((k) => (
-              <option key={k} value={k}>
-                {IDENTIFIER_LABELS[k]}
-              </option>
-            ))}
-          </select>
-          <input
-            value={value}
-            placeholder="another address of yours"
-            onChange={(e) => setValue(e.target.value)}
-          />
-          <Button
-            variant="primary"
-            disabled={!value.trim() || add.isPending}
-            onClick={async () => {
-              await add.mutateAsync({ kind, value });
-              setValue("");
-              const again = list.find((s) => s.status === "imported");
-              if (again) startImport.mutate(again.id);
-            }}
-          >
-            Add it and read the file again
-          </Button>
-        </div>
-        {add.isError ? <InlineError>{(add.error as Error).message}</InlineError> : null}
-        <p className="muted small">
-          Re-reading a file you have already imported costs nothing: messages are matched on their
-          own identifiers, so nothing is duplicated.
-        </p>
+        <AddAddressForm
+          primary
+          inputLabel="Another address of yours"
+          placeholder="another address of yours"
+          submitLabel="Add it"
+          onAdded={(added, address, asked) =>
+            setTried(!asked && added.claimed.messages === 0 ? address : null)
+          }
+        />
+        {tried ? (
+          <p className="muted small">
+            Nothing I&rsquo;ve read came from {tried} either. If you wrote from another address, add
+            that one too.
+          </p>
+        ) : null}
         <div className="row gap-2">
           <Button variant="ghost" onClick={() => setAdding(true)}>
             Choose a different file
@@ -380,7 +338,7 @@ function ImportStep() {
 function AnalyzeStep({ onFinish }: { onFinish: () => void }) {
   const analyze = useStartAnalysis();
   const jobs = useJobs(true);
-  const running = (jobs.data ?? []).some((j) => j.type === "analyze");
+  const running = (jobs.data ?? []).some((j) => j.type === JOB_KINDS.analyzeVoice);
   const [tried, setTried] = useState(false);
   return (
     <Card title="Last, let me read it">

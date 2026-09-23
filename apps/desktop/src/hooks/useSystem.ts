@@ -31,9 +31,14 @@ export function useNativeEventBridge() {
       events.onJob((ev) => {
         qc.invalidateQueries({ queryKey: qk.jobs });
         if (ev.status === "completed" || ev.status === "failed" || ev.status === "canceled") {
+          // A finished read may have folded someone back into the user, and
+          // settled an address Settings listed as still held.
           for (const key of [
             qk.sources,
+            qk.identity,
             qk.people,
+            ["person"],
+            qk.drafts,
             qk.voice,
             qk.system,
             qk.onboarding,
