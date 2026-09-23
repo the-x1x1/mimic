@@ -13,9 +13,11 @@
 //!   message. A mailbox import of forty thousand conversations must not turn
 //!   into forty thousand provider calls.
 //! * **It drafts only for what is waiting.** The same definition as the home
-//!   screen (`db::repo_waiting`): mail that looks automated from its headers
-//!   and threads the user said need no reply are not drafted for, so a run
-//!   spends its ten on people rather than on newsletters.
+//!   screen (`db::repo_waiting`): mail that looks automated from its headers,
+//!   threads that have gone quiet (older than the waiting window) and threads
+//!   the user said need no reply are not drafted for, so a run spends its ten
+//!   on people who may still be waiting rather than on newsletters or last
+//!   year's mail.
 //! * **It drafts; it does not send.** The output is a `drafts` row with no
 //!   outcome, exactly like a draft the user asked for by hand. Every reply
 //!   still leaves through a person.
@@ -181,6 +183,9 @@ mod tests {
 
     fn seed() -> (Db, String, String, String) {
         let db = Db::open_in_memory().unwrap();
+        // Fixed dates: the waiting window is measured against the clock, so
+        // it is opened to any age here (`repo_waiting` tests the window).
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         let source = db
             .create_source(&NewSource {
                 connector: "test".into(),
@@ -248,6 +253,51 @@ mod tests {
         assert_eq!(second.drafted, 0);
         assert_eq!(db.pending_drafts(10).unwrap().len(), 1);
         assert_eq!(provider.call_count(), 1);
+    }
+
+    #[test]
+    fn a_thread_that_has_gone_quiet_is_not_drafted_for_unless_the_user_keeps_it() {
+        let (db, source, convo, ada) = seed();
+        db.set_setting(SETTING, &true).unwrap();
+        // Ada's question is two months old; the one about the keys is from
+        // yesterday.
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &30).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE messages SET sent_at = ?1 WHERE conversation_id = ?2",
+                [crate::ids::fmt_rfc3339(chrono::Utc::now() - chrono::Duration::days(60)), convo.clone()],
+            )
+            .unwrap();
+        let recent = db.upsert_conversation(&source, "t2", "chat", Some("Keys")).unwrap();
+        db.insert_messages(&[NewMessage {
+            conversation_id: recent.clone(),
+            source_id: source.clone(),
+            participant_id: None,
+            external_id: "m2".into(),
+            direction: "other".into(),
+            channel: "chat".into(),
+            sent_at: Some(crate::ids::fmt_rfc3339(chrono::Utc::now() - chrono::Duration::days(1))),
+            sequence_index: 0,
+            body: "where did you leave the keys?".into(),
+            reply_to_external_id: None,
+            metadata: Value::Null,
+        }])
+        .unwrap();
+        db.refresh_conversation_stats(&recent).unwrap();
+        let provider = MockProvider::default();
+
+        let run = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!((run.considered, run.drafted), (1, 1));
+        let drafts = db.pending_drafts(10).unwrap();
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].conversation_id.as_deref(), Some(recent.as_str()), "last year's mail is not answered");
+
+        // Saying Ada's thread needs a reply is what brings it back.
+        let old = db.threads_left_out(10).unwrap().into_iter().find(|t| t.conversation.id == convo).unwrap();
+        assert!(old.quiet && old.participant_id.as_deref() == Some(ada.as_str()));
+        db.mark_thread(&convo, &old.last_message_id, Some(crate::db::ThreadMark::NeedsReply)).unwrap();
+        let again = draft_waiting_threads(&db, &provider, 10, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(again.drafted, 1);
     }
 
     #[test]

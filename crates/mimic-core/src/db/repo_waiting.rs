@@ -21,13 +21,18 @@
 //! 2. Otherwise, whether the deciding message looks automated from its
 //!    headers (`metadata.automated`, written by `sources::automated` at
 //!    import) — which it can only when the whole thread does.
-//! 3. Otherwise it needs a reply.
+//! 3. Otherwise, whether it has gone quiet: its deciding message is older
+//!    than the window the user chose (`waiting.withinDays`, 30 days unless
+//!    they changed it, 0 for any age), measured against the clock. A message
+//!    with no date, or a date that cannot be read, is never quiet — Mimic
+//!    does not guess an age.
+//! 4. Otherwise it needs a reply.
 //!
 //! Everything that asks "what is waiting" — the home screen, its counts, and
 //! assisted drafting — goes through the one definition below, so the list the
 //! user sees and the list Mimic drafts for cannot drift apart.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{named_params, params, OptionalExtension};
 use serde::Serialize;
 
 use super::repo_messages::{map_conv, CONV_COLS_Q};
@@ -48,10 +53,19 @@ pub struct AwaitingReply {
     pub automated: Option<String>,
     /// What the user said about this thread, if it still applies.
     pub mark: Option<ThreadMark>,
+    /// The message it is waiting on is older than the waiting window. Only
+    /// ever true of a waiting thread when the user said it needs a reply.
+    pub quiet: bool,
 }
 
+/// How many days back a thread can wait: the setting, what it is unless the
+/// user changed it, and the longest it can be.
+pub const WITHIN_DAYS_SETTING: &str = "waiting.withinDays";
+pub const DEFAULT_WITHIN_DAYS: i64 = 30;
+pub const MAX_WITHIN_DAYS: i64 = 36_500;
+
 /// How many unanswered threads were left out of what is waiting, and why.
-/// Both are counts of rows, never estimates.
+/// All are counts of rows, never estimates.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeftOut {
@@ -60,6 +74,10 @@ pub struct LeftOut {
     pub automated: i64,
     /// Left out because the user said it does not need a reply.
     pub not_needed: i64,
+    /// Left out because its last message is older than the waiting window,
+    /// and the user has not said otherwise. Not counted here when it also
+    /// looks automated: that reason is given first.
+    pub quiet: i64,
 }
 
 /// What the user said about whether a thread needs a reply.
@@ -141,13 +159,18 @@ fn deciding_cte(conversation_filter: bool) -> String {
 }
 
 /// Every unanswered thread: its deciding message came from someone else.
-/// Carries the user's mark when it is about that same message.
+/// Carries the user's mark when it is about that same message, and whether
+/// that message is older than `:cutoff` (never, when `:cutoff` is NULL or
+/// the message's date cannot be read — `julianday` reads ISO 8601 with `Z`,
+/// a `±HH:MM` offset or no zone, and gives NULL for other forms).
 fn unanswered_cte() -> String {
     format!(
         "{deciding},
          unanswered AS (
-           SELECT d.conversation_id, d.message_id, d.automated, tm.mark AS mark
+           SELECT d.conversation_id, d.message_id, d.automated, tm.mark AS mark,
+                  COALESCE(julianday(dm.sent_at) < julianday(:cutoff), 0) AS quiet
            FROM deciding d
+           JOIN messages dm ON dm.id = d.message_id
            LEFT JOIN thread_marks tm
              ON tm.conversation_id = d.conversation_id AND tm.message_id = d.message_id
            WHERE d.direction = 'other'
@@ -156,65 +179,142 @@ fn unanswered_cte() -> String {
     )
 }
 
-/// The user's word first, then the headers.
-const NEEDS_REPLY: &str = "(u.mark = 'needs_reply' OR (u.mark IS NULL AND u.automated IS NULL))";
-const LEFT_OUT: &str = "(u.mark = 'no_reply_needed' OR (u.mark IS NULL AND u.automated IS NOT NULL))";
+/// The columns after the conversation's, for `map_row`.
+const ROW_COLS: &str = "u.message_id, m.body, m.sent_at, m.participant_id, u.automated, u.mark, u.quiet";
+
+fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AwaitingReply> {
+    Ok(AwaitingReply {
+        conversation: map_conv(r)?,
+        last_message_id: r.get(10)?,
+        last_message: r.get(11)?,
+        last_message_at: r.get(12)?,
+        participant_id: r.get(13)?,
+        automated: r.get(14)?,
+        mark: r.get::<_, Option<String>>(15)?.as_deref().and_then(ThreadMark::parse),
+        quiet: r.get(16)?,
+    })
+}
+
+/// The user's word first, then the headers, then the date.
+const NEEDS_REPLY: &str = "(u.mark = 'needs_reply' OR (u.mark IS NULL AND u.automated IS NULL AND NOT u.quiet))";
+const LEFT_OUT: &str = "(u.mark = 'no_reply_needed' OR (u.mark IS NULL AND (u.automated IS NOT NULL OR u.quiet)))";
+
+/// The waiting window as of one moment: how many days back a thread can be
+/// waiting, and the cutoff that makes. Taken once per read, so the lists and
+/// the counts a screen shows are judged against the same moment and setting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitingWindow {
+    /// `None` for any age.
+    pub within_days: Option<i64>,
+    cutoff: Option<String>,
+}
+
+/// Why an unanswered thread was left out, in the order the screen lists the
+/// reasons: automated, gone quiet, taken off by the user.
+const REASON: &str = "CASE WHEN u.mark = 'no_reply_needed' THEN 2 WHEN u.automated IS NOT NULL THEN 0 ELSE 1 END";
 
 impl Db {
+    /// How many days back a thread can be waiting, or `None` for any age.
+    /// Read leniently: a value that is not a number is the default, and one
+    /// out of range is brought into it, so a bad setting cannot empty or
+    /// break the home screen.
+    pub fn waiting_within_days(&self) -> DbResult<Option<i64>> {
+        let raw = self.get_setting::<serde_json::Value>(WITHIN_DAYS_SETTING)?;
+        let days = raw.as_ref().and_then(serde_json::Value::as_f64).map_or(DEFAULT_WITHIN_DAYS, |d| d as i64);
+        Ok((days > 0).then(|| days.min(MAX_WITHIN_DAYS)))
+    }
+
+    /// The window now: the setting, and the moment before which a thread's
+    /// last message has gone quiet.
+    pub fn waiting_window(&self) -> DbResult<WaitingWindow> {
+        let within_days = self.waiting_within_days()?;
+        let cutoff = within_days.map(|days| crate::ids::fmt_rfc3339(chrono::Utc::now() - chrono::Duration::days(days)));
+        Ok(WaitingWindow { within_days, cutoff })
+    }
+
     /// Threads that need a reply, newest first.
     pub fn threads_awaiting_reply(&self, limit: usize) -> DbResult<Vec<AwaitingReply>> {
-        self.unanswered_where(NEEDS_REPLY, limit)
+        self.threads_awaiting_reply_in(&self.waiting_window()?, limit)
     }
 
-    /// Unanswered threads that were left out of what is waiting, newest
-    /// first: the ones that look automated and the ones the user took off.
-    pub fn threads_left_out(&self, limit: usize) -> DbResult<Vec<AwaitingReply>> {
-        self.unanswered_where(LEFT_OUT, limit)
-    }
-
-    fn unanswered_where(&self, filter: &str, limit: usize) -> DbResult<Vec<AwaitingReply>> {
+    /// The same, judged against a window the caller already took.
+    pub fn threads_awaiting_reply_in(&self, window: &WaitingWindow, limit: usize) -> DbResult<Vec<AwaitingReply>> {
         let conn = self.conn();
         let sql = format!(
             "{cte}
-             SELECT {CONV_COLS_Q}, u.message_id, m.body, m.sent_at, m.participant_id, u.automated, u.mark
+             SELECT {CONV_COLS_Q}, {ROW_COLS}
              FROM unanswered u
              JOIN messages m ON m.id = u.message_id
              JOIN conversations c ON c.id = u.conversation_id
-             WHERE {filter}
+             WHERE {NEEDS_REPLY}
              ORDER BY m.sent_at DESC NULLS LAST, c.id
              LIMIT {limit}",
             cte = unanswered_cte()
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map([], |r| {
-            Ok(AwaitingReply {
-                conversation: map_conv(r)?,
-                last_message_id: r.get(10)?,
-                last_message: r.get(11)?,
-                last_message_at: r.get(12)?,
-                participant_id: r.get(13)?,
-                automated: r.get(14)?,
-                mark: r.get::<_, Option<String>>(15)?.as_deref().and_then(ThreadMark::parse),
-            })
-        })?;
+        let rows = stmt.query_map(named_params! { ":cutoff": window.cutoff }, map_row)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Unanswered threads that were left out of what is waiting: up to
+    /// `limit` for each reason, newest first within it, in the order the
+    /// screen gives the reasons — the ones that look automated, the ones that
+    /// have gone quiet, the ones the user took off. Per reason, because the
+    /// newest few of all of them together would be this month's newsletters
+    /// every time, and a thread that has gone quiet could never be shown.
+    pub fn threads_left_out(&self, limit: usize) -> DbResult<Vec<AwaitingReply>> {
+        self.threads_left_out_in(&self.waiting_window()?, limit)
+    }
+
+    /// The same, judged against a window the caller already took.
+    pub fn threads_left_out_in(&self, window: &WaitingWindow, limit: usize) -> DbResult<Vec<AwaitingReply>> {
+        let conn = self.conn();
+        let sql = format!(
+            "{cte},
+             left_out AS (
+               SELECT u.*, {REASON} AS reason,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY {REASON}
+                        ORDER BY lm.sent_at DESC NULLS LAST, u.conversation_id
+                      ) AS rank_in_reason
+               FROM unanswered u
+               JOIN messages lm ON lm.id = u.message_id
+               WHERE {LEFT_OUT}
+             )
+             SELECT {CONV_COLS_Q}, {ROW_COLS}
+             FROM left_out u
+             JOIN messages m ON m.id = u.message_id
+             JOIN conversations c ON c.id = u.conversation_id
+             WHERE u.rank_in_reason <= {limit}
+             ORDER BY u.reason, m.sent_at DESC NULLS LAST, c.id",
+            cte = unanswered_cte()
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(named_params! { ":cutoff": window.cutoff }, map_row)?;
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
     /// How many threads need a reply, and how many unanswered ones were left
-    /// out and why — in one pass, because the home screen asks for all three
-    /// every time it loads.
+    /// out and why — in one pass, because the home screen asks for all of
+    /// them every time it loads.
     pub fn waiting_counts(&self) -> DbResult<(i64, LeftOut)> {
+        self.waiting_counts_in(&self.waiting_window()?)
+    }
+
+    /// The same, judged against a window the caller already took.
+    pub fn waiting_counts_in(&self, window: &WaitingWindow) -> DbResult<(i64, LeftOut)> {
         Ok(self.conn().query_row(
             &format!(
                 "{cte}
                  SELECT COALESCE(SUM({NEEDS_REPLY}), 0),
                         COALESCE(SUM(u.mark IS NULL AND u.automated IS NOT NULL), 0),
-                        COALESCE(SUM(u.mark = 'no_reply_needed'), 0)
+                        COALESCE(SUM(u.mark = 'no_reply_needed'), 0),
+                        COALESCE(SUM(u.mark IS NULL AND u.automated IS NULL AND u.quiet), 0)
                  FROM unanswered u",
                 cte = unanswered_cte()
             ),
-            [],
-            |r| Ok((r.get(0)?, LeftOut { automated: r.get(1)?, not_needed: r.get(2)? })),
+            named_params! { ":cutoff": window.cutoff },
+            |r| Ok((r.get(0)?, LeftOut { automated: r.get(1)?, not_needed: r.get(2)?, quiet: r.get(3)? })),
         )?)
     }
 
@@ -288,6 +388,10 @@ mod tests {
             })
             .unwrap()
             .id;
+        // These threads are dated early in September 2026. The window is
+        // measured against the clock, so the rules below are tested at any
+        // age and the window by itself, with dates relative to now.
+        db.set_setting(WITHIN_DAYS_SETTING, &0).unwrap();
         World { db, source }
     }
 
@@ -373,7 +477,7 @@ mod tests {
         w.thread("bank", &[("other", "your statement is ready", Some("no_reply_address"))]);
 
         assert_eq!(w.waiting(), ["lunch on thursday?"]);
-        assert_eq!(w.db.waiting_counts().unwrap(), (1, LeftOut { automated: 2, not_needed: 0 }));
+        assert_eq!(w.db.waiting_counts().unwrap(), (1, LeftOut { automated: 2, not_needed: 0, quiet: 0 }));
 
         let left: Vec<_> = w.db.threads_left_out(50).unwrap();
         assert_eq!(left.len(), 2);
@@ -418,7 +522,7 @@ mod tests {
             ],
         );
         assert_eq!(w.waiting(), ["did it arrive?"]);
-        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 1, not_needed: 0 });
+        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 1, not_needed: 0, quiet: 0 });
         let left = &w.db.threads_left_out(10).unwrap()[0];
         assert_eq!(left.last_message, "@you can you rebase?");
         // And it can be put on the list.
@@ -443,7 +547,7 @@ mod tests {
         let convo = w.thread("ada", &[("other", "fyi, the deck is attached", None)]);
         assert!(w.mark(&convo, Some(ThreadMark::NoReplyNeeded)));
         assert!(w.waiting().is_empty());
-        assert_eq!(w.db.waiting_counts().unwrap(), (0, LeftOut { automated: 0, not_needed: 1 }));
+        assert_eq!(w.db.waiting_counts().unwrap(), (0, LeftOut { automated: 0, not_needed: 1, quiet: 0 }));
         assert_eq!(w.db.threads_left_out(10).unwrap()[0].mark, Some(ThreadMark::NoReplyNeeded));
 
         // A new message is a new question; the old answer does not cover it.
@@ -494,6 +598,114 @@ mod tests {
         assert_eq!(w.waiting().len(), 2);
         let bobs = w.shown(&other);
         assert!(matches!(w.db.mark_thread(&convo, &bobs, Some(ThreadMark::NoReplyNeeded)), Err(DbError::NotFound(_))));
+    }
+
+    /// A one-message thread from `key`, sent at `sent_at` (None: no date).
+    fn dated(w: &World, key: &str, body: &str, sent_at: Option<String>, automated: Option<&str>) -> String {
+        let convo = w.db.upsert_conversation(&w.source, key, "email", Some(key)).unwrap();
+        w.db.insert_messages(&[NewMessage {
+            conversation_id: convo.clone(),
+            source_id: w.source.clone(),
+            participant_id: None,
+            external_id: format!("{key}-0"),
+            direction: "other".into(),
+            channel: "email".into(),
+            sent_at,
+            sequence_index: 0,
+            body: body.into(),
+            reply_to_external_id: None,
+            metadata: automated.map(|a| json!({ "automated": a })).unwrap_or(Value::Null),
+        }])
+        .unwrap();
+        w.db.refresh_conversation_stats(&convo).unwrap();
+        convo
+    }
+
+    fn days_ago(days: i64) -> Option<String> {
+        Some(crate::ids::fmt_rfc3339(chrono::Utc::now() - chrono::Duration::days(days)))
+    }
+
+    #[test]
+    fn a_thread_that_has_gone_quiet_is_left_out_and_counted_and_the_users_word_still_wins() {
+        let w = world();
+        w.db.set_setting(WITHIN_DAYS_SETTING, &30).unwrap();
+        dated(&w, "recent", "are we still on for friday?", days_ago(3), None);
+        let old = dated(&w, "old", "any news on the lease?", days_ago(45), None);
+        dated(&w, "old-news", "spring sale", days_ago(90), Some("newsletter"));
+        // No date, or one that cannot be read: no age is guessed.
+        dated(&w, "undated", "hello from nowhere", None, None);
+        dated(&w, "garbled", "hello from the past", Some("last tuesday".into()), None);
+        // A date with an offset is read as the moment it names.
+        let offset = (chrono::Utc::now() - chrono::Duration::days(40))
+            .with_timezone(&chrono::FixedOffset::east_opt(2 * 3600).unwrap())
+            .to_rfc3339();
+        dated(&w, "offset", "sent from Berlin", Some(offset), None);
+
+        let mut waiting = w.waiting();
+        waiting.sort();
+        assert_eq!(waiting, ["are we still on for friday?", "hello from nowhere", "hello from the past"]);
+        assert_eq!(w.db.waiting_counts().unwrap(), (3, LeftOut { automated: 1, not_needed: 0, quiet: 2 }));
+        let left = w.db.threads_left_out(50).unwrap();
+        let lease = left.iter().find(|t| t.conversation.id == old).unwrap();
+        assert!(lease.quiet && lease.automated.is_none() && lease.mark.is_none());
+        let sale = left.iter().find(|t| t.last_message == "spring sale").unwrap();
+        assert!(sale.automated.is_some() && sale.quiet, "automated first, and counted once");
+
+        // The user's word outranks the date, both ways.
+        assert!(w.mark(&old, Some(ThreadMark::NeedsReply)));
+        let kept = w.db.threads_awaiting_reply(50).unwrap().into_iter().find(|t| t.conversation.id == old).unwrap();
+        assert!(kept.quiet, "still said, so the screen can say it");
+        assert_eq!(w.db.count_left_out().unwrap().quiet, 1);
+        assert!(w.mark(&old, None));
+        assert_eq!(w.db.count_left_out().unwrap().quiet, 2);
+
+        // Any age: nothing goes quiet.
+        w.db.set_setting(WITHIN_DAYS_SETTING, &0).unwrap();
+        assert_eq!(w.db.waiting_counts().unwrap(), (5, LeftOut { automated: 1, not_needed: 0, quiet: 0 }));
+        assert!(w.db.threads_left_out(50).unwrap().iter().all(|t| !t.quiet));
+    }
+
+    #[test]
+    fn what_was_left_out_is_listed_per_reason_so_an_old_thread_is_never_crowded_out() {
+        let w = world();
+        w.db.set_setting(WITHIN_DAYS_SETTING, &30).unwrap();
+        for i in 0..5 {
+            dated(&w, &format!("news{i}"), &format!("sale {i}"), days_ago(i), Some("newsletter"));
+        }
+        let old = dated(&w, "old", "any news on the lease?", days_ago(60), None);
+        let older = dated(&w, "older", "are you coming in june?", days_ago(90), None);
+        let off = dated(&w, "off", "fyi, the office is shut monday", days_ago(2), None);
+        assert!(w.mark(&off, Some(ThreadMark::NoReplyNeeded)));
+
+        let left = w.db.threads_left_out(2).unwrap();
+        let ids: Vec<&str> = left.iter().map(|t| t.conversation.id.as_str()).collect();
+        // Up to two of each, in the order the screen gives the reasons, newest
+        // first within each: automated, then gone quiet, then taken off.
+        assert_eq!(left.len(), 5);
+        assert_eq!((left[0].last_message.as_str(), left[1].last_message.as_str()), ("sale 0", "sale 1"));
+        assert_eq!(&ids[2..4], [old.as_str(), older.as_str()]);
+        assert_eq!(ids[4], off);
+        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 5, not_needed: 1, quiet: 2 });
+    }
+
+    #[test]
+    fn the_window_is_read_leniently() {
+        let w = world();
+        let read = |v: Value| {
+            w.db.set_setting(WITHIN_DAYS_SETTING, &v).unwrap();
+            w.db.waiting_within_days().unwrap()
+        };
+        assert_eq!(read(json!(14)), Some(14));
+        assert_eq!(read(json!(0)), None);
+        assert_eq!(read(json!(-5)), None);
+        assert_eq!(read(json!(7.0)), Some(7));
+        assert_eq!(read(json!("soon")), Some(DEFAULT_WITHIN_DAYS));
+        assert_eq!(read(json!(10_000_000)), Some(MAX_WITHIN_DAYS));
+        w.db.conn().execute("DELETE FROM app_settings WHERE key = ?1", [WITHIN_DAYS_SETTING]).unwrap();
+        assert_eq!(w.db.waiting_within_days().unwrap(), Some(DEFAULT_WITHIN_DAYS), "30 days unless changed");
+        // And the largest window still makes a date.
+        w.db.set_setting(WITHIN_DAYS_SETTING, &MAX_WITHIN_DAYS).unwrap();
+        assert!(w.db.waiting_counts().is_ok());
     }
 
     #[test]

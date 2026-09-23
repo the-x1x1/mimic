@@ -201,6 +201,11 @@ export const DashboardThread = z.object({
   automated: AutomatedReason.nullable(),
   /** What the user said about this thread, while it still applies. */
   mark: ThreadMark.nullable(),
+  /**
+   * Its last message is older than the waiting window (`waitingWithinDays`).
+   * On a thread that is waiting, only because the user said it needs a reply.
+   */
+  quiet: z.boolean(),
 });
 export type DashboardThread = z.infer<typeof DashboardThread>;
 
@@ -211,12 +216,21 @@ export const Dashboard = z.object({
   ownMessages: z.number(),
   awaiting: z.array(DashboardThread),
   awaitingTotal: z.number(),
-  /** Unanswered threads not in `awaiting`, counted by why. Counts, never estimates. */
-  leftOut: z.object({ automated: z.number(), notNeeded: z.number() }),
+  /**
+   * Unanswered threads not in `awaiting`, counted by why. Counts, never
+   * estimates. One that looks automated is counted there even if it is also
+   * old.
+   */
+  leftOut: z.object({ automated: z.number(), notNeeded: z.number(), quiet: z.number() }),
   /** Those threads, only when they were asked for. */
   leftOutThreads: z.array(DashboardThread),
   /** Whether they were asked for: empty and not asked for are different answers. */
   showingLeftOut: z.boolean(),
+  /**
+   * How many days back a thread can be waiting; null for any age. Older ones
+   * are left out as `quiet` unless the user said they need a reply.
+   */
+  waitingWithinDays: z.number().nullable(),
   pendingDrafts: z.array(Draft),
   outcomes: DraftOutcomes,
   /** When the last import finished. Null before the first one. */
@@ -274,14 +288,42 @@ export function describeAutomated(reason: string | null): string | null {
   }
 }
 
+/** Every unanswered thread that is not on the waiting list, for whatever reason. */
+export function leftOutTotal(d: Dashboard): number {
+  return d.leftOut.automated + d.leftOut.notNeeded + d.leftOut.quiet;
+}
+
+/**
+ * How old a quiet thread's last message is, as "more than 30 days old", or the
+ * same without a number when there is none.
+ */
+export function olderThan(days: number | null): string {
+  if (days === null) return "older than the window you chose";
+  return days === 1 ? "more than a day old" : `more than ${days.toLocaleString()} days old`;
+}
+
+/**
+ * Why a thread that has gone quiet was left out, for the thread itself.
+ * Mimic's reading of a date, worded as one: nobody said nobody is waiting.
+ */
+export function describeQuiet(days: number | null): string {
+  return `Its last message is ${olderThan(days)}, so I've taken it that nobody is still waiting on a reply.`;
+}
+
+/** "a, b and c", "a and b", or "a". */
+function listOf(parts: string[]): string {
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
 /**
  * What was left out of the waiting list and why, in one sentence, or null when
  * nothing was. Said every time something is left out, so leaving a thread out
  * never quietly hides it.
  */
 export function describeLeftOut(d: Dashboard): string | null {
-  const { automated, notNeeded } = d.leftOut;
-  if (automated === 0 && notNeeded === 0) return null;
+  const { automated, notNeeded, quiet } = d.leftOut;
+  if (automated === 0 && notNeeded === 0 && quiet === 0) return null;
   const parts: string[] = [];
   if (automated === 1) parts.push("one thread that looks automated");
   if (automated > 1) {
@@ -289,9 +331,12 @@ export function describeLeftOut(d: Dashboard): string | null {
       `${automated.toLocaleString()} threads that look automated (newsletters, notifications and the like)`,
     );
   }
+  const age = olderThan(d.waitingWithinDays);
+  if (quiet === 1) parts.push(`one thread whose last message is ${age}`);
+  if (quiet > 1) parts.push(`${quiet.toLocaleString()} threads whose last message is ${age}`);
   if (notNeeded === 1) parts.push("one you said doesn't need a reply");
   if (notNeeded > 1) parts.push(`${notNeeded.toLocaleString()} you said don't need a reply`);
-  return `I left out ${parts.join(" and ")}.`;
+  return `I left out ${listOf(parts)}.`;
 }
 
 export const AssistSummary = z.object({
@@ -322,7 +367,11 @@ export function describeWaiting(d: Dashboard): string {
       : "I haven't read any of your mail yet, so there's nothing here. Point me at it and this fills up.";
   }
   if (d.awaitingTotal === 0) {
-    return "You're all caught up. Nobody is waiting on a reply.";
+    // With something left out, that nobody is waiting is a reading — of
+    // headers, dates and what the user said — and is worded as one.
+    return leftOutTotal(d) > 0
+      ? "Nothing I've read looks like it's waiting on you."
+      : "You're all caught up. Nobody is waiting on a reply.";
   }
   const everyoneIsAPerson = d.awaiting.every((t) => t.participant !== null && !t.isGroup);
   const noun = everyoneIsAPerson

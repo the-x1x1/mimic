@@ -52,7 +52,7 @@ Three modes are designed. One is implemented, one is half-built, one is delibera
 
 **MANUAL** — implemented. Mimic drafts; the user reads, edits and sends by hand, in whatever app they actually use. Mimic never has send access, and the learning loop depends on the user telling it what they sent.
 
-**ASSISTED** — partly implemented (0.8.0-alpha.1, watching since 0.10.0-alpha.3). Mimic notices threads it could answer — a conversation whose last message from a person came from someone else and was never replied to, unless it looks automated from its headers or the user said it needs no reply (0.10.0-alpha.4) — and prepares drafts for them, which wait on the home screen for use, change or drop. The user still sends, by hand, elsewhere.
+**ASSISTED** — partly implemented (0.8.0-alpha.1, watching since 0.10.0-alpha.3). Mimic notices threads it could answer — a conversation whose last message from a person came from someone else and was never replied to, unless it looks automated from its headers or the user said it needs no reply (0.10.0-alpha.4), or its last message is older than the waiting window the user chose (0.10.0-alpha.7) — and prepares drafts for them, which wait on the home screen for use, change or drop. The user still sends, by hand, elsewhere.
 
 Two things make this safe to have on: it is off until switched on in Settings, because with it on a model sees incoming messages nobody handed it; and it is bounded — ten threads per run, one draft per message, cancellable between threads. With a mailbox connected, each check is followed by a run, so "in advance" means "as mail arrives"; without one it still means "after the next import".
 

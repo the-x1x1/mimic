@@ -4,7 +4,9 @@ import {
   ANTHROPIC_SECRET_KEY,
   IDENTIFIER_LABELS,
   IdentifierKind,
+  WAITING_WINDOWS,
   describeCredentials,
+  describeWaitingWindow,
   type Theme,
 } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
@@ -33,6 +35,7 @@ export function SettingsPage() {
       <AppearanceSection />
       <WritingEngineSection />
       <ProviderSection />
+      <WaitingSection />
       <AssistSection />
       <MailSection />
       <EngineSection />
@@ -310,6 +313,44 @@ function AppearanceSection() {
 }
 
 /**
+ * How old a thread can be and still be waiting. A thread waits because its
+ * last message came from someone else; a real inbox is years of those, and
+ * most of them are not waiting on anyone any more.
+ */
+function WaitingSection() {
+  const settings = useSettings();
+  const days = settings.data?.["waiting.withinDays"] ?? 30;
+  // A value set some other way still shows as itself rather than as the
+  // first option.
+  const options = (WAITING_WINDOWS as readonly number[]).includes(days)
+    ? WAITING_WINDOWS
+    : [...WAITING_WINDOWS, days];
+  return (
+    <Card title="What counts as waiting">
+      <p className="neutral">
+        A thread is waiting on you when the last message in it came from someone else and you
+        haven&rsquo;t answered. After a while a thread usually isn&rsquo;t waiting on anyone any
+        more, so I leave out threads whose last message is older than this. I count them and show
+        them when you ask, and anything you said needs a reply stays, whatever its age.
+      </p>
+      <label className="row gap-2">
+        <span>Waiting means the last message is from</span>
+        <select
+          value={days}
+          onChange={(e) => ipc.setSetting("waiting.withinDays", Number(e.target.value))}
+        >
+          {options.map((d) => (
+            <option key={d} value={d}>
+              {describeWaitingWindow(d)}
+            </option>
+          ))}
+        </select>
+      </label>
+    </Card>
+  );
+}
+
+/**
  * Assisted drafting. This is the one setting that changes what leaves the
  * machine without the user acting, so the copy says exactly that rather than
  * "improve your experience", and it is off until turned on here.
@@ -324,8 +365,8 @@ function AssistSection() {
       <p className="neutral">
         Mimic normally drafts only when you ask it to. With this on, after each import, mailbox
         check or analysis it drafts replies for up to ten of the threads waiting on you &mdash; not
-        for mail that looks automated, or threads you said need no reply &mdash; and they wait on
-        the home screen for you to read.
+        for mail that looks automated, threads that have gone quiet, or threads you said need no
+        reply &mdash; and they wait on the home screen for you to read.
       </p>
       <label className="row gap-2">
         <input

@@ -33,6 +33,11 @@ import {
   type CredentialState,
   describeAutomated,
   describeLeftOut,
+  describeQuiet,
+  describeWaitingWindow,
+  leftOutTotal,
+  olderThan,
+  WAITING_WINDOWS,
   describeMailChecking,
   ThreadMark,
   describeImport,
@@ -85,11 +90,23 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     // A person is waiting; the newsletter the fixture adds is left out,
     // counted, and carried with its reason because the fixture asked for it.
     expect(withDraft!.automated).toBeNull();
-    expect(view.leftOut).toEqual({ automated: 1, notNeeded: 0 });
+    // The fixture is written with the waiting window at 30 days over an
+    // export from January: everything has gone quiet except the thread the
+    // user said needs a reply, which stays and is still said to be old.
+    expect(view.waitingWithinDays).toBe(30);
+    expect(withDraft!.mark).toBe("needs_reply");
+    expect(withDraft!.quiet).toBe(true);
+    expect(view.leftOut.automated).toBe(1);
+    expect(view.leftOut.notNeeded).toBe(0);
+    expect(view.leftOut.quiet).toBeGreaterThan(0);
     expect(view.showingLeftOut).toBe(true);
-    expect(view.leftOutThreads).toHaveLength(1);
-    expect(view.leftOutThreads[0]!.automated).toBe("newsletter");
-    expect(view.leftOutThreads[0]!.mark).toBeNull();
+    expect(view.leftOutThreads).toHaveLength(view.leftOut.automated + view.leftOut.quiet);
+    const news = view.leftOutThreads.find((t) => t.automated !== null);
+    expect(news!.automated).toBe("newsletter");
+    expect(news!.mark).toBeNull();
+    expect(view.leftOutThreads.filter((t) => t.automated === null).every((t) => t.quiet)).toBe(
+      true,
+    );
   });
 
   it("parses the situation vocabulary, all six, with counts rather than scores", () => {
@@ -369,7 +386,14 @@ describe("the home screen speaks for itself, and does not pretend to be an inbox
   });
 
   it("says when nothing is waiting instead of showing an empty list", () => {
-    expect(describeWaiting({ ...base, awaitingTotal: 0, awaiting: [] })).toContain("all caught up");
+    const none = { ...base, awaitingTotal: 0, awaiting: [] };
+    expect(
+      describeWaiting({ ...none, leftOut: { automated: 0, notNeeded: 0, quiet: 0 } }),
+    ).toContain("all caught up");
+    // With something left out, that nobody is waiting is a reading.
+    expect(describeWaiting({ ...none, leftOut: { automated: 0, notNeeded: 0, quiet: 3 } })).toBe(
+      "Nothing I've read looks like it's waiting on you.",
+    );
   });
 
   it("counts people only when every waiting thread really is one person", () => {
@@ -424,21 +448,58 @@ describe("people are people", () => {
 describe("what was left out is said, and said as a reading", () => {
   const base = Dashboard.parse(read(contractFixture("dashboard.json")));
 
+  const left = (automated: number, notNeeded: number, quiet = 0) => ({
+    ...base,
+    leftOut: { automated, notNeeded, quiet },
+  });
+
   it("says nothing when nothing was left out", () => {
-    expect(describeLeftOut({ ...base, leftOut: { automated: 0, notNeeded: 0 } })).toBeNull();
+    expect(describeLeftOut(left(0, 0))).toBeNull();
+    expect(leftOutTotal(left(0, 0))).toBe(0);
   });
 
   it("counts each reason, and gets one right", () => {
-    expect(describeLeftOut({ ...base, leftOut: { automated: 1, notNeeded: 0 } })).toBe(
-      "I left out one thread that looks automated.",
-    );
-    expect(describeLeftOut({ ...base, leftOut: { automated: 0, notNeeded: 2 } })).toBe(
-      "I left out 2 you said don't need a reply.",
-    );
-    const both = describeLeftOut({ ...base, leftOut: { automated: 12, notNeeded: 1 } });
+    expect(describeLeftOut(left(1, 0))).toBe("I left out one thread that looks automated.");
+    expect(describeLeftOut(left(0, 2))).toBe("I left out 2 you said don't need a reply.");
+    const both = describeLeftOut(left(12, 1));
     expect(both).toBe(
       "I left out 12 threads that look automated (newsletters, notifications and the like) and one you said doesn't need a reply.",
     );
+  });
+
+  it("names the window when threads have gone quiet", () => {
+    expect(describeLeftOut({ ...left(0, 0, 1), waitingWithinDays: 30 })).toBe(
+      "I left out one thread whose last message is more than 30 days old.",
+    );
+    expect(describeLeftOut({ ...left(3, 1, 1200), waitingWithinDays: 14 })).toBe(
+      `I left out 3 threads that look automated (newsletters, notifications and the like), ${(1200).toLocaleString()} threads whose last message is more than 14 days old and one you said doesn't need a reply.`,
+    );
+    expect(leftOutTotal(left(3, 1, 1200))).toBe(1204);
+    // With no window there is nothing to be quiet for; said without a number
+    // rather than inventing one.
+    expect(describeLeftOut({ ...left(0, 0, 2), waitingWithinDays: null })).toBe(
+      "I left out 2 threads whose last message is older than the window you chose.",
+    );
+  });
+
+  it("words gone quiet as a reading of a date, not a fact about anyone", () => {
+    expect(describeQuiet(30)).toBe(
+      "Its last message is more than 30 days old, so I've taken it that nobody is still waiting on a reply.",
+    );
+    expect(olderThan(7)).toBe("more than 7 days old");
+    expect(olderThan(1)).toBe("more than a day old");
+    expect(olderThan(null)).toBe("older than the window you chose");
+  });
+
+  it("offers the windows Settings shows, and names each one", () => {
+    expect(WAITING_WINDOWS).toContain(30);
+    expect(WAITING_WINDOWS).toContain(0);
+    expect(describeWaitingWindow(0)).toBe("any time");
+    expect(describeWaitingWindow(1)).toBe("the last day");
+    expect(describeWaitingWindow(7)).toBe("the last week");
+    expect(describeWaitingWindow(14)).toBe("the last two weeks");
+    expect(describeWaitingWindow(30)).toBe("the last 30 days");
+    expect(describeWaitingWindow(45)).toBe("the last 45 days");
   });
 
   it("words every reason Rust stores, and something true for one it does not know", () => {
@@ -548,6 +609,7 @@ describe("settings and updater contracts", () => {
       "generation.anthropicModel": "claude-sonnet-4-5",
       "assist.autoDraft": false,
       "mail.checkEveryMinutes": 15,
+      "waiting.withinDays": 30,
       "onboarding.completed": false,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();

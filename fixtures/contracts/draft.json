@@ -1,6 +1,6 @@
 {
-  "id": "e96a536e-c302-46ee-a5c7-62b01dd63022",
-  "participantId": "5671b534-55f5-4713-bd55-a198f89c4653",
+  "id": "be04b641-fdf6-41d1-acd1-77c644627a61",
+  "participantId": "8cb4f7b7-d1ad-4fb8-87d7-6ce9c140e15c",
   "conversationId": null,
   "channel": "chat",
   "situationId": null,
@@ -43,33 +43,33 @@
     ],
     "examples": [
       {
-        "messageId": "a2af3967-077e-45fb-8ea1-9048bae536b1",
-        "reason": "similar wording: you, deck, can",
+        "messageId": "e94bb560-2589-4fe8-a65d-1f311ce5963c",
+        "reason": "similar wording: can, you, send",
         "score": 0.911
       },
       {
-        "messageId": "b8bc42f1-5c7e-49ef-887b-4aed042085fe",
-        "reason": "similar wording: you, can",
+        "messageId": "38221ddf-5d91-4f99-9063-174248191e25",
+        "reason": "similar wording: can, you",
         "score": 0.375
       },
       {
-        "messageId": "87f7b837-9525-4bbe-a825-769659ecd278",
+        "messageId": "21e2c8e6-ed34-4911-ae6a-6102d249f916",
         "reason": "similar wording: you",
         "score": 0.17
       },
       {
-        "messageId": "4e2c11d0-9608-4ff6-aa32-82139060de6c",
+        "messageId": "ebd60d56-6332-4035-8448-ed77f263a347",
         "reason": "same person and channel",
         "score": -0.0
       },
       {
-        "messageId": "a52db2b4-8506-441d-a7bc-d07f5300696b",
+        "messageId": "ea0c798a-0b30-4bf0-b97a-f0cc9ae002a8",
         "reason": "same person and channel",
         "score": -0.0
       }
     ]
   },
-  "createdAt": "2026-09-23T03:38:46.300Z",
+  "createdAt": "2026-09-23T04:42:50.792Z",
   "resolvedAt": null,
   "outcome": null,
   "incomingMessageId": null

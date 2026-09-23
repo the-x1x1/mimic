@@ -40,6 +40,7 @@ const thread = (over: Partial<DashboardThread> = {}): DashboardThread => ({
   draft,
   automated: null,
   mark: null,
+  quiet: false,
   ...over,
 });
 
@@ -77,5 +78,27 @@ describe("a card shows only the draft written for the message on it", () => {
     expect(
       message.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+describe("a thread kept on the list against its age says so", () => {
+  it("names the window when the user said an old thread needs a reply", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <Thread thread={thread({ mark: "needs_reply", quiet: true })} withinDays={30} />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.getByText(
+        /You said this one needs a reply, though its last message is more than 30 days old\./,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /take that back/i })).toBeInTheDocument();
+  });
+
+  it("says nothing about age on an ordinary thread", () => {
+    setup(thread());
+    expect(screen.queryByText(/days old/)).toBeNull();
   });
 });
