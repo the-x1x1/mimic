@@ -209,52 +209,12 @@ impl Db {
     /// latency. Run once per conversation after its messages are in, because
     /// a reply can arrive in the export before the message it answers.
     pub fn link_replies(&self, conversation_id: &str) -> DbResult<usize> {
-        let linked = self.conn().execute(
-            "UPDATE messages SET reply_to_message_id = (
-                 SELECT prev.id FROM messages prev
-                 WHERE prev.conversation_id = messages.conversation_id
-                   AND prev.sequence_index < messages.sequence_index
-                 ORDER BY prev.sequence_index DESC LIMIT 1
-             )
-             WHERE conversation_id = ?1 AND reply_to_message_id IS NULL",
-            [conversation_id],
-        )?;
-        // Latency is only meaningful when both timestamps exist and the reply
-        // is by someone other than the author of the message it answers.
-        self.conn().execute(
-            "UPDATE messages SET response_latency_seconds = (
-                 SELECT CAST((julianday(messages.sent_at) - julianday(prev.sent_at)) * 86400 AS INTEGER)
-                 FROM messages prev
-                 WHERE prev.id = messages.reply_to_message_id
-                   AND prev.sent_at IS NOT NULL AND messages.sent_at IS NOT NULL
-                   AND prev.direction <> messages.direction
-             )
-             WHERE conversation_id = ?1",
-            [conversation_id],
-        )?;
-        Ok(linked)
+        link_replies(&self.conn(), conversation_id)
     }
 
     /// Recompute the denormalized counters from the rows themselves.
     pub fn refresh_conversation_stats(&self, conversation_id: &str) -> DbResult<()> {
-        self.conn().execute(
-            "UPDATE conversations SET
-                message_count = (SELECT COUNT(*) FROM messages WHERE conversation_id = ?1),
-                started_at = (SELECT MIN(sent_at) FROM messages WHERE conversation_id = ?1),
-                last_message_at = (SELECT MAX(sent_at) FROM messages WHERE conversation_id = ?1),
-                is_group = (SELECT COUNT(*) > 2 FROM conversation_participants WHERE conversation_id = ?1)
-             WHERE id = ?1",
-            [conversation_id],
-        )?;
-        self.conn().execute(
-            "UPDATE conversation_participants SET message_count = (
-                 SELECT COUNT(*) FROM messages m
-                 WHERE m.conversation_id = conversation_participants.conversation_id
-                   AND m.participant_id = conversation_participants.participant_id
-             ) WHERE conversation_id = ?1",
-            [conversation_id],
-        )?;
-        Ok(())
+        refresh_conversation_stats(&self.conn(), conversation_id)
     }
 
     pub fn conversation_ids_for_source(&self, source_id: &str) -> DbResult<Vec<String>> {
@@ -466,6 +426,59 @@ impl Db {
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
+}
+
+/// `Db::link_replies` on a connection the caller holds, so it can run inside
+/// a transaction. Latency is recomputed for every message in the
+/// conversation, because it depends on direction and a direction can change
+/// after the fact (an address declared as the user's).
+pub(crate) fn link_replies(conn: &rusqlite::Connection, conversation_id: &str) -> DbResult<usize> {
+    let linked = conn.execute(
+        "UPDATE messages SET reply_to_message_id = (
+             SELECT prev.id FROM messages prev
+             WHERE prev.conversation_id = messages.conversation_id
+               AND prev.sequence_index < messages.sequence_index
+             ORDER BY prev.sequence_index DESC LIMIT 1
+         )
+         WHERE conversation_id = ?1 AND reply_to_message_id IS NULL",
+        [conversation_id],
+    )?;
+    // Latency is only meaningful when both timestamps exist and the reply
+    // is by someone other than the author of the message it answers.
+    conn.execute(
+        "UPDATE messages SET response_latency_seconds = (
+             SELECT CAST((julianday(messages.sent_at) - julianday(prev.sent_at)) * 86400 AS INTEGER)
+             FROM messages prev
+             WHERE prev.id = messages.reply_to_message_id
+               AND prev.sent_at IS NOT NULL AND messages.sent_at IS NOT NULL
+               AND prev.direction <> messages.direction
+         )
+         WHERE conversation_id = ?1",
+        [conversation_id],
+    )?;
+    Ok(linked)
+}
+
+/// `Db::refresh_conversation_stats` on a connection the caller holds.
+pub(crate) fn refresh_conversation_stats(conn: &rusqlite::Connection, conversation_id: &str) -> DbResult<()> {
+    conn.execute(
+        "UPDATE conversations SET
+            message_count = (SELECT COUNT(*) FROM messages WHERE conversation_id = ?1),
+            started_at = (SELECT MIN(sent_at) FROM messages WHERE conversation_id = ?1),
+            last_message_at = (SELECT MAX(sent_at) FROM messages WHERE conversation_id = ?1),
+            is_group = (SELECT COUNT(*) > 2 FROM conversation_participants WHERE conversation_id = ?1)
+         WHERE id = ?1",
+        [conversation_id],
+    )?;
+    conn.execute(
+        "UPDATE conversation_participants SET message_count = (
+             SELECT COUNT(*) FROM messages m
+             WHERE m.conversation_id = conversation_participants.conversation_id
+               AND m.participant_id = conversation_participants.participant_id
+         ) WHERE conversation_id = ?1",
+        [conversation_id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

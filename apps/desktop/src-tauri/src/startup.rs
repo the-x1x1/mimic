@@ -114,6 +114,10 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     if interrupted > 0 {
         tracing::warn!(target: "jobs", interrupted, requeued, "recovered interrupted jobs");
     }
+    // Mail read before one of the user's addresses was declared, by versions
+    // before 0.10.0-alpha.8, may still be filed under someone who is nothing
+    // but the user. Nothing is running yet, so nothing holds them.
+    crate::commands::people::reconcile_identity(&db, &jobs, "startup");
 
     Ok(AppState {
         paths,
@@ -238,6 +242,15 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
             loop {
                 match rx.recv().await {
                     Ok(ev) => {
+                        // Mail just read may be filed under someone whose
+                        // every address is the user's (read while one was
+                        // being added). They are folded back before the
+                        // screen is told. After any job, not only a read: one
+                        // that holds people defers it, and the next job to
+                        // finish is the next chance.
+                        if matches!(ev.status.as_str(), "completed" | "failed" | "canceled") {
+                            crate::commands::people::reconcile_identity(&st.db, &st.jobs, "after_job");
+                        }
                         let _ = app2.emit("jobs://event", &ev);
                         // New messages or a new profile change what a prepared
                         // reply would say, so a finished import or analysis is

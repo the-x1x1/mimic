@@ -1,0 +1,26 @@
+{
+  "identity": {
+    "id": "2f8060d4-ab7a-4242-9f51-9ec05202742f",
+    "displayName": "C",
+    "identifiers": [
+      {
+        "id": "f12876c1-96f4-476b-b986-1071695dce9b",
+        "kind": "email",
+        "value": "c@example.com",
+        "normalizedValue": "c@example.com"
+      },
+      {
+        "id": "6bffbd30-2896-4909-ba99-4c09c2eadee7",
+        "kind": "phone",
+        "value": "+1 (555) 010-1111",
+        "normalizedValue": "5550101111"
+      }
+    ],
+    "createdAt": "2026-09-23T05:57:59.910Z",
+    "updatedAt": "2026-09-23T05:57:59.910Z"
+  },
+  "claimed": {
+    "messages": 20,
+    "people": 1
+  }
+}

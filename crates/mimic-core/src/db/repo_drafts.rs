@@ -83,13 +83,16 @@ pub struct DraftOutcomes {
 }
 
 impl Db {
+    /// Record a draft. Addressed to nobody if the person it was written for
+    /// is gone by the time it is saved — folded back into the user while the
+    /// model was writing — as drafts already saved to them are kept.
     pub fn create_draft(&self, new: &NewDraft) -> DbResult<Draft> {
         let id = new_id();
         self.conn().execute(
             "INSERT INTO drafts(id, participant_id, conversation_id, channel, situation_id, incoming_message,
                                 intent, generated_text, provider, model, context_json, prompt_hash, evidence_json, created_at,
                                 incoming_message_id)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+             VALUES (?1,(SELECT id FROM participants WHERE id = ?2),?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
             params![
                 id,
                 new.participant_id,
@@ -334,6 +337,14 @@ mod tests {
             prompt_hash: "h".into(),
             evidence: json!({"examples": 0}),
         }
+    }
+
+    #[test]
+    fn a_draft_for_someone_gone_while_it_was_written_is_kept_addressed_to_nobody() {
+        let db = Db::open_in_memory().unwrap();
+        let saved = db.create_draft(&NewDraft { participant_id: Some("folded".into()), ..draft("Sure.") }).unwrap();
+        assert_eq!(saved.participant_id, None);
+        assert_eq!(saved.generated_text, "Sure.");
     }
 
     #[test]

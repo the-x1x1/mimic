@@ -30,6 +30,12 @@ import {
   PeopleView,
   ProviderState,
   describeCredentials,
+  AddressAdded,
+  AddressPreview,
+  HeldAddress,
+  describeClaimed,
+  describeFold,
+  type AddressOwner,
   type CredentialState,
   describeAutomated,
   describeLeftOut,
@@ -773,5 +779,94 @@ describe("saved passwords are described as they are kept", () => {
       /I can't unlock 2 saved keys or passwords any more: .* they need entering again\./,
     );
     expect(describeCredentials(kept())).not.toMatch(/can't unlock/);
+  });
+});
+
+describe("an address filed under someone is the user's only once they say who", () => {
+  it("parses the preview: who the mail from the address is filed under", () => {
+    const preview = AddressPreview.parse(read(contractFixture("address_preview.json")));
+    // Written after an import that left the email out: what the user wrote
+    // from it was filed under a person called C.
+    expect(preview.alreadyYours).toBe(false);
+    expect(preview.owner?.displayName).toBe("C");
+    expect(preview.owner?.messages).toBeGreaterThan(0);
+  });
+
+  it("parses what adding the address did, with the counts the preview gave", () => {
+    const added = AddressAdded.parse(read(contractFixture("address_added.json")));
+    const preview = AddressPreview.parse(read(contractFixture("address_preview.json")));
+    expect(added.identity.identifiers.some((i) => i.kind === "email")).toBe(true);
+    expect(added.claimed).toEqual({ messages: preview.owner?.messages, people: 1 });
+  });
+
+  it("parses the addresses still held, for Settings", () => {
+    const held = HeldAddress.array().parse(read(contractFixture("held_addresses.json")));
+    expect(held).toHaveLength(1);
+    expect(held[0]!.identifier.normalizedValue).toBe("c@example.com");
+    expect(held[0]!.owner.displayName).toBe("C");
+    expect(held[0]!.keptApart).toBe(false);
+  });
+
+  const owner = (over: Partial<AddressOwner> = {}): AddressOwner => ({
+    participantId: "p1",
+    displayName: "C (work)",
+    messages: 12,
+    otherAddresses: [],
+    relationship: null,
+    hasNotes: false,
+    preferences: 0,
+    ...over,
+  });
+
+  it("asks about the person, and says every message filed under them moves", () => {
+    const { question, lines } = describeFold(owner(), "c@work.example");
+    expect(question).toBe("Is C (work) you?");
+    expect(lines).toEqual([
+      "I have c@work.example down as C (work)'s.",
+      "If C (work) is you, the 12 messages filed under them become yours, and C (work) is no longer among your people.",
+      "This can't be undone: removing the address later won't make those messages C (work)'s again.",
+    ]);
+  });
+
+  it("names the addresses that become the user's and what the user said that goes", () => {
+    const { lines } = describeFold(
+      owner({
+        messages: 1,
+        otherAddresses: ["555 010 2222", "c@old.example"],
+        relationship: "colleague",
+        hasNotes: true,
+        preferences: 2,
+      }),
+      "c@work.example",
+    );
+    expect(lines).toContain(
+      "If C (work) is you, the one message filed under them becomes yours, and C (work) is no longer among your people.",
+    );
+    expect(lines).toContain(
+      "Their other addresses, 555 010 2222 and c@old.example, become yours too.",
+    );
+    expect(lines).toContain(
+      'What you told me about them goes: what they are to you ("colleague"), your notes and the 2 preferences you set for writing to them.',
+    );
+    expect(lines.at(-1)).toBe(
+      "This can't be undone: removing the address later won't make that message C (work)'s again.",
+    );
+    expect(describeFold(owner({ otherAddresses: ["x@y.z"] }), "a@b.c").lines).toContain(
+      "Their other address, x@y.z, becomes yours too.",
+    );
+    expect(describeFold(owner({ messages: 0 }), "a@b.c").lines.at(-1)).toBe(
+      "This can't be undone.",
+    );
+  });
+
+  it("says how much moved, and nothing when no message did", () => {
+    expect(describeClaimed({ messages: 0, people: 0 })).toBeNull();
+    expect(describeClaimed({ messages: 0, people: 1 })).toBeNull();
+    expect(describeClaimed({ messages: 1, people: 1 })).toBe(
+      "One message I'd already read is yours now. I'll look at how you write again so it counts.",
+    );
+    expect(describeClaimed({ messages: 1200, people: 1 })).toBe(
+      `${(1200).toLocaleString()} messages I'd already read are yours now. I'll look at how you write again so they count.`,
+    );
   });
 });

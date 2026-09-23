@@ -145,6 +145,10 @@ pub async fn connect_mailbox(
     // support@) is left alone — what colleagues sent from it is not the user's.
     if is_mine && account.username.contains('@') {
         state.db.add_user_identifier(mimic_core::db::IdentifierKind::Email, account.username.trim())?;
+        // Mail from it already read, from an export of the same mailbox, is
+        // folded back if whoever it was filed under is nothing but the user;
+        // anyone else is listed in Settings for the user to decide.
+        crate::commands::people::reconcile_identity(&state.db, &state.jobs, "connect_mailbox");
     }
     let config = mimic_core::sources::imap::ImapSourceConfig {
         account: account.clone(),

@@ -3,20 +3,21 @@ import { Badge, Button, Card, Field, InlineError } from "@mimic/ui";
 import {
   ANTHROPIC_SECRET_KEY,
   IDENTIFIER_LABELS,
-  IdentifierKind,
   WAITING_WINDOWS,
   describeCredentials,
   describeWaitingWindow,
+  type IdentifierKind,
   type Theme,
 } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
 import { useAppInfo, useSettings, useSystemStatus } from "@/hooks/useSystem";
 import {
-  useAddIdentifier,
+  useHeldAddresses,
   useIdentity,
   useRemoveIdentifier,
   useSetIdentity,
 } from "@/hooks/usePeople";
+import { AddAddressForm, HeldAddressQuestion } from "@/features/identity/AddAddressForm";
 import { useProviderState } from "@/hooks/useCompose";
 import { useSources } from "@/hooks/useSources";
 import { useUpdater } from "@/features/updater/useUpdater";
@@ -49,22 +50,23 @@ export function SettingsPage() {
 /**
  * Who the user is. This is not a profile page: these addresses are what
  * decides whether an imported message counts as the user's own writing, so the
- * section says so.
+ * section says so — and says when mail already read from one of them is still
+ * filed under someone else, with the same question adding it asks.
  */
 function IdentitySection() {
   const identity = useIdentity();
+  const held = useHeldAddresses(Boolean(identity.data));
   const setIdentity = useSetIdentity();
-  const add = useAddIdentifier();
   const remove = useRemoveIdentifier();
-  const [kind, setKind] = useState<IdentifierKind>("email");
-  const [value, setValue] = useState("");
 
   return (
     <Card title="You">
       <p className="neutral">
         Mimic learns only from messages you wrote. It works out which those are by matching the
-        sender against the addresses below — so if one is missing, the messages you sent from it
-        will be treated as someone else&rsquo;s.
+        sender against the addresses below — so while one is missing, what you sent from it reads as
+        someone else&rsquo;s. Adding it puts that right for mail already read, too, once
+        you&rsquo;ve said whose it was. Removing one changes only mail read after that: which
+        address an older message came from isn&rsquo;t kept.
       </p>
       <Field label="Your name" htmlFor="display-name">
         <input
@@ -77,45 +79,30 @@ function IdentitySection() {
 
       {identity.data ? (
         <ul className="plain-list">
-          {identity.data.identifiers.map((i) => (
-            <li key={i.id} className="row gap-2 between">
-              <span>
-                <span className="muted small">{IDENTIFIER_LABELS[i.kind as IdentifierKind]}</span>{" "}
-                <span className="mono">{i.value}</span>
-              </span>
-              <Button size="sm" variant="ghost" onClick={() => remove.mutate(i.id)}>
-                Remove
-              </Button>
-            </li>
-          ))}
+          {identity.data.identifiers.map((i) => {
+            const heldHere = held.data?.find((h) => h.identifier.id === i.id);
+            return (
+              <li key={i.id} className="stack gap-2">
+                <div className="row gap-2 between">
+                  <span>
+                    <span className="muted small">
+                      {IDENTIFIER_LABELS[i.kind as IdentifierKind]}
+                    </span>{" "}
+                    <span className="mono">{i.value}</span>
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={() => remove.mutate(i.id)}>
+                    Remove
+                  </Button>
+                </div>
+                {heldHere ? <HeldAddressQuestion held={heldHere} /> : null}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
 
-      <div className="row gap-2">
-        <select value={kind} onChange={(e) => setKind(e.target.value as IdentifierKind)}>
-          {IdentifierKind.options.map((k) => (
-            <option key={k} value={k}>
-              {IDENTIFIER_LABELS[k]}
-            </option>
-          ))}
-        </select>
-        <input
-          value={value}
-          placeholder="you@example.com"
-          onChange={(e) => setValue(e.target.value)}
-        />
-        <Button
-          disabled={!identity.data || !value.trim()}
-          onClick={async () => {
-            await add.mutateAsync({ kind, value });
-            setValue("");
-          }}
-        >
-          Add
-        </Button>
-      </div>
+      <AddAddressForm disabled={!identity.data} />
       {!identity.data ? <p className="muted small">Set your name first.</p> : null}
-      {add.isError ? <InlineError>{(add.error as Error).message}</InlineError> : null}
     </Card>
   );
 }

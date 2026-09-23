@@ -1309,3 +1309,15 @@ select option {
   gap: var(--space-3);
   flex-wrap: wrap;
 }
+
+/* ---------------------------------------------------------- identity ----- */
+
+/* The question asked before mail filed under someone becomes the user's. It
+   sits under the field that asked it, set apart because saying yes cannot be
+   undone. */
+.fold-confirm {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  padding: var(--space-3);
+}

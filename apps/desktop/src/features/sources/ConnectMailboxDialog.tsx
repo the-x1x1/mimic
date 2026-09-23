@@ -185,6 +185,15 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                 Untick this for a mailbox you share (team@, support@), so what colleagues sent from
                 it isn&rsquo;t taken as your writing.
               </p>
+              {isMine ? (
+                <p className="muted small">
+                  Mail from it I&rsquo;ve already read &mdash; in an export of this mailbox, say
+                  &mdash; becomes yours too if I filed it under someone whose every address is yours
+                  and for whom you&rsquo;ve set no relationship, notes or preferences. If I filed it
+                  under anyone else, Settings lists them under You, to say whether they&rsquo;re
+                  you.
+                </p>
+              ) : null}
             </div>
           ) : null}
 

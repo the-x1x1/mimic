@@ -111,6 +111,8 @@ For each author:
 
 Resolution runs through an in-memory cache keyed on the author's lowest identifier key, because the alternative is a `SELECT` per message and a mailbox has a million of them.
 
+**An address declared after the import** can be applied to the messages already read, not only to the next import: whoever was filed as a person under it becomes the user again, with their messages — once the user has been shown who that is and said yes, or without asking when every address they hold is already the user's and the user recorded nothing about them (`Db::add_user_address`, `Db::claim_user_mail`, which the desktop runs whenever a job finishes; see `DATA_MODEL.md`). Reading the source again would not do it — `insert_messages` keeps the first copy of every message — so nothing asks the user to. An address the user types is refused while mail is being read, because a running import matches authors against the addresses it read when it started; one added by connecting a mailbox mid-read is caught by that fold once the work in progress has finished, or listed in Settings when its holder is not only the user.
+
 **The importer refuses to run when the user has declared no identifiers at all.** Every message would import as `unknown`, no voice profile could be built from it, and the failure would be silent. Better to stop and say so.
 
 ## Batching, dedupe and cancellation
