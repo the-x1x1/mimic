@@ -1,0 +1,90 @@
+{
+  "people": [
+    {
+      "participant": {
+        "id": "b21d9ac8-c769-40f8-a980-e140145697b7",
+        "displayName": "Bob",
+        "isSelf": false,
+        "relationship": null,
+        "notes": null,
+        "identifiers": [
+          {
+            "id": "c9721f61-a4f1-419f-b7d3-9dc2fac522b0",
+            "kind": "phone",
+            "value": "+1 (555) 010-2222",
+            "normalizedValue": "5550102222"
+          }
+        ],
+        "createdAt": "2026-09-23T02:03:09.703Z",
+        "updatedAt": "2026-09-23T02:03:09.703Z"
+      },
+      "messageCount": 5,
+      "sentByUser": 2,
+      "conversationCount": 1,
+      "channels": ["sms"],
+      "firstMessageAt": "2026-01-25T18:00:00Z",
+      "lastMessageAt": "2026-01-25T18:40:00Z",
+      "hasRelationshipProfile": false,
+      "automated": false
+    },
+    {
+      "participant": {
+        "id": "f47410d0-2f29-462e-bf9b-616b8dfc09c0",
+        "displayName": "Ada Lovelace",
+        "isSelf": false,
+        "relationship": null,
+        "notes": null,
+        "identifiers": [
+          {
+            "id": "87b9e69b-898d-4b37-8b94-3f546a72eac9",
+            "kind": "email",
+            "value": "ada@example.com",
+            "normalizedValue": "ada@example.com"
+          }
+        ],
+        "createdAt": "2026-09-23T02:03:09.695Z",
+        "updatedAt": "2026-09-23T02:03:09.695Z"
+      },
+      "messageCount": 40,
+      "sentByUser": 20,
+      "conversationCount": 1,
+      "channels": ["chat"],
+      "firstMessageAt": "2026-01-05T09:00:00Z",
+      "lastMessageAt": "2026-01-24T09:08:00Z",
+      "hasRelationshipProfile": false,
+      "automated": false
+    }
+  ],
+  "peopleTotal": 2,
+  "automatedSendersTotal": 1,
+  "automatedSenders": [
+    {
+      "participant": {
+        "id": "87c6912b-f19b-4bea-9d87-4cdc0a94a951",
+        "displayName": "Brand Weekly",
+        "isSelf": false,
+        "relationship": null,
+        "notes": null,
+        "identifiers": [
+          {
+            "id": "95d18fe6-9b7f-4434-86d0-d612ebe76e9a",
+            "kind": "email",
+            "value": "news@brand.example",
+            "normalizedValue": "news@brand.example"
+          }
+        ],
+        "createdAt": "2026-09-23T02:03:09.709Z",
+        "updatedAt": "2026-09-23T02:03:09.709Z"
+      },
+      "messageCount": 1,
+      "sentByUser": 0,
+      "conversationCount": 1,
+      "channels": ["chat"],
+      "firstMessageAt": "2026-01-01T08:00:00Z",
+      "lastMessageAt": "2026-01-01T08:00:00Z",
+      "hasRelationshipProfile": false,
+      "automated": true
+    }
+  ],
+  "showingAutomated": true
+}

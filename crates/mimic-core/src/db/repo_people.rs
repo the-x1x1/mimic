@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 
 use rusqlite::{params, OptionalExtension, Row};
+use serde::Serialize;
 
 use super::{Db, DbError, DbResult, Identifier, IdentifierKind, Participant, ParticipantSummary};
 use crate::ids::{new_id, now_rfc3339};
@@ -43,6 +44,124 @@ fn map(r: &Row<'_>) -> rusqlite::Result<Participant> {
 }
 
 const COLS: &str = "id, display_name, is_self, relationship, notes, created_at, updated_at";
+
+/// Which participants to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeopleFilter {
+    /// Everyone who is not a sender of automated mail (`classified_cte`).
+    People,
+    /// Senders all of whose mail looks automated from its headers, whom the
+    /// user has neither written to nor said anything about.
+    AutomatedSenders,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeopleCounts {
+    pub people: i64,
+    pub automated_senders: i64,
+}
+
+/// The People screen. `people` may be fewer than `people_total`, and the
+/// screen says so; `automated_senders` is empty unless it was asked for, and
+/// `showing_automated` says which of those an empty list means.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeopleView {
+    pub people: Vec<ParticipantSummary>,
+    pub people_total: i64,
+    pub automated_senders_total: i64,
+    pub automated_senders: Vec<ParticipantSummary>,
+    pub showing_automated: bool,
+}
+
+/// Which participants are senders of automated mail, one row per participant
+/// other than the user. A sender is automated only when all of these hold:
+///
+/// * they sent at least one message, and every one reads as automated from
+///   its headers — one ordinary message makes them a person;
+/// * the user has not said how they know them (`relationship`);
+/// * the user has not written in any conversation they are in — an
+///   out-of-office reply is often the only message a new contact has sent.
+///   Forwarding or answering a sender's mail counts, so an "unsubscribe me"
+///   reply keeps a newsletter among people: the error on the side of a person;
+/// * the user has not said one of their threads needs a reply.
+///
+/// The user's word, or the user's own writing, outranks the headers, as it
+/// does for threads. Each exception is worked out once as a set, and the
+/// classification is materialized, because the People list and its count
+/// both read it and it would otherwise be recomputed per reference.
+fn classified_cte() -> String {
+    let automated = super::repo_waiting::automated_of("x");
+    format!(
+        "sent AS (
+           SELECT x.participant_id AS pid,
+                  COUNT(*) AS from_them,
+                  SUM({automated} IS NOT NULL) AS automated_from_them
+           FROM messages x
+           WHERE x.participant_id IS NOT NULL AND x.direction = 'other'
+           GROUP BY x.participant_id
+         ),
+         written_to AS (
+           SELECT DISTINCT cp.participant_id AS pid
+           FROM messages mine
+           CROSS JOIN conversation_participants cp ON cp.conversation_id = mine.conversation_id
+           WHERE mine.direction = 'self'
+         ),
+         kept AS (
+           SELECT DISTINCT marked.participant_id AS pid
+           FROM thread_marks tm
+           JOIN messages marked ON marked.id = tm.message_id
+           WHERE tm.mark = 'needs_reply' AND marked.participant_id IS NOT NULL
+         ),
+         classified AS MATERIALIZED (
+           SELECT p.id AS pid,
+                  (COALESCE(sent.from_them, 0) > 0
+                   AND sent.automated_from_them = sent.from_them
+                   AND p.relationship IS NULL
+                   AND p.id NOT IN (SELECT pid FROM written_to)
+                   AND p.id NOT IN (SELECT pid FROM kept)
+                  ) AS automated
+           FROM participants p
+           LEFT JOIN sent ON sent.pid = p.id
+           WHERE p.is_self = 0
+         )"
+    )
+}
+
+/// One row per participant other than the user: what they are in (messages,
+/// the user's share, conversations, channels, first and last), whether a
+/// relationship profile exists, and whether they are a sender of automated
+/// mail (`classified_cte`).
+fn summary_cte() -> String {
+    format!(
+        "WITH seen AS (
+           SELECT cp.participant_id AS pid,
+                  COUNT(msg.id) AS total,
+                  SUM(CASE WHEN msg.direction = 'self' THEN 1 ELSE 0 END) AS sent_by_user,
+                  COUNT(DISTINCT msg.conversation_id) AS conversations,
+                  GROUP_CONCAT(DISTINCT msg.channel) AS channels,
+                  MIN(msg.sent_at) AS first_at,
+                  MAX(msg.sent_at) AS last_at
+           FROM conversation_participants cp
+           JOIN messages msg ON msg.conversation_id = cp.conversation_id
+           GROUP BY cp.participant_id
+         ),
+         {classified},
+         summary AS (
+           SELECT p.id, p.display_name, p.is_self, p.relationship, p.notes, p.created_at, p.updated_at,
+                  COALESCE(seen.total, 0) AS total, COALESCE(seen.sent_by_user, 0) AS sent_by_user,
+                  COALESCE(seen.conversations, 0) AS conversations, COALESCE(seen.channels, '') AS channels,
+                  seen.first_at AS first_at, seen.last_at AS last_at,
+                  EXISTS(SELECT 1 FROM voice_profiles v WHERE v.layer = 'relationship' AND v.scope_key = p.id) AS has_profile,
+                  classified.automated AS automated
+           FROM participants p
+           JOIN classified ON classified.pid = p.id
+           LEFT JOIN seen ON seen.pid = p.id
+         )",
+        classified = classified_cte()
+    )
+}
 
 impl Db {
     fn load_identifiers(&self, participant_id: &str) -> DbResult<Vec<Identifier>> {
@@ -184,31 +303,74 @@ impl Db {
         self.get_participant(id)?.ok_or_else(|| DbError::NotFound(id.into()))
     }
 
-    /// People the user actually talks to, most recent first. One grouped query
-    /// rather than a per-row count, so this stays flat at a million messages.
+    /// Everyone the user's mail has in it, most recent first, with whether
+    /// each one has only ever sent automated mail. One grouped query rather
+    /// than a per-row count, so this stays flat at a million messages.
     pub fn list_participants(&self, limit: usize) -> DbResult<Vec<ParticipantSummary>> {
+        self.participants_where("TRUE", limit)
+    }
+
+    /// People, or senders that have only ever sent automated mail, most
+    /// recent first. The People screen and every place a person is picked
+    /// list the first; the second is what they left out.
+    pub fn list_people(&self, which: PeopleFilter, limit: usize) -> DbResult<Vec<ParticipantSummary>> {
+        self.participants_where(
+            match which {
+                PeopleFilter::People => "NOT automated",
+                PeopleFilter::AutomatedSenders => "automated",
+            },
+            limit,
+        )
+    }
+
+    /// How many people there are, and how many senders have only ever sent
+    /// automated mail. Counts of rows, however many the caller asked to see.
+    pub fn count_people(&self) -> DbResult<PeopleCounts> {
+        Ok(self.conn().query_row(
+            &format!(
+                "WITH {classified}
+                 SELECT COALESCE(SUM(NOT automated), 0), COALESCE(SUM(automated), 0) FROM classified",
+                classified = classified_cte()
+            ),
+            [],
+            |r| Ok(PeopleCounts { people: r.get(0)?, automated_senders: r.get(1)? }),
+        )?)
+    }
+
+    /// The People screen's read model: up to `people_limit` people, how many
+    /// there are, and what was left out — the senders themselves only when
+    /// `automated_limit` asks for them. A caller that wants only the senders
+    /// passes a `people_limit` of 0 rather than paying for a list it ignores.
+    pub fn people_view(&self, people_limit: usize, automated_limit: Option<usize>) -> DbResult<PeopleView> {
+        let people = if people_limit > 0 { self.list_people(PeopleFilter::People, people_limit)? } else { Vec::new() };
+        let automated_senders = match automated_limit {
+            Some(limit) => self.list_people(PeopleFilter::AutomatedSenders, limit)?,
+            None => Vec::new(),
+        };
+        // Counted after listing, and never below what was listed: an import
+        // landing in between can only add rows, and a total that lagged the
+        // list would hide the line saying the list was cut short.
+        let counts = self.count_people()?;
+        Ok(PeopleView {
+            people_total: counts.people.max(people.len() as i64),
+            automated_senders_total: counts.automated_senders.max(automated_senders.len() as i64),
+            people,
+            automated_senders,
+            showing_automated: automated_limit.is_some(),
+        })
+    }
+
+    fn participants_where(&self, filter: &str, limit: usize) -> DbResult<Vec<ParticipantSummary>> {
         let conn = self.conn();
         let sql = format!(
-            "SELECT p.id, p.display_name, p.is_self, p.relationship, p.notes, p.created_at, p.updated_at,
-                    COALESCE(m.total, 0), COALESCE(m.sent_by_user, 0), COALESCE(m.conversations, 0),
-                    COALESCE(m.channels, ''), m.first_at, m.last_at,
-                    EXISTS(SELECT 1 FROM voice_profiles v WHERE v.layer = 'relationship' AND v.scope_key = p.id)
-             FROM participants p
-             LEFT JOIN (
-               SELECT cp.participant_id AS pid,
-                      COUNT(msg.id) AS total,
-                      SUM(CASE WHEN msg.direction = 'self' THEN 1 ELSE 0 END) AS sent_by_user,
-                      COUNT(DISTINCT msg.conversation_id) AS conversations,
-                      GROUP_CONCAT(DISTINCT msg.channel) AS channels,
-                      MIN(msg.sent_at) AS first_at,
-                      MAX(msg.sent_at) AS last_at
-               FROM conversation_participants cp
-               JOIN messages msg ON msg.conversation_id = cp.conversation_id
-               GROUP BY cp.participant_id
-             ) m ON m.pid = p.id
-             WHERE p.is_self = 0
-             ORDER BY m.last_at DESC NULLS LAST, p.display_name
-             LIMIT {limit}"
+            "{cte}
+             SELECT id, display_name, is_self, relationship, notes, created_at, updated_at,
+                    total, sent_by_user, conversations, channels, first_at, last_at, has_profile, automated
+             FROM summary
+             WHERE {filter}
+             ORDER BY last_at DESC NULLS LAST, display_name
+             LIMIT {limit}",
+            cte = summary_cte()
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |r| {
@@ -231,6 +393,7 @@ impl Db {
                 first_message_at: r.get(11)?,
                 last_message_at: r.get(12)?,
                 has_relationship_profile: r.get::<_, i64>(13)? != 0,
+                automated: r.get::<_, i64>(14)? != 0,
             })
         })?;
         let mut out: Vec<ParticipantSummary> = rows.collect::<Result<_, _>>()?;
@@ -314,5 +477,116 @@ mod tests {
         assert_eq!(db.rename_participant(&id, "Ada L").unwrap().display_name, "Ada L");
         assert!(db.rename_participant(&id, " ").is_err());
         assert!(db.rename_participant("nope", "X").is_err());
+    }
+
+    #[test]
+    fn a_sender_of_nothing_but_automated_mail_is_left_out_unless_the_user_says_otherwise() {
+        use crate::db::{NewMessage, NewSource};
+        use serde_json::{json, Value};
+        let db = Db::open_in_memory().unwrap();
+        let source = db
+            .create_source(&NewSource {
+                connector: "test".into(),
+                name: "T".into(),
+                channel: "email".into(),
+                location: None,
+                config: Value::Null,
+            })
+            .unwrap()
+            .id;
+        // (who, messages they sent as (body, automated)); nobody sends nothing
+        // except Grace, whom the user only wrote to.
+        type Sent<'a> = &'a [(&'a str, Option<&'a str>)];
+        let cast: [(&str, Sent); 7] = [
+            ("Ada", &[("lunch?", None)]),
+            ("Brand", &[("sale", Some("newsletter")), ("more sale", Some("newsletter"))]),
+            // One message from a person makes them a person.
+            ("Shop", &[("order shipped", Some("no_reply_address")), ("sorry, it was lost - refund?", None)]),
+            ("Grace", &[]),
+            // A new contact whose only message so far is an out-of-office —
+            // but the user wrote to them, so they are a person.
+            ("Hopper", &[("I'm away until Monday", Some("auto_reply"))]),
+            ("Club", &[("meeting saturday", Some("newsletter"))]),
+            ("Alerts", &[("your build failed", Some("no_reply_address"))]),
+        ];
+        let mut seq = 0;
+        for (name, sent) in cast {
+            let convo = db.upsert_conversation(&source, name, "email", Some(name)).unwrap();
+            let who = db.resolve_participant(name, &[email(&format!("{name}@example.com"))], false).unwrap();
+            db.link_conversation_participant(&convo, &who).unwrap();
+            let mut batch: Vec<NewMessage> = sent
+                .iter()
+                .map(|(body, automated)| {
+                    seq += 1;
+                    NewMessage {
+                        conversation_id: convo.clone(),
+                        source_id: source.clone(),
+                        participant_id: Some(who.clone()),
+                        external_id: format!("{name}-{seq}"),
+                        direction: "other".into(),
+                        channel: "email".into(),
+                        sent_at: Some(format!("2026-09-{:02}T10:00:00Z", seq)),
+                        sequence_index: seq,
+                        body: (*body).into(),
+                        reply_to_external_id: None,
+                        metadata: automated.map(|a| json!({ "automated": a })).unwrap_or(Value::Null),
+                    }
+                })
+                .collect();
+            seq += 1;
+            batch.push(NewMessage {
+                conversation_id: convo.clone(),
+                source_id: source.clone(),
+                participant_id: None,
+                external_id: format!("{name}-mine-{seq}"),
+                direction: "self".into(),
+                channel: "email".into(),
+                sent_at: Some(format!("2026-09-{:02}T10:00:00Z", seq)),
+                sequence_index: seq,
+                body: "hello".into(),
+                reply_to_external_id: None,
+                metadata: Value::Null,
+            });
+            // The user wrote in every conversation except the newsletters'.
+            if matches!(name, "Brand" | "Club" | "Alerts") {
+                batch.pop();
+            }
+            db.insert_messages(&batch).unwrap();
+        }
+        // The user says how they know the club, so it is theirs to call.
+        let club =
+            db.list_participants(50).unwrap().into_iter().find(|p| p.participant.display_name == "Club").unwrap();
+        db.set_participant_relationship(&club.participant.id, Some("book club")).unwrap();
+        // And says a thread from the alerts needs a reply.
+        let (alerts_convo, alerts_message): (String, String) = db
+            .conn()
+            .query_row("SELECT conversation_id, id FROM messages WHERE external_id LIKE 'Alerts-%'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        db.mark_thread(&alerts_convo, &alerts_message, Some(crate::db::ThreadMark::NeedsReply)).unwrap();
+
+        let names = |v: &[ParticipantSummary]| {
+            let mut n: Vec<String> = v.iter().map(|p| p.participant.display_name.clone()).collect();
+            n.sort();
+            n
+        };
+        assert_eq!(
+            names(&db.list_people(PeopleFilter::People, 50).unwrap()),
+            ["Ada", "Alerts", "Club", "Grace", "Hopper", "Shop"]
+        );
+        assert_eq!(names(&db.list_people(PeopleFilter::AutomatedSenders, 50).unwrap()), ["Brand"]);
+        assert_eq!(db.count_people().unwrap(), PeopleCounts { people: 6, automated_senders: 1 });
+        assert_eq!(db.list_participants(50).unwrap().len(), 7, "everyone is still there for whoever needs everyone");
+
+        let view = db.people_view(2, None).unwrap();
+        assert_eq!(view.people.len(), 2, "the list is cut at the limit");
+        assert_eq!(view.people_total, 6, "and the total says by how much");
+        assert!(view.automated_senders.is_empty() && !view.showing_automated);
+        let shown = db.people_view(0, Some(50)).unwrap();
+        assert!(shown.people.is_empty(), "a caller after the senders only gets the senders");
+        assert_eq!(shown.people_total, 6, "and still the counts");
+        assert_eq!(names(&shown.automated_senders), ["Brand"]);
+        assert!(shown.automated_senders[0].automated);
     }
 }

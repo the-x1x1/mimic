@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/mimic-core", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.10.0-alpha.4"
+version = "0.10.0-alpha.5"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"

@@ -24,7 +24,7 @@ import {
   LocalModelStatus,
   OnboardingState,
   Participant,
-  ParticipantSummary,
+  PeopleView,
   ProviderState,
   RepresentativeExample,
   Settings,
@@ -151,7 +151,13 @@ export const ipc = {
   removeUserIdentifier: (identifierId: string) =>
     call("remove_user_identifier", UserIdentity, { identifierId }),
 
-  people: (limit = 200) => call("list_people", ParticipantSummary.array(), { limit }),
+  /**
+   * Up to `limit` people, with the counts; the senders whose mail all looks
+   * automated only when `automatedLimit` asks for them. Pass a `limit` of 0
+   * to get only the senders.
+   */
+  people: (limit = 200, automatedLimit: number | null = null) =>
+    call("list_people", PeopleView, { limit, automatedLimit }),
   person: (participantId: string) => call("get_person", Participant.nullable(), { participantId }),
   setPersonRelationship: (participantId: string, relationship: string | null) =>
     call("set_person_relationship", Participant, { participantId, relationship }),

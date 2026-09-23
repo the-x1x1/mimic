@@ -2,6 +2,25 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.5] — 2026-09-22
+
+People are people. With a mailbox connected, **People** was mostly newsletters.
+
+### Added
+
+- **Senders whose mail all looks automated are left out of People** — newsletters, notification services, no-reply addresses — by the same reading of their headers that keeps their threads off the home screen. Your word and your writing come first: anyone you've written to, anyone you've said how you know, and anyone whose thread you said needs a reply stays a person, however their mail reads. So does anyone who sends one ordinary message. The line under the heading says how many I left out, and **Show them** lists them; saying how you know one of them puts them back among people.
+- **Picking someone to write to** lists people only, and says when the list is cut short.
+
+### Fixed
+
+- **People could stop at 200 without saying so**, and with a mailbox the most recent 200 were mostly newsletters, so someone you write to could fall off the bottom unseen. The list now says when it is cut short, and newsletters no longer take the places.
+- The subtitle said "Everyone I've seen you write to", but the list is everyone who has written to you. It now says so.
+- The people count in the app's status counts people, not senders.
+
+### Not in this release
+
+Nothing here changes what is learned: leaving a sender out of the list touches none of their messages and no profile. Forwarding or answering a sender's mail counts as writing to them, so a newsletter you replied "unsubscribe" to stays among people. Mail imported before 0.10.0-alpha.4 carries no reading of its headers, so its senders count as people until its source is removed and added again.
+
 ## [0.10.0-alpha.4] — 2026-09-22
 
 Only what needs a reply. With a real mailbox connected, most of what arrives is not a person.

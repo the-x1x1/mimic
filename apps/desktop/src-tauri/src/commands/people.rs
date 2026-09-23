@@ -43,8 +43,9 @@ pub async fn remove_user_identifier(
 pub async fn list_people(
     state: State<'_, SharedState>,
     limit: Option<usize>,
-) -> CommandResult<Vec<mimic_core::db::ParticipantSummary>> {
-    Ok(state.db.list_participants(limit.unwrap_or(200).min(5000))?)
+    automated_limit: Option<usize>,
+) -> CommandResult<mimic_core::db::PeopleView> {
+    Ok(state.db.people_view(limit.unwrap_or(200).min(5000), automated_limit.map(|l| l.min(5000)))?)
 }
 
 #[tauri::command]

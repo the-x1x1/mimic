@@ -87,13 +87,18 @@ impl ThreadMark {
     }
 }
 
-/// Why a message looks automated, from `metadata_json`, or NULL. Text only:
-/// anything else under that key is not a reading this code wrote. The `instr`
-/// keeps the JSON parse off the great majority of rows, which have no
-/// reading at all.
-const AUTOMATED: &str = "CASE WHEN instr(m.metadata_json, '\"automated\"') > 0
-                               AND json_type(m.metadata_json, '$.automated') = 'text'
-                          THEN json_extract(m.metadata_json, '$.automated') END";
+/// Why a message (the `messages` row aliased `alias`) looks automated, from
+/// its `metadata_json`, or NULL. Text only: anything else under that key is
+/// not a reading this code wrote. The `instr` keeps the JSON parse off the
+/// great majority of rows, which have no reading at all. Shared with the
+/// People list, so a sender is automated by the same reading as a thread.
+pub(super) fn automated_of(alias: &str) -> String {
+    format!(
+        "CASE WHEN instr({alias}.metadata_json, '\"automated\"') > 0
+                   AND json_type({alias}.metadata_json, '$.automated') = 'text'
+              THEN json_extract({alias}.metadata_json, '$.automated') END"
+    )
+}
 
 /// The deciding message of every thread (see the module comment), and why it
 /// looks automated. Messages whose direction could not be established
@@ -103,9 +108,10 @@ const AUTOMATED: &str = "CASE WHEN instr(m.metadata_json, '\"automated\"') > 0
 /// `conversation_filter` narrows it to one thread (`?1`) for `mark_thread`.
 fn deciding_cte(conversation_filter: bool) -> String {
     let one = if conversation_filter { "AND m.conversation_id = ?1" } else { "" };
+    let automated = automated_of("m");
     format!(
         "WITH msgs AS (
-           SELECT m.conversation_id, m.id, m.direction, m.sequence_index, {AUTOMATED} AS automated
+           SELECT m.conversation_id, m.id, m.direction, m.sequence_index, {automated} AS automated
            FROM messages m
            WHERE m.direction IN ('self','other') {one}
          ),
