@@ -2,6 +2,16 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.9] — 2026-09-22
+
+One Mimic at a time.
+
+### Fixed
+
+- **Opening Mimic when it's already open brings the open one to the front.** Before, opening it a second time — a second click on its icon, say — started a second copy on the same data, running its own background work alongside the first's. The second marked the first's work in progress as interrupted and started it again, both checked the same mailbox at once, and both wrote the same saved-passwords file. Now the second launch hands over to the first and closes.
+- **And if a second copy gets that far anyway**, it finds the data in use, touches nothing, shows no window, says "Another Mimic is using your data right now, so this one won't start", and closes. The data folder is locked for as long as Mimic runs, and the lock goes when Mimic does, however it ends, so a crash never locks Mimic out of its own data.
+- **Opening Mimic while it's still closing opens it once it has closed**, instead of handing the launch to the copy that is going. Closing can take a few seconds while background work stops.
+
 ## [0.10.0-alpha.8] — 2026-09-22
 
 Your own mail, whichever address it came from.

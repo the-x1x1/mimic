@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! <root>/
-//!   data/mimic.db  data/backups/
+//!   data/mimic.db  data/mimic.lock  data/backups/
 //!   cache/embeddings/
 //!   models/encoders/
 //!   credentials/   logs/  updates/  tmp/
@@ -52,6 +52,11 @@ impl AppPaths {
     }
     pub fn backups_dir(&self) -> PathBuf {
         self.data_dir().join("backups")
+    }
+    /// Locked for as long as a Mimic uses this folder (`instance::InstanceLock`),
+    /// beside the database it protects.
+    pub fn instance_lock_file(&self) -> PathBuf {
+        self.data_dir().join("mimic.lock")
     }
     pub fn embeddings_cache(&self) -> PathBuf {
         self.root.join("cache").join("embeddings")

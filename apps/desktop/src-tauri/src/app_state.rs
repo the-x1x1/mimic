@@ -27,6 +27,8 @@ pub struct AppState {
     pub demo_mode: AtomicBool,
     pub schema_report: mimic_core::db::OpenReport,
     pub log_dir: PathBuf,
+    /// This process's hold on the data folder, for as long as the app runs.
+    pub instance: mimic_core::instance::InstanceLock,
 }
 
 pub type SharedState = Arc<AppState>;
