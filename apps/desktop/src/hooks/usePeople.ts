@@ -53,12 +53,16 @@ export function useClaimHeldAddress() {
   });
 }
 
-/** The person under one of the user's addresses is not them. */
+/** The person under one of the user's addresses, or behind mail in their Sent folder, is not them. */
 export function useKeepApart() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (participantId: string) => ipc.keepPersonApart(participantId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.heldAddresses }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: qk.heldAddresses }),
+        qc.invalidateQueries({ queryKey: qk.sentFolderPeople }),
+      ]),
   });
 }
 
@@ -95,6 +99,14 @@ export function usePreviewAddress() {
 /** The user's addresses that mail already read is still filed under someone else by. */
 export function useHeldAddresses(enabled = true) {
   return useQuery({ queryKey: qk.heldAddresses, queryFn: ipc.heldUserAddresses, enabled });
+}
+
+/**
+ * People whose mail was in the user's Sent folder, under an address not yet
+ * theirs, most first. Under "identity", so it is read again after every job.
+ */
+export function useSentFolderPeople(enabled = true) {
+  return useQuery({ queryKey: qk.sentFolderPeople, queryFn: ipc.sentFolderPeople, enabled });
 }
 
 export function useRemoveIdentifier() {

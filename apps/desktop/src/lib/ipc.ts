@@ -33,6 +33,7 @@ import {
   PeopleView,
   ProviderState,
   RepresentativeExample,
+  SentFolderPerson,
   Settings,
   SituationSummary,
   Source,
@@ -181,6 +182,8 @@ export const ipc = {
   addUserIdentifier: (kind: string, value: string, confirmedOwner: AddressOwner | null = null) =>
     call("add_user_identifier", AddressAdded, { kind, value, confirmedOwner }),
   heldUserAddresses: () => call("held_user_addresses", HeldAddress.array()),
+  /** People whose mail was in the user's Sent folder, under an address not yet theirs. */
+  sentFolderPeople: () => call("sent_folder_people", SentFolderPerson.array()),
   /** Fold in the holder of a held address, when `confirmedOwner` is what the list shows now. */
   claimHeldAddress: (identifierId: string, confirmedOwner: AddressOwner) =>
     call("claim_held_address", AddressAdded, { identifierId, confirmedOwner }),

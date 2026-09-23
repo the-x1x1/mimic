@@ -88,6 +88,14 @@ pub async fn held_user_addresses(state: State<'_, SharedState>) -> CommandResult
     Ok(state.db.held_user_addresses()?)
 }
 
+/// People whose mail was in the user's own Sent folder, most first, for the
+/// user to say whether each is them (`add_user_identifier` with the owner
+/// shown, or `keep_person_apart`).
+#[tauri::command]
+pub async fn sent_folder_people(state: State<'_, SharedState>) -> CommandResult<Vec<mimic_core::db::SentFolderPerson>> {
+    Ok(state.db.sent_folder_people()?)
+}
+
 /// Messages became the user's, so how they write is measured again — once,
 /// if a measurement is not already waiting to run.
 fn measure_again_if(db: &Db, jobs: &JobRunner, claimed_messages: usize) -> CommandResult<()> {

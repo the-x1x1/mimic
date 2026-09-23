@@ -36,6 +36,7 @@ Make the model of the person better, not the prompt longer.
 ## Phase 4 — Connectors
 
 - Done in 0.10.0-alpha.3: IMAP, read-only, inbox and sent, with a per-folder watermark and a schedule. Still open: OAuth (XOAUTH2), which Outlook.com and Hotmail now require and single-sign-on work accounts always did, and a first real connection to each major provider.
+- Done in 0.10.0-alpha.12: mail in the sent folder, or labelled `Sent` in a Gmail export, from an address the user didn't give is asked about by name. Still open: knowing the folder for other exports (a Thunderbird or Apple Mail export is one mbox per folder, and its name is the only clue), and marking mail imported before it.
 - Platform exports: iMessage, WhatsApp, Signal, Slack, Discord.
 - Incremental sync for file sources (IMAP has it).
 

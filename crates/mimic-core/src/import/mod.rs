@@ -226,8 +226,12 @@ impl ImportState<'_> {
 
         let mut batch: Vec<NewMessage> = Vec::with_capacity(convo.messages.len().min(BATCH));
         let mut counts = ImportCounts::default();
+        let mut seen: HashSet<&str> = HashSet::new();
         for (i, raw) in convo.messages.iter().enumerate() {
-            if elsewhere.contains(&raw.external_id) {
+            // Kept once: a copy another source has, or a second copy here —
+            // the same message read from two folders, where the connector
+            // puts the copy to keep first. Nobody is made up for the other.
+            if elsewhere.contains(&raw.external_id) || !seen.insert(raw.external_id.as_str()) {
                 counts.duplicates += 1;
                 continue;
             }

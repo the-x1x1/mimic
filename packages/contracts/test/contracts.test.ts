@@ -45,8 +45,10 @@ import {
   describeSplitWarning,
   formatShare,
   HeldAddress,
+  SentFolderPerson,
   describeClaimed,
   describeFold,
+  describeSentFolder,
   type AddressOwner,
   type CredentialState,
   describeAutomated,
@@ -821,6 +823,37 @@ describe("an address filed under someone is the user's only once they say who", 
     expect(held[0]!.identifier.normalizedValue).toBe("c@example.com");
     expect(held[0]!.owner.displayName).toBe("C");
     expect(held[0]!.keptApart).toBe(false);
+  });
+
+  it("parses who sent mail from the Sent folder under an address not yet the user's", () => {
+    const asked = SentFolderPerson.array().parse(read(contractFixture("sent_folder_people.json")));
+    // Written from a Gmail export where the user replied from a work address.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.address).toBe("c@work.example");
+    expect(asked[0]!.sent).toBe(2);
+    expect(asked[0]!.owner.displayName).toBe("C at work");
+    expect(describeSentFolder(asked[0]!)).toEqual({
+      line: "Both messages I have from C at work (c@work.example) were in your Sent folder. If that's you, I'm counting what you wrote as someone else's.",
+      why: "Both messages I have from C at work (c@work.example) were in your Sent folder. Mail there is usually yours, so C at work may be you writing from another address — unless someone else sends for you, you passed their mail on, or other people send from that address too.",
+    });
+    const person = (sent: number, messages: number, displayName = "Pat") => ({
+      ...asked[0]!,
+      address: "pat@example.com",
+      sent,
+      owner: { ...asked[0]!.owner, displayName, messages },
+    });
+    // How much of their mail was there is always said, so one message sent
+    // for someone who writes to you often doesn't read like a match.
+    expect(describeSentFolder(person(1, 300)).line).toMatch(
+      /^1 of the 300 messages I have from Pat \(pat@example\.com\) was in your Sent folder\./,
+    );
+    expect(describeSentFolder(person(3, 8)).line).toMatch(/^3 of the 8 messages .* were in/);
+    expect(describeSentFolder(person(1, 1)).line).toMatch(/^The one message I have from Pat/);
+    expect(describeSentFolder(person(12, 12)).line).toMatch(/^All 12 messages I have from Pat/);
+    // A person known only by the address isn't named twice.
+    expect(describeSentFolder(person(1, 1, "pat@example.com")).line).toMatch(
+      /^The one message I have from pat@example\.com was in/,
+    );
   });
 
   const owner = (over: Partial<AddressOwner> = {}): AddressOwner => ({

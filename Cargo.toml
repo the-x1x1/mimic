@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/mimic-core", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.10.0-alpha.11"
+version = "0.10.0-alpha.12"
 edition = "2021"
 # 1.89: std::fs::File::try_lock, for the one-Mimic-at-a-time lock (instance.rs).
 rust-version = "1.89"

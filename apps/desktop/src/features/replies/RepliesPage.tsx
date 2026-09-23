@@ -26,6 +26,7 @@ import { formatRelative } from "@/lib/format";
 import { toast } from "@/state/toast";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
+import { SentFolderNotice } from "@/features/identity/AddAddressForm";
 
 /**
  * The one screen: who is waiting, what they said, and what Mimic would say
@@ -67,6 +68,9 @@ export function RepliesPage() {
           </p>
         ) : null}
         <LeftOutLine data={data} showing={showLeftOut} onToggle={() => setShowLeftOut((v) => !v)} />
+        {/* What the user sent from an address I wasn't given reads as someone
+            waiting on them, so it is asked about here, where that shows. */}
+        <SentFolderNotice />
       </div>
 
       {data.messages === 0 ? <NothingYet data={data} /> : null}

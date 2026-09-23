@@ -15,7 +15,7 @@ One coherent slice per version: code + tests + docs + CHANGELOG entry + PROJECT_
 3. Docs swept for anything the release made untrue (README status table, PROJECT_STATUS, ROADMAP, MIGRATION_AUDIT, this file).
 4. Commit authored `the-x1x1 <connersalt123@outlook.com>`, no attribution trailers.
 5. Push branch, PR to `main`, rebase-merge, tag from `main`.
-6. The `Release` workflow builds the Windows installer, signs the updater artifact, generates `latest.json` and checksums, and creates a **draft** GitHub Release with all assets; its last job verifies every asset is attached.
+6. The `Release` workflow builds the Windows installer, signs the updater artifact, generates `latest.json` and checksums, and creates a **draft** GitHub Release with all assets; its last job verifies every asset is attached. Runs for one tag don't overlap (`concurrency`), and a run that finds a release for its tag already there stops rather than make a second: a draft doesn't reserve its tag, and two runs for the one push of 0.10.0-alpha.9 left two. A broken draft from a failed run has to be deleted before running again.
 7. `gh release edit vX.Y.Z --draft=false --latest` publishes it.
 8. `.\scripts\verify-release.ps1 -Tag vX.Y.Z` downloads `latest.json`, checks the signature field and asset reachability.
 

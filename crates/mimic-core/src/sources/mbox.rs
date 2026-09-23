@@ -40,6 +40,15 @@ pub(crate) struct Mail {
     /// Why the headers say a machine sent it, if they do. Decided here because
     /// the headers are not kept after parsing.
     pub(crate) automated: Option<super::automated::Automated>,
+    /// It was in the user's own Sent folder: read from it over IMAP, or
+    /// labelled "Sent" in a Gmail export. What is there is usually what the
+    /// user sent, so whoever it is filed under is often the user under an
+    /// address Mimic doesn't know yet — and is asked about, never assumed.
+    pub(crate) sent: bool,
+    /// The headers say it was passed on (`Resent-From`, `Resent-Sender`): the
+    /// `From` is whoever wrote it first, so its being in the Sent folder says
+    /// nothing about who that is.
+    pub(crate) resent: bool,
 }
 
 impl CommunicationSource for MboxSource {
@@ -198,7 +207,15 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         date: get("date").and_then(|d| parse_date(&d)),
         body,
         automated,
+        sent: get("x-gmail-labels").is_some_and(|labels| in_sent(&super::mime::decode_header(&labels))),
+        resent: get("resent-from").is_some() || get("resent-sender").is_some(),
     })
+}
+
+/// Gmail's labels for a message in an export: comma-separated, "Sent" among
+/// them for what the user sent.
+fn in_sent(labels: &str) -> bool {
+    labels.split(',').any(|l| l.trim().eq_ignore_ascii_case("sent"))
 }
 
 /// `Ada Lovelace <ada@example.com>` or a bare address.
@@ -242,7 +259,18 @@ fn normalized_subject(subject: &str) -> String {
 
 /// Group mails into conversations: by reference chain first, then by
 /// (normalized subject + a shared participant).
-pub(crate) fn thread(mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
+pub(crate) fn thread(mut mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
+    // Two copies of one message — the user's post to a list, read back from
+    // the inbox with the list as its sender — are one message sent when the
+    // Sent copy says, whatever the other copy's date reads (or fails to), so
+    // the Sent copy sorts first below and is the one the importer keeps.
+    let sent_dates: HashMap<String, Option<String>> =
+        mails.iter().filter(|m| m.sent).map(|m| (m.message_id.clone(), m.date.clone())).collect();
+    for m in mails.iter_mut().filter(|m| !m.sent) {
+        if let Some(date) = sent_dates.get(&m.message_id) {
+            m.date = date.clone();
+        }
+    }
     // Union-find over message ids.
     let mut parent: HashMap<String, String> = HashMap::new();
     fn find(parent: &mut HashMap<String, String>, x: &str) -> String {
@@ -304,7 +332,10 @@ pub(crate) fn thread(mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
     let mut out: Vec<DiscoveredConversation> = grouped
         .into_iter()
         .map(|(root, mut group)| {
-            group.sort_by(|a, b| a.date.cmp(&b.date).then(a.message_id.cmp(&b.message_id)));
+            // Of two copies of one message, the one from the Sent folder
+            // comes first, which is the one the importer keeps: it carries
+            // the user's own address, and only it was in the folder.
+            group.sort_by(|a, b| a.date.cmp(&b.date).then(a.message_id.cmp(&b.message_id)).then(b.sent.cmp(&a.sent)));
             let subject = group.iter().find_map(|m| m.subject.clone());
             let messages = group
                 .into_iter()
@@ -321,6 +352,11 @@ pub(crate) fn thread(mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
                         let mut meta = serde_json::Map::new();
                         if let Some(s) = &m.subject {
                             meta.insert("subject".into(), json!(s));
+                        }
+                        // Read by `Db::sent_folder_people` to ask whether
+                        // whoever this is filed under is the user.
+                        if m.sent && !m.resent {
+                            meta.insert("sentFolder".into(), json!(true));
                         }
                         if !refs.is_empty() {
                             meta.insert("refs".into(), json!(refs));
@@ -597,5 +633,65 @@ mod tests {
         let person = all.iter().find(|m| m.external_id == "p1@example.com").unwrap();
         assert_eq!(news.metadata["automated"], serde_json::json!("newsletter"));
         assert!(person.metadata.get("automated").is_none(), "a person's mail carries no marker at all");
+    }
+
+    #[test]
+    fn mail_gmail_labelled_sent_is_marked_as_from_the_sent_folder() {
+        let mbox = concat!(
+            "From 1824354102836451234@xxx Mon Feb 02 09:00:00 +0000 2026\n",
+            "X-Gmail-Labels: Important,Opened,Sent\n",
+            "From: C at work <c@work.example>\n",
+            "Subject: numbers\n",
+            "Date: Mon, 2 Feb 2026 09:00:00 +0000\n",
+            "Message-ID: <s1@work.example>\n",
+            "\n",
+            "sending them over now\n",
+            "\n",
+            "From 1824354102836455678@xxx Mon Feb 02 10:00:00 +0000 2026\n",
+            "X-Gmail-Labels: Inbox,Category Sent Items\n",
+            "From: Ada <ada@example.com>\n",
+            "Subject: lunch\n",
+            "Date: Mon, 2 Feb 2026 10:00:00 +0000\n",
+            "Message-ID: <i1@example.com>\n",
+            "\n",
+            "lunch on thursday?\n",
+        );
+        let (_dir, path) = write(mbox);
+        let convos = import(&path);
+        let all: Vec<_> = convos.iter().flat_map(|c| &c.messages).collect();
+        let sent = all.iter().find(|m| m.external_id == "s1@work.example").unwrap();
+        let inbox = all.iter().find(|m| m.external_id == "i1@example.com").unwrap();
+        assert_eq!(sent.metadata["sentFolder"], serde_json::json!(true));
+        assert!(inbox.metadata.get("sentFolder").is_none(), "a label that only contains the word is not Sent");
+        assert!(in_sent(" sent "));
+        assert!(!in_sent("Unsent"));
+
+        // The user's post to a list, read back from the inbox with the list as
+        // its sender, and from the Sent folder.
+        // The list's copy has no date it can be read by, so a date alone would put it first.
+        let list_copy = parse_raw(
+            b"From: 'C' via Team <team@lists.example>\nSubject: hi\nDate: sometime\nMessage-ID: <d1@x>\n\nhello\n",
+        )
+        .unwrap();
+        let mut own = parse_raw(
+            b"From: C at work <c@work.example>\nSubject: hi\nDate: Mon, 2 Feb 2026 11:00:00 +0000\nMessage-ID: <d1@x>\n\nhello\n",
+        )
+        .unwrap();
+        own.sent = true;
+        let convos = thread(vec![list_copy, own]);
+        let copies: Vec<_> = convos.iter().flat_map(|c| &c.messages).collect();
+        assert_eq!(copies.len(), 2);
+        assert_eq!(copies[0].author.identifiers[0].value, "c@work.example", "the copy that was sent is the one kept");
+        assert_eq!(copies[0].metadata["sentFolder"], serde_json::json!(true));
+        assert!(copies[1].metadata.get("sentFolder").is_none(), "the list's copy was never in the Sent folder");
+
+        // Passed on by the user, with its first writer's From: not a sign of anything.
+        let mut redirected = parse_raw(
+            b"Resent-From: c@example.com\nFrom: Ada <ada@example.com>\nSubject: fyi\nMessage-ID: <r1@x>\n\nthe numbers\n",
+        )
+        .unwrap();
+        redirected.sent = true;
+        let convos = thread(vec![redirected]);
+        assert!(convos[0].messages[0].metadata.get("sentFolder").is_none());
     }
 }
