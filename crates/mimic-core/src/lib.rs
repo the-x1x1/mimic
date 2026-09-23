@@ -26,6 +26,7 @@ pub mod engine;
 pub mod generation;
 pub mod ids;
 pub mod import;
+pub mod instance;
 pub mod jobs;
 pub mod learning;
 pub mod localmodel;

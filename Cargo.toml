@@ -3,9 +3,10 @@ resolver = "2"
 members = ["crates/mimic-core", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.10.0-alpha.8"
+version = "0.10.0-alpha.9"
 edition = "2021"
-rust-version = "1.85"
+# 1.89: std::fs::File::try_lock, for the one-Mimic-at-a-time lock (instance.rs).
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/the-x1x1/mimic"
 authors = ["the-x1x1 <connersalt123@outlook.com>"]

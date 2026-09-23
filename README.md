@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.10.0-alpha.8`
+## Current status — `0.10.0-alpha.9`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -24,6 +24,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | People leaves out senders of nothing but automated mail, and says how many                                               | Implemented and tested; the same header reading                                                                                       |
 | Sending a reply                                                                                                          | Deliberately not built                                                                                                                |
 | SQLite schema v10, migrations, backup before upgrade, resumable jobs                                                     | Implemented and tested                                                                                                                |
+| One Mimic at a time: a second launch brings the open one to the front, and the data folder is locked while Mimic runs    | Implemented and tested; the hand-over itself is a Tauri plugin, not exercised by a test                                               |
 | Source connectors: standard `.mbox` (now decoding MIME), Mimic's own JSON format, and IMAP                               | Implemented and tested; IMAP only against a scripted server — no real provider exercised yet                                          |
 | Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume                                | Implemented and tested                                                                                                                |
 | An address you add later counts for mail already read, once you've said whose it was filed under                         | Implemented and tested; removing an address changes only mail read afterwards                                                         |

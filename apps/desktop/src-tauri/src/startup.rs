@@ -1,6 +1,7 @@
-//! Boot sequence: paths → logs → database (migrate) → secrets → providers →
-//! engine → jobs. The window opens even if the engine fails to start; its
-//! status is shown in the UI rather than blocking launch.
+//! Boot sequence: paths → logs → the data folder's lock (one Mimic at a
+//! time) → database (migrate) → secrets → providers → engine → jobs. The
+//! window opens even if the engine fails to start; its status is shown in the
+//! UI rather than blocking launch.
 
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -31,6 +32,9 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         std::mem::forget(g);
     }
     tracing::info!(target: "app", version = mimic_core::APP_VERSION, root = %paths.root.display(), "starting Mimic");
+    // Before anything reads or writes the data: another Mimic on this folder
+    // means this one goes, having touched nothing.
+    let instance = take_instance_lock(&paths)?;
 
     let (db, schema_report) = Db::open(&paths.database_file(), &paths.backups_dir())?;
     if !schema_report.applied.is_empty() {
@@ -132,7 +136,32 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         demo_mode: std::sync::atomic::AtomicBool::new(false),
         schema_report,
         log_dir,
+        instance,
     })
+}
+
+/// How long a starting Mimic waits for one that is closing to let go. A
+/// launch made while Mimic was closing is started by the closing one on its
+/// way out (`lib.rs`), so it arrives while the old process is still exiting.
+const TAKE_OVER_WITHIN: Duration = Duration::from_secs(10);
+
+/// This process's hold on the data folder. When another Mimic already has it,
+/// the error is `instance::AlreadyRunning`, which the shell tells apart from a
+/// start-up that failed (`anyhow::Error::is`).
+pub fn take_instance_lock(paths: &AppPaths) -> anyhow::Result<mimic_core::instance::InstanceLock> {
+    take_instance_lock_within(paths, TAKE_OVER_WITHIN)
+}
+
+fn take_instance_lock_within(paths: &AppPaths, wait: Duration) -> anyhow::Result<mimic_core::instance::InstanceLock> {
+    use mimic_core::instance::{InstanceLock, LockError};
+    match InstanceLock::acquire_within(&paths.instance_lock_file(), wait) {
+        Ok(lock) => Ok(lock),
+        Err(LockError::AlreadyRunning(held)) => {
+            tracing::warn!(target: "app", lock = %held.0.display(), "another Mimic is using this data folder; leaving it alone");
+            Err(held.into())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// What opening the credential store did, as counts and reasons: never a
@@ -299,5 +328,28 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mimic_core::instance::AlreadyRunning;
+
+    #[test]
+    fn a_second_mimic_on_the_same_data_is_told_apart_from_a_failed_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = AppPaths::new(dir.path());
+        paths.ensure().unwrap();
+        let wait = Duration::from_millis(200);
+        let first = take_instance_lock_within(&paths, wait).unwrap();
+        let second = take_instance_lock_within(&paths, wait).unwrap_err();
+        assert!(second.is::<AlreadyRunning>(), "{second}");
+        drop(first);
+        take_instance_lock(&paths).expect("the data is free once the first has gone");
+
+        // A folder that cannot be locked is a failure, not "already running".
+        let missing = AppPaths::new(dir.path().join("never-made"));
+        assert!(!take_instance_lock_within(&missing, wait).unwrap_err().is::<AlreadyRunning>());
     }
 }
