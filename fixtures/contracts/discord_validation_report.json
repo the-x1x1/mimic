@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "blockers": [],
+  "warnings": [
+    "Only 5 messages. That is enough to import, but a voice profile needs a few hundred of your own messages to say anything useful.",
+    "A Discord package holds only what you wrote — nothing anyone else said — so it teaches me how you write, not how you reply to anyone.",
+    "1 message was only a file or a picture, with no words, so it's left out."
+  ],
+  "conversations": 2,
+  "messages": 5,
+  "frequentIdentifiers": [
+    ["c@example.com", 5],
+    ["discord:90001", 5]
+  ],
+  "earliest": "2025-11-02T20:00:00Z",
+  "latest": "2026-01-12T09:15:00Z",
+  "sentFolder": 0,
+  "names": [
+    {
+      "name": "C",
+      "kind": "account_id",
+      "value": "discord:90001",
+      "normalized": "discord:90001",
+      "messages": 5,
+      "chatNamedAfter": false,
+      "also": [
+        {
+          "kind": "email",
+          "value": "c@example.com",
+          "normalized": "c@example.com"
+        }
+      ]
+    }
+  ],
+  "oneWriter": true
+}

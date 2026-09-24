@@ -1,6 +1,6 @@
 {
   "name": "@mimic/test-fixtures",
-  "version": "0.10.0-alpha.19",
+  "version": "0.10.0-alpha.20",
   "private": true,
   "type": "module",
   "description": "Paths to the repository's golden fixtures for JS tests.",

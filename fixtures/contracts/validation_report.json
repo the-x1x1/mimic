@@ -21,7 +21,8 @@
       "value": "whatsapp:Ada",
       "normalized": "whatsapp:ada",
       "messages": 6,
-      "chatNamedAfter": true
+      "chatNamedAfter": true,
+      "also": []
     },
     {
       "name": "C",
@@ -29,7 +30,9 @@
       "value": "whatsapp:C",
       "normalized": "whatsapp:c",
       "messages": 6,
-      "chatNamedAfter": false
+      "chatNamedAfter": false,
+      "also": []
     }
-  ]
+  ],
+  "oneWriter": false
 }

@@ -20,6 +20,7 @@ const writer = (name: string, messages: number, over: Partial<WriterName> = {}):
   normalized: `whatsapp:${name.toLowerCase()}`,
   messages,
   chatNamedAfter: false,
+  also: [],
   ...over,
 });
 
@@ -55,11 +56,11 @@ const owner: AddressOwner = {
   preferences: 0,
 };
 
-function renderIt(names: WriterName[] = [ada, c, unsaved]) {
+function renderIt(names: WriterName[] = [ada, c, unsaved], connector = "whatsapp") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <WhoIsYou names={names} />
+      <WhoIsYou names={names} connector={connector} />
     </QueryClientProvider>,
   );
 }
@@ -175,5 +176,41 @@ describe("which name in a chat is the user's", () => {
     expect(screen.queryByRole("button", { name: "That’s me: W9" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show all 10 names" }));
     expect(screen.getByRole("button", { name: "That’s me: W9" })).toBeInTheDocument();
+  });
+
+  it("asks about a Discord package's one account as the package it is", async () => {
+    native.userIdentity.mockResolvedValue(identity());
+    native.previewUserAddress.mockResolvedValue({ alreadyYours: false, owner: null });
+    const account = writer("C", 5, {
+      kind: "account_id",
+      value: "discord:90001",
+      normalized: "discord:90001",
+    });
+    renderIt([account], "discord");
+    const group = screen.getByRole("group", { name: /Is this you\?/ });
+    expect(group).toHaveTextContent("everything one account wrote");
+    expect(group).toHaveTextContent("I’ll import it once you say it’s yours");
+    expect(group).not.toHaveTextContent("saved on your phone");
+    fireEvent.click(await button("That’s me: C"));
+    await waitFor(() =>
+      expect(native.addUserIdentifier).toHaveBeenCalledWith("account_id", "discord:90001", null),
+    );
+  });
+
+  it("says a Discord account is the user's already when its email is theirs", async () => {
+    native.userIdentity.mockResolvedValue(identity());
+    const account = writer("C", 5, {
+      kind: "account_id",
+      value: "discord:90001",
+      normalized: "discord:90001",
+      also: [{ kind: "email", value: "C@example.com", normalized: "c@example.com" }],
+    });
+    renderIt([account], "discord");
+    expect(await screen.findByRole("group", { name: /This is you\./ })).toHaveTextContent(
+      "this account is one of yours",
+    );
+    expect(screen.getByText("You — already one of your addresses")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "That’s me: C" })).toBeNull();
+    expect(native.addUserIdentifier).not.toHaveBeenCalled();
   });
 });

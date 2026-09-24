@@ -1,40 +1,53 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button, Field, InlineError } from "@mimic/ui";
-import { CHANNEL_LABELS, Channel, type ValidationReport } from "@mimic/contracts";
+import { CHANNEL_LABELS, Channel, yoursAs, type ValidationReport } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
+import { useIdentity } from "@/hooks/usePeople";
 import { useConnectors, useCreateSource, useStartImport } from "@/hooks/useSources";
 import { WhoIsYou } from "./WhoIsYou";
 
 /**
  * Adding a source is: pick a format, pick a file, see what Mimic found in it,
  * then decide. The validation step exists so nobody imports twelve years of
- * mail before discovering the export has no timestamps.
+ * mail before discovering the export has no timestamps. A source that is one
+ * writer's (a Discord package) waits until that writer is the user, since
+ * read as someone else's, all of it would wait for a reply.
  */
 export function AddSourceDialog({ onClose }: { onClose: () => void }) {
   const connectors = useConnectors();
   const create = useCreateSource();
   const startImport = useStartImport();
+  const identity = useIdentity();
+  const whyNot = useId();
 
   const [connector, setConnector] = useState("");
   const [name, setName] = useState("");
   const [channel, setChannel] = useState<Channel>("email");
-  const [location, setLocation] = useState<string | null>(null);
+  const [location, setLocation] = useState<{ path: string; kind: "file" | "folder" } | null>(null);
   const [report, setReport] = useState<ValidationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
 
   const chosen = connectors.data?.find((c) => c.connector === connector);
+  const kinds: ("file" | "folder")[] = !chosen
+    ? []
+    : chosen.locationKind === "fileOrFolder"
+      ? ["file", "folder"]
+      : [chosen.locationKind];
+  const identifiers = identity.data?.identifiers ?? [];
+  const notYetYours =
+    report?.oneWriter === true && !report.names.some((w) => yoursAs(w, identifiers) !== null);
 
-  async function pick() {
+  async function pick(kind: "file" | "folder") {
     if (!chosen) return;
     setError(null);
-    const picked = await ipc.pickSourceFile(
-      `Choose a ${chosen.displayName} file`,
-      chosen.extensions,
-    );
+    const picked =
+      kind === "folder"
+        ? await ipc.pickSourceFolder(`Choose the unzipped ${chosen.displayName} folder`)
+        : await ipc.pickSourceFile(`Choose a ${chosen.displayName} file`, chosen.extensions);
     if (!picked) return;
-    setLocation(picked);
+    setLocation({ path: picked, kind });
     if (!name) setName(picked.split(/[\\/]/).pop() ?? chosen.displayName);
     setChecking(true);
     try {
@@ -48,7 +61,12 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
   }
 
   async function confirm() {
-    const source = await create.mutateAsync({ connector, name, channel, location });
+    const source = await create.mutateAsync({
+      connector,
+      name,
+      channel,
+      location: location?.path ?? null,
+    });
     await startImport.mutateAsync(source.id);
     onClose();
   }
@@ -85,13 +103,21 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
           {chosen ? (
             <>
               <div className="row gap-2">
-                <Button onClick={pick}>
-                  {location ? "Choose a different file" : "Choose a file"}
-                </Button>
-                {location ? <span className="mono small">{location}</span> : null}
+                {kinds.map((kind) => (
+                  <Button key={kind} onClick={() => void pick(kind)}>
+                    {location?.kind === kind
+                      ? `Choose a different ${kind}`
+                      : kind === "folder"
+                        ? kinds.length > 1
+                          ? "Choose the unzipped folder"
+                          : "Choose a folder"
+                        : "Choose a file"}
+                  </Button>
+                ))}
+                {location ? <span className="mono small">{location.path}</span> : null}
               </div>
 
-              {checking ? <p className="neutral">Reading the file…</p> : null}
+              {checking ? <p className="neutral">Reading it…</p> : null}
               {error ? <InlineError>{error}</InlineError> : null}
 
               {report ? (
@@ -123,7 +149,9 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
                       {w}
                     </p>
                   ))}
-                  {report.names.length > 0 ? <WhoIsYou names={report.names} /> : null}
+                  {report.names.length > 0 ? (
+                    <WhoIsYou names={report.names} connector={connector} />
+                  ) : null}
                   {report.names.length === 0 && report.frequentIdentifiers.length > 0 ? (
                     <p className="muted small">
                       Most frequent addresses:{" "}
@@ -159,10 +187,16 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
             </>
           ) : null}
 
+          {report?.ok && notYetYours ? (
+            <p id={whyNot} className="muted small">
+              Say the account is yours before importing it.
+            </p>
+          ) : null}
           <div className="row gap-2 dialog__actions">
             <Button
               variant="primary"
-              disabled={!report?.ok || !name.trim() || create.isPending}
+              disabled={!report?.ok || notYetYours || !name.trim() || create.isPending}
+              aria-describedby={report?.ok && notYetYours ? whyNot : undefined}
               onClick={confirm}
             >
               Import

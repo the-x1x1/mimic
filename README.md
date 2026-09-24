@@ -10,7 +10,7 @@ The distinction that matters: this is not style imitation. The question it answe
 
 Everything stays on your computer. The only thing that leaves is what you send to a model provider you chose and can see named in the top bar.
 
-## Current status — `0.10.0-alpha.19`
+## Current status — `0.10.0-alpha.20`
 
 0.6.0 was the migration from what Mimic used to be (a Lightroom Classic editing assistant, versions 0.1.0 through 0.5.0) plus a working vertical slice of the new product; see [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md) for what was kept, refactored, archived and deleted. 0.7.0 is about the first run: onboarding that cannot strand you, and a model badge that tells the truth about whether anything is listening.
 
@@ -30,6 +30,7 @@ Everything stays on your computer. The only thing that leaves is what you send t
 | One Mimic at a time: a second launch brings the open one to the front, and the data folder is locked while Mimic runs                              | Implemented and tested; the hand-over itself is a Tauri plugin, not exercised by a test                                                                                   |
 | Source connectors: standard `.mbox` (now decoding MIME), Mimic's own JSON format, and IMAP                                                         | Implemented and tested; IMAP only against a scripted server — no real provider exercised yet                                                                              |
 | WhatsApp chats, from Export chat (a .txt, or the .zip from an iPhone or with media), with you saying which name in the chat is yours               | Implemented and tested on exports written to WhatsApp's forms; no real export from a phone has been read yet                                                              |
+| Your own messages from a Discord data package (only what you wrote: it teaches how you write, not how you reply)                                   | Implemented and tested on packages written to Discord's forms; no real package has been read yet                                                                          |
 | Outlook.com, Hotmail and Microsoft 365 mailboxes, signed in with Microsoft in your browser                                                         | Implemented and tested against stand-ins on this computer; needs Mimic's registration with Microsoft in the build, and a build without it says so                         |
 | Import: identity resolution, direction, dedupe, quoted-reply stripping, cancel and resume                                                          | Implemented and tested                                                                                                                                                    |
 | An address you add later counts for mail already read, once you've said whose it was filed under                                                   | Implemented and tested; removing an address changes only mail read afterwards                                                                                             |

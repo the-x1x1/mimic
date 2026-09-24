@@ -36,6 +36,7 @@ pub async fn list_connectors() -> CommandResult<Vec<ConnectorInfo>> {
                 location_kind: match m.location_kind {
                     mimic_core::sources::LocationKind::File => "file".into(),
                     mimic_core::sources::LocationKind::Folder => "folder".into(),
+                    mimic_core::sources::LocationKind::FileOrFolder => "fileOrFolder".into(),
                 },
                 extensions: m.extensions.iter().map(|e| e.to_string()).collect(),
             }
@@ -506,5 +507,17 @@ pub async fn pick_source_file(
         .pick_file(move |p| {
             let _ = tx.send(p.map(|f| f.to_string()));
         });
+    Ok(rx.await.unwrap_or(None))
+}
+
+/// A folder to read from: an export unzipped where the connector reads the
+/// folder too (a Discord package).
+#[tauri::command]
+pub async fn pick_source_folder(app: tauri::AppHandle, title: Option<String>) -> CommandResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().set_title(title.unwrap_or_else(|| "Choose a folder".into())).pick_folder(move |p| {
+        let _ = tx.send(p.map(|f| f.to_string()));
+    });
     Ok(rx.await.unwrap_or(None))
 }

@@ -16,6 +16,7 @@ use serde_json::Value;
 use crate::db::repo_people::IdentifierInput;
 
 pub mod automated;
+pub mod discord;
 pub mod imap;
 pub mod mbox;
 pub mod mime;
@@ -44,6 +45,8 @@ pub type SourceResult<T> = Result<T, SourceError>;
 pub enum LocationKind {
     File,
     Folder,
+    /// A file, or the folder it unzips to: a Discord package.
+    FileOrFolder,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,9 +115,15 @@ pub struct ValidationReport {
     pub sent_folder: usize,
     /// For a source that knows people only by the names a phone saved them
     /// under (WhatsApp), everyone who wrote, most messages first, so the user
-    /// can say which is theirs. Empty for any other source.
+    /// can say which is theirs; for a Discord package, its account. Empty for
+    /// any other source.
     #[serde(default)]
     pub names: Vec<WriterName>,
+    /// Everything here was written by the one writer in `names` — a Discord
+    /// package is one account's messages — so it is imported only once that
+    /// writer is the user: read as someone else's, all of it would wait.
+    #[serde(default)]
+    pub one_writer: bool,
 }
 
 /// Someone who wrote in a chat that knows people only by name, as the import
@@ -124,7 +133,8 @@ pub struct ValidationReport {
 #[serde(rename_all = "camelCase")]
 pub struct WriterName {
     pub name: String,
-    /// The kind of address the import gives them: `handle` or `phone`.
+    /// The kind of address the import gives them: `handle` or `phone`, or a
+    /// Discord package's `account_id`.
     pub kind: String,
     pub value: String,
     /// What matching compares, as the user's own addresses store it.
@@ -133,6 +143,29 @@ pub struct WriterName {
     /// A chat here is named after them: in one between two people, the one
     /// it is with, which is seldom the user.
     pub chat_named_after: bool,
+    /// Other addresses the import gives the same writer — a Discord
+    /// account's email — any of which being the user's makes them the user.
+    #[serde(default)]
+    pub also: Vec<WriterAddress>,
+}
+
+/// An address, as the import gives it and as the user's own are matched.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterAddress {
+    pub kind: String,
+    pub value: String,
+    pub normalized: String,
+}
+
+impl WriterAddress {
+    pub fn of(identifier: &IdentifierInput) -> Self {
+        Self {
+            kind: identifier.kind.as_str().to_string(),
+            value: identifier.value.clone(),
+            normalized: identifier.normalized(),
+        }
+    }
 }
 
 /// What mail programs call the folder of what the user sent, lower-cased:
@@ -205,11 +238,24 @@ pub trait CommunicationSource: Send + Sync {
         location: &Path,
         sink: &mut dyn FnMut(DiscoveredConversation) -> SourceResult<()>,
     ) -> SourceResult<()>;
+
+    /// For a source whose every message one writer wrote — a Discord package
+    /// — that writer. The import refuses until one of their addresses is the
+    /// user's, since read as someone else's the whole source would wait on
+    /// the home screen, and nothing in it could say otherwise.
+    fn sole_author(&self, _location: &Path) -> SourceResult<Option<AuthorRef>> {
+        Ok(None)
+    }
 }
 
 /// Every connector this build ships.
 pub fn all() -> Vec<Box<dyn CommunicationSource>> {
-    vec![Box::new(mimic_json::MimicJsonSource), Box::new(mbox::MboxSource), Box::new(whatsapp::WhatsAppSource)]
+    vec![
+        Box::new(mimic_json::MimicJsonSource),
+        Box::new(mbox::MboxSource),
+        Box::new(whatsapp::WhatsAppSource),
+        Box::new(discord::DiscordSource),
+    ]
 }
 
 pub fn by_connector(connector: &str) -> SourceResult<Box<dyn CommunicationSource>> {
@@ -256,7 +302,8 @@ pub fn validate_by_dry_run(source: &dyn CommunicationSource, location: &Path) ->
     if report.messages == 0 {
         report.blockers.push("No messages could be read from this file.".into());
     }
-    if report.earliest.is_none() {
+    // Only about messages there are: with none, the blocker says it all.
+    if report.messages > 0 && report.earliest.is_none() {
         report.warnings.push(
             "No timestamps were found. Messages will import, but response timing cannot be learned from them.".into(),
         );

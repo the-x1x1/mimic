@@ -1,10 +1,10 @@
 {
-  "id": "8f8d7276-bbee-47ae-a74f-93fb8409b4cc",
-  "createdAt": "2026-09-23T23:48:36.137Z",
+  "id": "e02783a9-897e-4fd1-af01-c55a9d86de2d",
+  "createdAt": "2026-09-24T00:28:55.732Z",
   "provider": "mock",
   "model": "mock-1",
-  "measured": 12,
-  "remaining": 12,
+  "measured": 2,
+  "remaining": 2,
   "strategy": "conversation_grouped",
   "conversations": 2,
   "heldOutConversations": 1,
@@ -12,19 +12,19 @@
   "warnings": [],
   "embeddingProvider": null,
   "commonReply": {
-    "text": "works",
+    "text": "any time, let me know what's next",
     "times": 1
   },
   "systems": [
     {
       "system": "mimic",
-      "cases": 12,
+      "cases": 2,
       "length": {
-        "mean": 0.5905,
-        "p10": 0.4017
+        "mean": 0.4,
+        "p10": 0.24
       },
       "vocabulary": {
-        "mean": 0.0153,
+        "mean": 0.0,
         "p10": 0.0
       },
       "punctuation": {
@@ -35,13 +35,13 @@
     },
     {
       "system": "generic",
-      "cases": 12,
+      "cases": 2,
       "length": {
-        "mean": 0.5905,
-        "p10": 0.4017
+        "mean": 0.4,
+        "p10": 0.24
       },
       "vocabulary": {
-        "mean": 0.0153,
+        "mean": 0.0,
         "p10": 0.0
       },
       "punctuation": {
@@ -52,13 +52,13 @@
     },
     {
       "system": "common_reply",
-      "cases": 12,
+      "cases": 2,
       "length": {
-        "mean": 0.2214,
-        "p10": 0.085
+        "mean": 0.2858,
+        "p10": 0.1715
       },
       "vocabulary": {
-        "mean": 0.0278,
+        "mean": 0.0,
         "p10": 0.0
       },
       "punctuation": {
@@ -70,9 +70,9 @@
   ],
   "cases": [
     {
-      "incoming": "thanks for all the help this month",
-      "from": "Ada Lovelace",
-      "reply": "any time, let me know what's next",
+      "incoming": "7?",
+      "from": "Bob",
+      "reply": "works",
       "answers": [
         {
           "system": "mimic",
@@ -84,14 +84,14 @@
         },
         {
           "system": "common_reply",
-          "text": "works"
+          "text": "any time, let me know what's next"
         }
       ]
     },
     {
-      "incoming": "they might",
-      "from": "Ada Lovelace",
-      "reply": "fine by me",
+      "incoming": "pub friday?",
+      "from": "Bob",
+      "reply": "yeah im in",
       "answers": [
         {
           "system": "mimic",
@@ -103,197 +103,7 @@
         },
         {
           "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "board liked it",
-      "from": "Ada Lovelace",
-      "reply": "glad to hear it, let me know if they want a follow up",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "sent",
-      "from": "Ada Lovelace",
-      "reply": "nice one",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "here's the final version",
-      "from": "Ada Lovelace",
-      "reply": "looks great, let me know when it goes out",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "no need",
-      "from": "Ada Lovelace",
-      "reply": "sounds good to me",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "who else is joining",
-      "from": "Ada Lovelace",
-      "reply": "just us i think, let me know if you want bob there",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "are we still on for wednesday",
-      "from": "Ada Lovelace",
-      "reply": "yep still on",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "much better, thanks",
-      "from": "Ada Lovelace",
-      "reply": "no problem, let me know if anything else comes up",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "the growth line looks optimistic",
-      "from": "Ada Lovelace",
-      "reply": "agreed, i'll pull it back a bit",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "one more thing on the forecast",
-      "from": "Ada Lovelace",
-      "reply": "go on, i'm listening",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
-        }
-      ]
-    },
-    {
-      "incoming": "moving the call to wednesday, ok?",
-      "from": "Ada Lovelace",
-      "reply": "wednesday works fine",
-      "answers": [
-        {
-          "system": "mimic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "generic",
-          "text": "echo: Reply to this message:"
-        },
-        {
-          "system": "common_reply",
-          "text": "works"
+          "text": "any time, let me know what's next"
         }
       ]
     }

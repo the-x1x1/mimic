@@ -1,0 +1,26 @@
+[
+  {
+    "ID": 1101,
+    "Timestamp": "2026-01-10 18:00:00",
+    "Contents": "drinks friday? <@90002>",
+    "Attachments": ""
+  },
+  {
+    "ID": 1102,
+    "Timestamp": "2026-01-10 18:02:00",
+    "Contents": "the usual place, 6ish",
+    "Attachments": ""
+  },
+  {
+    "ID": 1103,
+    "Timestamp": "2026-01-10 18:03:00",
+    "Contents": "",
+    "Attachments": "https://cdn.discordapp.com/attachments/1/2/menu.png"
+  },
+  {
+    "ID": 1104,
+    "Timestamp": "2026-01-12 09:15:00",
+    "Contents": "running 10 min late sorry <:sweat:4242>",
+    "Attachments": ""
+  }
+]

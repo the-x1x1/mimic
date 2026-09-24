@@ -77,6 +77,21 @@ pub fn import_source(
     if user_ids.is_empty() {
         return Err(ImportError::NoIdentity);
     }
+    // A source one writer wrote is imported only once that writer is the
+    // user: read as someone else's, every conversation in it would wait for
+    // a reply that is already the user's.
+    let refused = match connector.sole_author(path) {
+        Ok(Some(author)) if !author.identifiers.iter().any(|i| user_ids.contains(&i.key())) => {
+            let address = author.identifiers.first().map(|i| i.value.clone()).unwrap_or_default();
+            Some(ImportError::NotYours { name: author.display_name, address })
+        }
+        Ok(_) => None,
+        Err(e) => Some(e.into()),
+    };
+    if let Some(e) = refused {
+        db.set_source_status(source_id, "failed", Some(&json!({"message": e.to_string()})))?;
+        return Err(e);
+    }
 
     db.set_source_status(source_id, "importing", None)?;
     let mut state = ImportState {
@@ -434,6 +449,9 @@ pub enum ImportError {
     NoLocation,
     #[error("tell Mimic which addresses are yours before importing, or every message will import as 'unknown'")]
     NoIdentity,
+    /// Everything in the source is one writer's, and they are not the user.
+    #[error("Say this account is yours first — add {address} ({name}) as an Account ID under Settings → You — and import again. Everything in it was written by that one account, so until then all of it would be read as someone else's.")]
+    NotYours { name: String, address: String },
     #[error("canceled")]
     Canceled,
 }

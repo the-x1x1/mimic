@@ -644,6 +644,7 @@ impl CommunicationSource for WhatsAppSource {
                     value: id.value.clone(),
                     normalized: id.normalized(),
                     messages,
+                    also: Vec::new(),
                 }
             })
             .collect();
