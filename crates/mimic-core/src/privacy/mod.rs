@@ -430,6 +430,7 @@ mod tests {
             context: json!({}),
             prompt_hash: "h".into(),
             evidence: json!({}),
+            alternative_to: None,
         })
         .unwrap();
         World { db, ada, bob, source: source.id, group }

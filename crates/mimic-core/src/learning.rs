@@ -492,6 +492,7 @@ mod tests {
                 context: serde_json::json!({}),
                 prompt_hash: "h".into(),
                 evidence: serde_json::json!({}),
+                alternative_to: None,
             })
             .unwrap();
         let outcome = if generated == final_text { "sent_unedited" } else { "sent_edited" };
@@ -612,6 +613,7 @@ mod tests {
                     context: serde_json::json!({}),
                     prompt_hash: "h".into(),
                     evidence: serde_json::json!({}),
+                    alternative_to: None,
                 })
                 .unwrap();
             db.resolve_draft(&d.id, "discarded", None).unwrap();
@@ -619,6 +621,44 @@ mod tests {
         let o = patterns(&db).unwrap();
         assert_eq!(o.drafts_considered, 0);
         assert!(o.patterns.is_empty());
+    }
+
+    /// A draft written with an adjustment was asked to differ from how Mimic
+    /// writes; what the user changed in it is measured against that request,
+    /// not against Mimic's habits, so it teaches nothing.
+    #[test]
+    fn a_draft_asked_for_another_way_is_not_evidence_of_a_habit() {
+        let (db, ada, _) = db_with_people();
+        for adjustment in ["longer", "moreProfessional", "shorter"] {
+            let d = db
+                .create_draft(&NewDraft {
+                    participant_id: Some(ada.clone()),
+                    conversation_id: None,
+                    channel: "chat".into(),
+                    situation_id: None,
+                    incoming_message: None,
+                    incoming_message_id: None,
+                    intent: None,
+                    generated_text: GREETED.into(),
+                    provider: "mock".into(),
+                    model: "m".into(),
+                    context: serde_json::json!({ "adjustment": adjustment }),
+                    prompt_hash: "h".into(),
+                    evidence: serde_json::json!({}),
+                    alternative_to: None,
+                })
+                .unwrap();
+            db.resolve_draft(&d.id, "sent_edited", Some(BARE)).unwrap();
+        }
+        let o = patterns(&db).unwrap();
+        assert_eq!(o.drafts_considered, 0, "three edits the same way, none of them evidence");
+        assert!(o.patterns.is_empty());
+
+        // The same edits to drafts written as Mimic writes are.
+        for _ in 0..3 {
+            sent(&db, Some(&ada), GREETED, BARE);
+        }
+        assert_eq!(patterns(&db).unwrap().drafts_considered, 3);
     }
 
     #[test]

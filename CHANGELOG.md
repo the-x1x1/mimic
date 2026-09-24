@@ -2,6 +2,25 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.21] — 2026-09-23
+
+Other ways to say it.
+
+### Added
+
+- **Other ways to say it, side by side.** Under a reply I've written, **Write it another way** offers **Shorter**, **Longer**, **More casual** and **More professional**. Each writes one more version from the same message and the same note — one request to your model, like any draft — and puts it beside the first, named by how it differs.
+- Use whichever you like, changed or not. The others are set aside as passed over, not as turned down, so choosing between them doesn't count against my drafts. **Not this one** puts one version aside; **None of these** puts them all aside.
+- The versions stay beside each other until you choose, even if you leave the screen and come back.
+- A version you asked for isn't something I learn your habits from: what you change in it, you changed from what you asked for, not from how I write.
+
+### Changed
+
+- A draft written **Shorter**, **Longer**, **More casual** or **More professional** in Write something new is no longer read for your habits either. What you changed in it you changed from what you asked for, so a pattern that rested on those drafts may no longer show under How you write.
+
+### Fixed
+
+- Writing a draft again in Write something new no longer leaves the one it replaced waiting for ever: it's recorded as passed over.
+
 ## [0.10.0-alpha.20] — 2026-09-23
 
 Your Discord messages.

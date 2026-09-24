@@ -404,6 +404,10 @@ pub struct Draft {
     /// The stored message this draft answers. `None` for a draft written from
     /// pasted text, and for drafts made before 0.10.0-alpha.4.
     pub incoming_message_id: Option<String>,
+    /// The first draft this one is another way of saying, shown beside it.
+    /// `None` for a first draft (every draft before 0.10.0-alpha.21).
+    #[serde(default)]
+    pub alternative_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

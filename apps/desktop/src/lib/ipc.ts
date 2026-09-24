@@ -49,6 +49,7 @@ import {
   VoiceOverview,
   VoicePreference,
   CommandError,
+  type Adjustment,
   type ComposeRequest,
   type ImapAccount,
   type SearchWho,
@@ -304,6 +305,9 @@ export const ipc = {
   generationContext: (request: ComposeRequest) =>
     call("preview_generation_context", GenerationContext, { request }),
   generateDraft: (request: ComposeRequest) => call("generate_draft", Draft, { request }),
+  /** Another way of saying a draft, from the same request, to show beside it. One model call. */
+  writeAnotherDraft: (draftId: string, adjustment: Adjustment) =>
+    call("write_another_draft", Draft, { draftId, adjustment }),
   resolveDraft: (draftId: string, outcome: string, finalText: string | null) =>
     call("resolve_draft", Draft, { draftId, outcome, finalText }),
   addDraftPreference: (draftId: string, note: string) =>

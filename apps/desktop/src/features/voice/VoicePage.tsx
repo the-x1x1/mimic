@@ -91,7 +91,7 @@ export function VoicePage() {
         <Metric
           label="Drafts you sent unchanged"
           value={formatRate(outcomes.data?.uneditedRate ?? null)}
-          hint="measured from drafts you told Mimic about"
+          hint="measured from drafts you told Mimic about, including other ways you asked for"
           tone={outcomes.data?.uneditedRate === null ? "neutral" : "good"}
         />
       </div>

@@ -8,6 +8,7 @@ import {
   SearchPage,
   ValidationReport,
   WriterName,
+  adjustmentOf,
   yoursAs,
   describeFound,
   hasWordsToFind,
@@ -140,6 +141,12 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     const withDraft = view.awaiting.find((t) => t.draft !== null);
     expect(withDraft).toBeDefined();
     expect(withDraft!.draft!.outcome).toBeNull();
+    // With another way of saying it beside it, which names it and says how it differs.
+    const other = withDraft!.alternatives[0];
+    expect(other?.alternativeTo).toBe(withDraft!.draft!.id);
+    expect(other && adjustmentOf(other)).toBe("shorter");
+    expect(adjustmentOf(withDraft!.draft!)).toBeNull();
+    expect(withDraft!.draft!.alternativeTo).toBeNull();
     expect(withDraft!.lastMessage.length).toBeGreaterThan(0);
     expect(view.outcomes.uneditedRate).toBeNull();
     // A person is waiting; the newsletter the fixture adds is left out,
@@ -204,6 +211,10 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     const draft = Draft.parse(read(contractFixture("draft.json")));
     expect(draft.promptHash).toBeTruthy();
     expect(draft.outcome).toBeNull();
+    expect(draft.alternativeTo).toBeNull();
+    const older = read(contractFixture("draft.json"));
+    delete older.alternativeTo;
+    expect(Draft.parse(older).alternativeTo).toBeNull();
     const report = DeletionReport.parse(read(contractFixture("deletion_report.json")));
     expect(report.messages).toBeGreaterThan(0);
   });

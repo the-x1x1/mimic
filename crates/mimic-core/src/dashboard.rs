@@ -51,6 +51,9 @@ pub struct DashboardThread {
     /// one was generated — never a placeholder — and never a draft written for
     /// an earlier message in the thread.
     pub draft: Option<Draft>,
+    /// Other ways of saying `draft` still on offer beside it, oldest first
+    /// (`Db::alternatives_of`). Empty without a draft.
+    pub alternatives: Vec<Draft>,
     /// Why the last message looks automated, from its headers, if it does. A
     /// reading, and the screen words it as one.
     pub automated: Option<String>,
@@ -151,8 +154,14 @@ fn thread(db: &Db, row: AwaitingReply) -> Result<DashboardThread, DbError> {
         Err(DbError::NotFound(_)) => (0, 0),
         Err(e) => return Err(e),
     };
+    let draft = db.pending_draft_for_message(&row.conversation.id, &row.last_message_id, &row.last_message)?;
+    let alternatives = match &draft {
+        Some(d) => db.alternatives_of(&d.id)?,
+        None => Vec::new(),
+    };
     Ok(DashboardThread {
-        draft: db.pending_draft_for_message(&row.conversation.id, &row.last_message_id, &row.last_message)?,
+        draft,
+        alternatives,
         conversation_id: row.conversation.id,
         channel: row.conversation.channel,
         subject: row.conversation.subject,
@@ -175,8 +184,8 @@ fn thread(db: &Db, row: AwaitingReply) -> Result<DashboardThread, DbError> {
 mod tests {
     use super::*;
     use crate::db::repo_people::IdentifierInput;
-    use crate::db::{IdentifierKind, NewMessage, NewSource};
-    use serde_json::Value;
+    use crate::db::{IdentifierKind, NewDraft, NewMessage, NewSource};
+    use serde_json::{json, Value};
 
     fn db_with_thread() -> (Db, String, String, String) {
         let db = Db::open_in_memory().unwrap();
@@ -234,6 +243,56 @@ mod tests {
         db.insert_messages(&[msg(&source, &convo, None, "m3", "self", 2, "thursday works")]).unwrap();
         assert!(db.threads_awaiting_reply(10).unwrap().is_empty());
         assert_eq!(db.count_threads_awaiting_reply().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_card_offers_its_draft_with_the_other_ways_of_saying_it_until_one_is_used() {
+        let (db, source, convo, ada) = db_with_thread();
+        db.insert_messages(&[msg(&source, &convo, Some(&ada), "m1", "other", 0, "lunch on thursday?")]).unwrap();
+        db.refresh_conversation_stats(&convo).unwrap();
+        let waiting = db.threads_awaiting_reply(10).unwrap().remove(0);
+        let new = |text: &str, beside: Option<&str>| NewDraft {
+            participant_id: Some(ada.clone()),
+            conversation_id: Some(convo.clone()),
+            channel: "chat".into(),
+            situation_id: None,
+            incoming_message: Some(waiting.last_message.clone()),
+            incoming_message_id: Some(waiting.last_message_id.clone()),
+            intent: None,
+            generated_text: text.into(),
+            provider: "mock".into(),
+            model: "m".into(),
+            context: json!({}),
+            prompt_hash: "h".into(),
+            evidence: json!({}),
+            alternative_to: beside.map(str::to_string),
+        };
+        let first = db.create_draft(&new("yes, thursday works", None)).unwrap();
+        let shorter = db.create_draft(&new("thursday!", Some(&first.id))).unwrap();
+        let longer = db.create_draft(&new("yes, thursday works well for me. same place?", Some(&first.id))).unwrap();
+        let card = || dashboard(&db, 10, false, false).unwrap().awaiting.remove(0);
+        let ids = |ds: &[Draft]| ds.iter().map(|d| d.id.clone()).collect::<Vec<_>>();
+
+        let c = card();
+        assert_eq!(
+            c.draft.as_ref().map(|d| d.id.clone()),
+            Some(first.id.clone()),
+            "the first, never another way of it"
+        );
+        assert_eq!(ids(&c.alternatives), [shorter.id.clone(), longer.id.clone()]);
+        assert_eq!(dashboard(&db, 10, false, false).unwrap().pending_drafts.len(), 1);
+
+        // One other way put aside: the rest are still on offer, and the
+        // message still waits for a choice.
+        db.resolve_draft(&shorter.id, "discarded", None).unwrap();
+        let c = card();
+        assert_eq!(c.draft.as_ref().map(|d| d.id.clone()), Some(first.id.clone()));
+        assert_eq!(ids(&c.alternatives), std::slice::from_ref(&longer.id));
+
+        // Another way used: the message is dealt with.
+        db.resolve_draft(&longer.id, "sent_unedited", Some(&longer.generated_text)).unwrap();
+        let c = card();
+        assert!(c.draft.is_none() && c.alternatives.is_empty());
     }
 
     #[test]

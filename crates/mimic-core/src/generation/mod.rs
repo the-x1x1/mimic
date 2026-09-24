@@ -8,7 +8,9 @@
 //! 2. `assemble` turns that evidence into a prompt. It is a pure function:
 //!    same context in, same prompt out, which is what makes the prompt
 //!    testable and the `prompt_hash` meaningful.
-//! 3. `compose` runs the provider and records the draft.
+//! 3. `compose` runs the provider and records the draft; `compose_another`
+//!    writes another way of saying a draft already written — the same
+//!    request, with an adjustment — to be shown beside it.
 //!
 //! The intent is not a footnote. A reply assistant that only sees the incoming
 //! message can do no better than guess what the user wants to say; the whole
@@ -40,6 +42,21 @@ pub enum Adjustment {
 }
 
 impl Adjustment {
+    /// The adjustment a draft was written with, from what it recorded.
+    pub fn of(draft: &Draft) -> Option<Adjustment> {
+        serde_json::from_value(draft.context.get("adjustment")?.clone()).ok()
+    }
+
+    /// As the screen names it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Adjustment::Shorter => "shorter",
+            Adjustment::Longer => "longer",
+            Adjustment::MoreCasual => "more casual",
+            Adjustment::MoreProfessional => "more professional",
+        }
+    }
+
     fn instruction(self) -> &'static str {
         match self {
             Adjustment::Shorter => "Make this noticeably shorter than you otherwise would, without dropping anything the intent asks for.",
@@ -545,6 +562,74 @@ fn one_line(text: &str, limit: usize) -> String {
 
 /// Build the context, run the provider, record the draft.
 pub fn compose(db: &Db, provider: &dyn ModelProvider, req: &ComposeRequest) -> Result<Draft, GenerationError> {
+    write(db, provider, req, None)
+}
+
+impl ComposeRequest {
+    /// The request a first draft was written from, again, with `adjustment`:
+    /// the same person, conversation, message and note, and the situation
+    /// only if the user chose it — one read from the note is read again, the
+    /// same way. The meaning of the message is the caller's to add.
+    pub fn another_way_of(first: &Draft, adjustment: Adjustment) -> ComposeRequest {
+        let chosen = first
+            .context
+            .get("situation")
+            .and_then(|s| serde_json::from_value::<SituationChoice>(s.clone()).ok())
+            .filter(|s| s.source == SituationSource::Chosen)
+            .map(|s| s.id);
+        ComposeRequest {
+            participant_id: first.participant_id.clone(),
+            conversation_id: first.conversation_id.clone(),
+            channel: first.channel.clone(),
+            incoming_message: first.incoming_message.clone(),
+            incoming_message_id: first.incoming_message_id.clone(),
+            intent: first.intent.clone(),
+            situation_id: chosen,
+            adjustment: Some(adjustment),
+            meaning: None,
+        }
+    }
+}
+
+/// Write another way of saying a draft — shorter, longer, more casual or
+/// more professional — to be shown beside it and chosen between. `draft` is
+/// the first draft or any other way of it; the new one is always another way
+/// of the first. Refused, before the model is asked, once the first draft is
+/// used or put aside, or when a way of that kind is already on offer beside
+/// it: one of each is all there is to choose from.
+pub fn compose_another(
+    db: &Db,
+    provider: &dyn ModelProvider,
+    draft: &str,
+    adjustment: Adjustment,
+    meaning: Option<retrieval::QueryVector>,
+) -> Result<Draft, GenerationError> {
+    let gone = || DbError::Invalid(crate::db::DRAFT_GONE.into());
+    let found = db.get_draft(draft)?.ok_or_else(gone)?;
+    let first = match &found.alternative_to {
+        Some(first) => db.get_draft(first)?.ok_or_else(gone)?,
+        None => found,
+    };
+    if first.outcome.is_some() {
+        return Err(DbError::Invalid(crate::db::ALREADY_CHOSEN.into()).into());
+    }
+    if db.alternatives_of(&first.id)?.iter().any(|a| Adjustment::of(a) == Some(adjustment)) {
+        return Err(DbError::Invalid(format!(
+            "There's already a {} way of saying it beside this one.",
+            adjustment.label()
+        ))
+        .into());
+    }
+    let req = ComposeRequest { meaning, ..ComposeRequest::another_way_of(&first, adjustment) };
+    write(db, provider, &req, Some(&first.id))
+}
+
+fn write(
+    db: &Db,
+    provider: &dyn ModelProvider,
+    req: &ComposeRequest,
+    alternative_to: Option<&str>,
+) -> Result<Draft, GenerationError> {
     // The message a draft will be recorded against has to be there, in this
     // conversation, before anything is paid for: a mailbox removed while the
     // screen was open must not cost a model call and then fail to store.
@@ -586,6 +671,7 @@ pub fn compose(db: &Db, provider: &dyn ModelProvider, req: &ComposeRequest) -> R
             "statements": ctx.evidence,
             "examples": ctx.examples.iter().map(|e| json!({"messageId": e.reply_message_id, "reason": e.reason, "score": e.score})).collect::<Vec<_>>(),
         }),
+        alternative_to: alternative_to.map(str::to_string),
     })?;
     Ok(draft)
 }
@@ -800,6 +886,59 @@ mod tests {
         let req = ComposeRequest { incoming_message_id: Some("no-such-message".into()), ..request(&ada) };
         assert!(matches!(compose(&db, &provider, &req), Err(GenerationError::Db(DbError::Invalid(_)))));
         assert_eq!(provider.call_count(), 0, "nothing is paid for a draft that cannot be stored");
+    }
+
+    #[test]
+    fn another_way_of_a_draft_is_its_request_again_with_an_adjustment_beside_the_first() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let provider = MockProvider::answering("yeah, tomorrow morning");
+        let req = ComposeRequest { situation_id: Some("declining".into()), ..request(&ada) };
+        let first = compose(&db, &provider, &req).unwrap();
+        assert_eq!(first.alternative_to, None);
+
+        let shorter = compose_another(&db, &provider, &first.id, Adjustment::Shorter, None).unwrap();
+        assert_eq!(shorter.alternative_to.as_deref(), Some(first.id.as_str()));
+        assert_eq!(
+            (shorter.intent.as_deref(), shorter.participant_id.as_deref(), shorter.situation_id.as_deref()),
+            (Some("yes, tomorrow morning"), Some(ada.as_str()), Some("declining")),
+            "the same note, person and chosen situation"
+        );
+        assert_eq!(Adjustment::of(&shorter), Some(Adjustment::Shorter));
+        assert!(provider.last_request().unwrap().system.contains("noticeably shorter"));
+
+        // Another way of another way is another way of the first.
+        let casual = compose_another(&db, &provider, &shorter.id, Adjustment::MoreCasual, None).unwrap();
+        assert_eq!(casual.alternative_to.as_deref(), Some(first.id.as_str()));
+        assert_eq!(db.alternatives_of(&first.id).unwrap().len(), 2);
+
+        // One of each kind, refused before anything is paid for.
+        let calls = provider.call_count();
+        let again = compose_another(&db, &provider, &first.id, Adjustment::Shorter, None);
+        assert!(matches!(again, Err(GenerationError::Db(DbError::Invalid(ref m))) if m.contains("shorter")));
+        assert_eq!(provider.call_count(), calls);
+
+        // Once one is used there is nothing left to choose between.
+        db.resolve_draft(&casual.id, "sent_unedited", Some(&casual.generated_text)).unwrap();
+        let after = compose_another(&db, &provider, &first.id, Adjustment::Longer, None);
+        assert!(matches!(after, Err(GenerationError::Db(DbError::Invalid(ref m))) if m == crate::db::ALREADY_CHOSEN));
+        assert_eq!(provider.call_count(), calls);
+        for passed_over in [&first, &shorter] {
+            assert_eq!(db.get_draft(&passed_over.id).unwrap().unwrap().outcome.as_deref(), Some("regenerated"));
+        }
+    }
+
+    #[test]
+    fn another_way_of_a_note_read_as_a_situation_reads_the_note_again() {
+        let (db, ada) = seeded_with_refusals();
+        let provider = MockProvider::answering("ah can't this time");
+        let first =
+            compose(&db, &provider, &ComposeRequest { intent: Some("say no".into()), ..request(&ada) }).unwrap();
+        assert_eq!(first.context["situation"]["source"], "fromNote");
+        let again = ComposeRequest::another_way_of(&first, Adjustment::Longer);
+        assert_eq!(again.situation_id, None, "a reading is not the user's choice, so it is not passed on as one");
+        let longer = compose_another(&db, &provider, &first.id, Adjustment::Longer, None).unwrap();
+        assert_eq!(longer.context["situation"]["source"], "fromNote");
+        assert_eq!(longer.situation_id.as_deref(), Some("declining"));
     }
 
     #[test]

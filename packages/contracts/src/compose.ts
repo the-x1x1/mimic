@@ -137,8 +137,19 @@ export const Draft = z.object({
   outcome: z.string().nullable(),
   /** The stored message this answers. Null for pasted text and for drafts made before 0.10.0-alpha.4. */
   incomingMessageId: z.string().nullable(),
+  /**
+   * The first draft this one is another way of saying, shown beside it. Null
+   * for a first draft (every draft before 0.10.0-alpha.21).
+   */
+  alternativeTo: z.string().nullable().default(null),
 });
 export type Draft = z.infer<typeof Draft>;
+
+/** The way a draft was asked to differ, from what it recorded; null for none. */
+export function adjustmentOf(draft: Draft): Adjustment | null {
+  const read = Adjustment.safeParse(draft.context["adjustment"]);
+  return read.success ? read.data : null;
+}
 
 export const DraftFeedback = z.object({
   id: z.string(),
