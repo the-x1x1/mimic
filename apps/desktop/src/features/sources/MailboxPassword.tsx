@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button, InlineError } from "@mimic/ui";
-import { useSetMailboxPassword } from "@/hooks/useSources";
+import { useMailSignIn, useSetMailboxPassword, useSignInMailboxAgain } from "@/hooks/useSources";
+import { ipc } from "@/lib/ipc";
 import { toast } from "@/state/toast";
 
 /**
@@ -71,5 +72,46 @@ export function MailboxPassword({ sourceId, name }: { sourceId: string; name: st
       </p>
       {save.isError ? <InlineError>{(save.error as Error).message}</InlineError> : null}
     </form>
+  );
+}
+
+/**
+ * A connected Microsoft mailbox, signed in again — when Microsoft asks for it,
+ * or the saved sign-in can't be unlocked on this Windows account — without
+ * removing it and everything read from it. The new sign-in is tried on the
+ * mailbox first, and kept only if it opens it.
+ */
+export function MailboxSignInAgain({ sourceId, name }: { sourceId: string; name: string }) {
+  const again = useSignInMailboxAgain();
+  const available = useMailSignIn().data === true;
+  const stopped = (again.error as { code?: unknown } | null)?.code === "canceled";
+
+  if (!available) return null;
+  return (
+    <div className="stack gap-1">
+      {again.isPending ? (
+        <div className="row gap-1">
+          <span className="muted small">Finish signing in in your browser.</span>
+          <Button size="sm" variant="ghost" onClick={() => void ipc.cancelMailSignIn()}>
+            Stop
+          </Button>
+        </div>
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() =>
+            again.mutate(sourceId, {
+              onSuccess: () => toast.success("Signed in again", `I'll check ${name} now.`),
+            })
+          }
+        >
+          Sign in again
+        </Button>
+      )}
+      {again.isError && !stopped ? (
+        <InlineError>{(again.error as Error).message}</InlineError>
+      ) : null}
+    </div>
   );
 }

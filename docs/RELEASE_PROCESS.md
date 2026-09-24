@@ -28,6 +28,22 @@ One coherent slice per version: code + tests + docs + CHANGELOG entry + PROJECT_
 
 Until a real key pair is generated and its public key replaces the development key in `tauri.conf.json`, only `alpha` tags may be released.
 
+## Mimic's registration with Microsoft
+
+Signing in to Outlook.com, Hotmail and Microsoft 365 mailboxes (`sources::oauth`) needs Mimic registered as an app with Microsoft. The registration's client id is compiled in from `MIMIC_MICROSOFT_CLIENT_ID`, which the release workflow reads from a repository **variable** of that name. It is not a secret — an app on someone's computer cannot keep one — so it is a variable, not a secret. Without it the build still succeeds; the variable check in the release workflow warns, and the app says it can't sign in with Microsoft and offers nothing that would fail.
+
+Registering, once, in the Microsoft Entra admin center (entra.microsoft.com, signed in with any Microsoft account):
+
+1. **App registrations → New registration.** Name: `Mimic`. Supported account types: _Accounts in any organizational directory and personal Microsoft accounts_ (both Outlook.com and Microsoft 365).
+2. **Redirect URI:** platform _Public client/native (mobile & desktop)_, value `http://localhost`. Microsoft accepts any port on `localhost` for this platform, which the sign-in needs (it listens on a port the system picks). Registered under _Web_ instead, the token exchange fails asking for a client secret.
+3. **Register**, and copy the _Application (client) ID_.
+4. **API permissions → Add a permission → Microsoft Graph → Delegated:** `IMAP.AccessAsUser.All` and `offline_access`. Mimic asks for them at sign-in either way; listing them lets an organisation's admin approve Mimic ahead of time.
+5. Set the variable: `gh variable set MIMIC_MICROSOFT_CLIENT_ID --repo the-x1x1/mimic --body <client id>`.
+
+For a local build, set `MIMIC_MICROSOFT_CLIENT_ID` in the environment before `pnpm tauri dev` or `.\scripts\build.ps1`; cargo rebuilds when it changes.
+
+Work and school tenants decide whether their users may approve an app themselves; many allow it only for apps from a verified publisher. Until Mimic's publisher is verified (a Microsoft Partner Network ID on the registration), someone in such a tenant needs their admin to approve Mimic — Microsoft says so on its own page, and the connect dialog tells the user to expect it. Personal accounts are not affected.
+
 ## Manual release checklist (spec §27.5)
 
 Fresh install → launch → update from the previous public release → declare an identity → add a source → validate → import → cancel mid-import and resume → analyze → compose against a local provider → compose against a hosted provider → edit and record what was sent → delete a person and confirm the preview matched → re-analyze → delete everything → restart during an interrupted import → GitHub offline → engine crash → provider unreachable. Record results in PROJECT_STATUS.

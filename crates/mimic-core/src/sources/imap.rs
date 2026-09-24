@@ -23,12 +23,15 @@
 //!   Nothing is ever written to the mailbox, and there is no command in this
 //!   module that could.
 //!
-//! What it does not: OAuth. Gmail, iCloud, Fastmail and Yahoo accept an app
-//! password for IMAP. Outlook.com and Hotmail stopped accepting passwords of
-//! any kind for IMAP in September 2024, and a work or school account whose
-//! admin allows only single sign-on is the same; none of those can be
-//! connected from here, and the connect dialog says so rather than letting a
-//! login fail mysteriously.
+//! How it signs in: Gmail, iCloud, Fastmail and Yahoo accept an app password
+//! (`LOGIN`). Outlook.com and Hotmail stopped accepting passwords of any kind
+//! for IMAP in September 2024, and Microsoft 365 did in 2022–23: those sign
+//! in with Microsoft
+//! (`sources::oauth`), and present an access token with `AUTHENTICATE
+//! XOAUTH2`. The secret store keeps the password, or the refresh token, under
+//! the same key; a check trades a refresh token for an access token first
+//! (`Credentials::credential`). Other OAuth providers (Gmail's own
+//! sign-in) are not here.
 //!
 //! The client is a small IMAP4rev1 subset written against `Read + Write`, so
 //! the tests drive the real protocol code against a scripted server on a
@@ -76,6 +79,38 @@ pub struct ImapAccount {
     pub username: String,
     /// `tls` (implicit, port 993) or `plain` (this computer only).
     pub security: Security,
+    /// How it signs in. Mailboxes connected before 0.10.0-alpha.14 have
+    /// none stored, and use a password.
+    #[serde(default)]
+    pub auth: Auth,
+}
+
+/// How a mailbox signs in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Auth {
+    /// An app password; the secret store keeps it.
+    #[default]
+    Password,
+    /// Signed in with Microsoft; the secret store keeps the refresh token.
+    Microsoft,
+}
+
+/// What one connection signs in with. Never printed.
+#[derive(Clone)]
+pub enum Credential {
+    Password(String),
+    /// An OAuth access token, for `AUTHENTICATE XOAUTH2`.
+    AccessToken(String),
+}
+
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Credential::Password(_) => "Credential::Password([redacted])",
+            Credential::AccessToken(_) => "Credential::AccessToken([redacted])",
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +157,8 @@ pub enum ImapError {
     Tls(String, String),
     #[error("The server turned down that username and password. Most providers want an app password here, not your usual one. ({0})")]
     Login(String),
+    #[error("The server didn't accept the sign-in ({0}). Sign in again under Your mail. If that doesn't help, IMAP may be turned off for this mailbox; for a work or school account, your admin can turn it on.")]
+    SignIn(String),
     #[error("A plain, unencrypted connection is only allowed to this computer. Use TLS for {0}.")]
     PlainRefused(String),
     #[error("The server said no: {0}")]
@@ -163,6 +200,15 @@ fn one_line(s: &str) -> String {
         out.push('…');
     }
     out
+}
+
+/// A tagged "NO [CODE] human text" as the human text, cut to one line.
+fn refusal(rest: &str) -> String {
+    let mut reason = rest.split_once(' ').map(|(_, r)| r.trim()).unwrap_or_default();
+    if reason.starts_with('[') {
+        reason = reason.split_once(']').map(|(_, r)| r.trim()).unwrap_or(reason);
+    }
+    one_line(if reason.is_empty() { rest } else { reason })
 }
 
 /// `localhost`, or a loopback IP address. Decided on the address itself, not
@@ -289,14 +335,40 @@ impl<S: Read + Write> Session<S> {
                 if upper.starts_with("OK") {
                     return Ok(untagged);
                 }
-                // "NO [CODE] human text": keep the human text.
-                let mut reason = rest.split_once(' ').map(|(_, r)| r.trim()).unwrap_or_default();
-                if reason.starts_with('[') {
-                    reason = reason.split_once(']').map(|(_, r)| r.trim()).unwrap_or(reason);
-                }
-                return Err(ImapError::Refused(one_line(if reason.is_empty() { rest } else { reason })));
+                return Err(ImapError::Refused(refusal(rest)));
             }
             untagged.push(line);
+        }
+    }
+
+    /// Sign in with an OAuth access token (SASL XOAUTH2, initial response on
+    /// the command line). A server that answers with a challenge — the
+    /// reason, as JSON — is sent the empty line it waits for, and then says
+    /// no with the command's tag.
+    pub fn authenticate_xoauth2(&mut self, username: &str, access_token: &str) -> Result<(), ImapError> {
+        self.tag += 1;
+        let tag = format!("m{}", self.tag);
+        let response = super::oauth::xoauth2(username.trim(), access_token);
+        self.stream.write_all(format!("{tag} AUTHENTICATE XOAUTH2 {response}\r\n").as_bytes())?;
+        self.stream.flush()?;
+        let mut challenges = 0;
+        loop {
+            let line = self.read_line()?;
+            if line.text.starts_with('+') {
+                challenges += 1;
+                if challenges > 2 {
+                    return Err(ImapError::Protocol("the server kept asking for more during sign-in".into()));
+                }
+                self.stream.write_all(b"\r\n")?;
+                self.stream.flush()?;
+                continue;
+            }
+            if let Some(rest) = line.text.strip_prefix(&format!("{tag} ")) {
+                if rest.to_ascii_uppercase().starts_with("OK") {
+                    return Ok(());
+                }
+                return Err(ImapError::SignIn(refusal(rest)));
+            }
         }
     }
 
@@ -493,9 +565,9 @@ macro_rules! with_session {
 }
 
 impl Connection {
-    pub fn open(account: &ImapAccount, password: &str) -> Result<Connection, ImapError> {
-        // Refuse before connecting: a password must never be offered in the
-        // clear to anything but this computer.
+    pub fn open(account: &ImapAccount, credential: &Credential) -> Result<Connection, ImapError> {
+        // Refuse before connecting: a password or a token must never be
+        // offered in the clear to anything but this computer.
         if account.security == Security::Plain && !is_loopback_host(&account.host) {
             return Err(ImapError::PlainRefused(account.host.clone()));
         }
@@ -525,7 +597,12 @@ impl Connection {
                 })?))
             }
         };
-        with_session!(&mut conn, s => s.login(&account.username, password))?;
+        match credential {
+            Credential::Password(password) => with_session!(&mut conn, s => s.login(&account.username, password))?,
+            Credential::AccessToken(token) => {
+                with_session!(&mut conn, s => s.authenticate_xoauth2(&account.username, token))?
+            }
+        }
         Ok(conn)
     }
 
@@ -561,8 +638,8 @@ pub struct ImapProbe {
     pub warnings: Vec<String>,
 }
 
-pub fn probe(account: &ImapAccount, password: &str) -> Result<ImapProbe, ImapError> {
-    let mut conn = Connection::open(account, password)?;
+pub fn probe(account: &ImapAccount, credential: &Credential) -> Result<ImapProbe, ImapError> {
+    let mut conn = Connection::open(account, credential)?;
     let listed = conn.list()?;
     let (folders, sent_folder) = choose_folders(&listed);
     let mut counts = Vec::new();
@@ -617,7 +694,7 @@ pub struct SyncSummary {
 pub fn sync(
     db: &Db,
     source_id: &str,
-    password: &str,
+    credential: &Credential,
     on_progress: &mut dyn FnMut(usize, &str),
     should_stop: &dyn Fn() -> bool,
 ) -> Result<SyncSummary, ImapError> {
@@ -633,7 +710,7 @@ pub fn sync(
         }
     };
     db.set_source_status(source_id, "importing", None)?;
-    let result = sync_inner(db, source_id, &mut config, password, on_progress, should_stop);
+    let result = sync_inner(db, source_id, &mut config, credential, on_progress, should_stop);
     // Every attempt is recorded, successful or not, so the schedule waits a
     // whole interval before the next one rather than retrying every minute.
     config.last_checked_at = Some(crate::ids::now_rfc3339());
@@ -666,6 +743,8 @@ pub enum PasswordError {
     NotAMailbox,
     #[error("I can't read this mailbox's settings; remove it and connect it again.")]
     UnreadableSettings,
+    #[error("This mailbox signs in with Microsoft, not a password. Sign in again instead.")]
+    SignsInWithMicrosoft,
     #[error(transparent)]
     Login(#[from] ImapError),
     #[error("I couldn't save the password: {0}")]
@@ -688,7 +767,10 @@ pub fn replace_password(
     let source = db.get_source(source_id)?.filter(|s| s.connector == CONNECTOR).ok_or(PasswordError::NotAMailbox)?;
     let config: ImapSourceConfig =
         serde_json::from_value(source.config).map_err(|_| PasswordError::UnreadableSettings)?;
-    probe(&config.account, password)?;
+    if config.account.auth != Auth::Password {
+        return Err(PasswordError::SignsInWithMicrosoft);
+    }
+    probe(&config.account, &Credential::Password(password.to_string()))?;
     save(password).map_err(PasswordError::Save)?;
     // Only a failure is cleared: a mailbox being read, or read fine, keeps
     // saying so.
@@ -702,11 +784,11 @@ fn sync_inner(
     db: &Db,
     source_id: &str,
     config: &mut ImapSourceConfig,
-    password: &str,
+    credential: &Credential,
     on_progress: &mut dyn FnMut(usize, &str),
     should_stop: &dyn Fn() -> bool,
 ) -> Result<SyncSummary, ImapError> {
-    let mut conn = Connection::open(&config.account, password)?;
+    let mut conn = Connection::open(&config.account, credential)?;
     // Folders are looked up every time: a sent folder renamed, or shown in
     // another language after a settings change, should not break every check
     // that follows.
@@ -941,16 +1023,104 @@ pub fn checking(db: &Db) -> Result<Option<MailChecking>, DbError> {
 
 pub const JOB_KIND: &str = "check_mailbox";
 
-/// Reads a mailbox's password from wherever the app keeps secrets.
+/// Reads a mailbox's password, or refresh token, from wherever the app keeps
+/// secrets.
 pub type PasswordFor = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+/// Saves a secret: a refresh token the provider replaced when it was used.
+pub type SaveSecret = Arc<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync>;
+
+/// What mailboxes sign in with, worked out per check.
+pub struct Credentials {
+    password_for: PasswordFor,
+    save: SaveSecret,
+    microsoft: super::oauth::Provider,
+    microsoft_client: Option<String>,
+    /// Access tokens still good, per mailbox, and when to stop trusting
+    /// each: a check every few minutes needn't ask for a new one every time.
+    kept: std::sync::Mutex<HashMap<String, (String, std::time::Instant)>>,
+}
+
+impl Credentials {
+    pub fn new(
+        password_for: PasswordFor,
+        save: SaveSecret,
+        microsoft: super::oauth::Provider,
+        microsoft_client: Option<String>,
+    ) -> Self {
+        Credentials { password_for, save, microsoft, microsoft_client, kept: Default::default() }
+    }
+
+    /// What a mailbox signs in with now: its password; or, for one signed in
+    /// with Microsoft, an access token — kept from an earlier check while it
+    /// has at least five minutes left, or else traded for the refresh token,
+    /// with the refresh token the provider hands back saved in its place.
+    /// `Err` is the sentence the mailbox shows.
+    pub fn credential(&self, auth: Auth, source_id: &str) -> Result<Credential, String> {
+        let key = secret_key(source_id);
+        match auth {
+            Auth::Password => (self.password_for)(&key).map(Credential::Password).ok_or_else(|| {
+                "I don't have a password I can use for this mailbox. Give it to me again with New password, under Your mail.".to_string()
+            }),
+            Auth::Microsoft => {
+                let now = std::time::Instant::now();
+                let mut kept = self.kept.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some((token, until)) = kept.get(source_id) {
+                    if *until > now {
+                        return Ok(Credential::AccessToken(token.clone()));
+                    }
+                }
+                let Some(client) = self.microsoft_client.as_deref() else {
+                    return Err("This copy of Mimic can't sign in with Microsoft, so this mailbox can't be checked.".into());
+                };
+                let Some(refresh) = (self.password_for)(&key) else {
+                    return Err("I don't have a Microsoft sign-in I can use for this mailbox. Sign in again under Your mail.".into());
+                };
+                let tokens = super::oauth::refresh(&self.microsoft, client, &refresh).map_err(|e| match e {
+                    super::oauth::OAuthError::SignInAgain(who) => {
+                        format!("{who} wants you to sign in again for this mailbox. Do it under Your mail.")
+                    }
+                    other => other.to_string(),
+                })?;
+                if let Some(next) = tokens.refresh_token.as_deref().filter(|t| *t != refresh) {
+                    // The old one may stop working now a new one is issued.
+                    // One that could not be kept is said, never shown.
+                    if let Err(e) = (self.save)(&key, next) {
+                        tracing::warn!(target: "secrets", error = %e, "a mailbox's new Microsoft sign-in could not be saved");
+                    }
+                }
+                let lasts = std::time::Duration::from_secs(tokens.expires_in.saturating_sub(300));
+                kept.insert(source_id.to_string(), (tokens.access_token.clone(), now + lasts));
+                Ok(Credential::AccessToken(tokens.access_token))
+            }
+        }
+    }
+
+    /// Forget a mailbox's kept access token: the server turned it down, or
+    /// the mailbox was signed in again.
+    pub fn forget(&self, source_id: &str) {
+        self.kept.lock().unwrap_or_else(|p| p.into_inner()).remove(source_id);
+    }
+
+    /// Change what a mailbox signs in with — keep a new sign-in, or remove
+    /// the saved one with the mailbox — once no check is trading the old one
+    /// for a token, and forget the token that came from it. Without the wait,
+    /// a check finishing a refresh would save what it was handed over the
+    /// new sign-in, or bring back a removed mailbox's.
+    pub fn settle<R>(&self, source_id: &str, change: impl FnOnce() -> R) -> R {
+        let mut kept = self.kept.lock().unwrap_or_else(|p| p.into_inner());
+        let changed = change();
+        kept.remove(source_id);
+        changed
+    }
+}
 
 pub struct CheckMailboxExecutor {
-    password_for: PasswordFor,
+    credentials: Arc<Credentials>,
 }
 
 impl CheckMailboxExecutor {
-    pub fn shared(password_for: PasswordFor) -> Arc<dyn crate::jobs::JobExecutor> {
-        Arc::new(CheckMailboxExecutor { password_for })
+    pub fn shared(credentials: Arc<Credentials>) -> Arc<dyn crate::jobs::JobExecutor> {
+        Arc::new(CheckMailboxExecutor { credentials })
     }
 }
 
@@ -963,16 +1133,26 @@ impl crate::jobs::JobExecutor for CheckMailboxExecutor {
         true
     }
     fn execute(&self, ctx: crate::jobs::JobContext) -> crate::jobs::JobFuture {
-        let password_for = self.password_for.clone();
+        let credentials = self.credentials.clone();
         Box::pin(async move {
             let source_id = ctx.job.payload["sourceId"]
                 .as_str()
                 .map(str::to_string)
                 .ok_or_else(|| crate::jobs::JobError::Failed("no mailbox was named".into()))?;
-            let Some(password) = password_for(&secret_key(&source_id)) else {
-                let why = "I don't have a password I can use for this mailbox. Give it to me again with New password, under Your mail.";
-                record_failure(&ctx.db, &source_id, why)?;
-                return Err(crate::jobs::JobError::Failed(why.into()));
+            let auth = ctx
+                .db
+                .get_source(&source_id)?
+                .and_then(|s| serde_json::from_value::<ImapSourceConfig>(s.config).ok())
+                .map(|c| c.account.auth)
+                .unwrap_or_default();
+            // A Microsoft mailbox may need a new access token first, which is
+            // a request of its own.
+            let credential = match tokio::task::block_in_place(|| credentials.credential(auth, &source_id)) {
+                Ok(c) => c,
+                Err(why) => {
+                    record_failure(&ctx.db, &source_id, &why)?;
+                    return Err(crate::jobs::JobError::Failed(why));
+                }
             };
             let db = ctx.db.clone();
             let progress_ctx = ctx.clone();
@@ -982,7 +1162,7 @@ impl crate::jobs::JobExecutor for CheckMailboxExecutor {
                     sync(
                         &db,
                         &source_id,
-                        &password,
+                        &credential,
                         &mut |n, folder| progress_ctx.progress(n as i64, 0, &format!("reading {folder}")),
                         &|| stop_ctx.check_cancel().is_err(),
                     )
@@ -1001,7 +1181,13 @@ impl crate::jobs::JobExecutor for CheckMailboxExecutor {
             match summary {
                 Ok(s) => Ok(serde_json::to_value(s).unwrap_or(Value::Null)),
                 Err(ImapError::Canceled) => Err(crate::jobs::JobError::Canceled),
-                Err(e) => Err(crate::jobs::JobError::Failed(e.to_string())),
+                Err(e) => {
+                    // A token the server turned down is not tried again.
+                    if matches!(e, ImapError::SignIn(_)) {
+                        credentials.forget(&source_id);
+                    }
+                    Err(crate::jobs::JobError::Failed(e.to_string()))
+                }
             }
         })
     }
@@ -1010,6 +1196,10 @@ impl crate::jobs::JobExecutor for CheckMailboxExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pw(password: &str) -> Credential {
+        Credential::Password(password.into())
+    }
     use std::io::{BufRead, BufReader};
     use std::net::TcpListener;
 
@@ -1062,9 +1252,14 @@ mod tests {
 
     #[test]
     fn plain_text_to_a_remote_server_is_refused_before_connecting() {
-        let account =
-            ImapAccount { host: "imap.example.com".into(), port: 143, username: "c".into(), security: Security::Plain };
-        assert!(matches!(Connection::open(&account, "secret"), Err(ImapError::PlainRefused(_))));
+        let account = ImapAccount {
+            host: "imap.example.com".into(),
+            port: 143,
+            username: "c".into(),
+            security: Security::Plain,
+            auth: Auth::Password,
+        };
+        assert!(matches!(Connection::open(&account, &pw("secret")), Err(ImapError::PlainRefused(_))));
     }
 
     // ------------------------------------------------------ a scripted server
@@ -1107,6 +1302,20 @@ mod tests {
                         } else {
                             w.write_all(format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n").as_bytes())
                                 .unwrap();
+                        }
+                    } else if let Some(arg) = cmd.strip_prefix("AUTHENTICATE XOAUTH2 ") {
+                        // `password` is the access token this server takes.
+                        let said = String::from_utf8_lossy(&crate::sources::mime::decode_base64(arg)).into_owned();
+                        if said.starts_with("user=") && said.ends_with(&format!("\x01auth=Bearer {password}\x01\x01")) {
+                            w.write_all(format!("{tag} OK AUTHENTICATE completed.\r\n").as_bytes()).unwrap();
+                        } else {
+                            // The reason as a challenge, as Gmail does; the
+                            // client answers with an empty line.
+                            w.write_all(b"+ eyJzdGF0dXMiOiI0MDEifQ==\r\n").unwrap();
+                            let mut answer = String::new();
+                            r.read_line(&mut answer).unwrap();
+                            seen.push(format!("(challenge answered with {:?})", answer.trim_end()));
+                            w.write_all(format!("{tag} NO AUTHENTICATE failed.\r\n").as_bytes()).unwrap();
                         }
                     } else if upper.starts_with("LIST") {
                         for b in &boxes {
@@ -1204,6 +1413,7 @@ mod tests {
                 port,
                 username: "c@example.com".into(),
                 security: Security::Plain,
+                auth: Auth::Password,
             },
             folders: vec![],
             sent_folder: None,
@@ -1255,7 +1465,7 @@ mod tests {
         let (port, seen) = serve(vec![inbox, sent], "app-pass");
         let (db, source) = db_for(port);
 
-        let first = sync(&db, &source, "app-pass", &mut |_, _| {}, &|| false).unwrap();
+        let first = sync(&db, &source, &pw("app-pass"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(first.fetched, 2);
         assert_eq!(first.inserted, 2);
         assert_eq!(first.from_self, 1, "the sent folder is where the user's own writing is");
@@ -1285,9 +1495,147 @@ mod tests {
         assert_eq!(body, "yes — see you there", "quoted-printable decoded, not stored raw");
 
         // Second check: the server answers "12:*" with message 11 anyway; nothing is fetched.
-        let second = sync(&db, &source, "app-pass", &mut |_, _| {}, &|| false).unwrap();
+        let second = sync(&db, &source, &pw("app-pass"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(second.fetched, 0);
         assert_eq!(second.inserted, 0);
+    }
+
+    /// Credentials for tests: secrets in memory, saves recorded, Microsoft's
+    /// token endpoint replaced with `token_url`.
+    /// Every (key, value) a `Credentials` saved, in order.
+    type Saved = Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
+    fn credentials(secrets: Vec<(String, String)>, token_url: &str, client: Option<&str>) -> (Credentials, Saved) {
+        let store: Arc<std::sync::Mutex<HashMap<String, String>>> =
+            Arc::new(std::sync::Mutex::new(secrets.into_iter().collect()));
+        let saved = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (read, write, log) = (store.clone(), store, saved.clone());
+        let creds = Credentials::new(
+            Arc::new(move |k: &str| read.lock().unwrap().get(k).cloned()),
+            Arc::new(move |k: &str, v: &str| {
+                write.lock().unwrap().insert(k.into(), v.into());
+                log.lock().unwrap().push((k.into(), v.into()));
+                Ok(())
+            }),
+            super::super::oauth::Provider { token_url: token_url.into(), ..super::super::oauth::Provider::microsoft() },
+            client.map(str::to_string),
+        );
+        (creds, saved)
+    }
+
+    #[test]
+    fn a_mailbox_signed_in_with_microsoft_is_read_with_a_token_and_never_a_password() {
+        let (url, forms) = super::super::oauth::fake::token_endpoint(vec![(
+            200,
+            r#"{"access_token":"at-1","refresh_token":"rt-2","expires_in":3599}"#.into(),
+        )]);
+        let inbox = Mailbox {
+            name: "INBOX",
+            validity: 1,
+            messages: vec![(1, mail("q@x", "Ada <ada@example.com>", None, "Mon, 2 Mar 2026 09:00:00 +0000", "hello?"))],
+        };
+        let (port, seen) = serve(vec![inbox, Mailbox { name: "Sent", validity: 1, messages: vec![] }], "at-1");
+        let (db, source) = db_for(port);
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        config.account.auth = Auth::Microsoft;
+        db.set_source_config(&source, &serde_json::to_value(&config).unwrap()).unwrap();
+
+        let (creds, saved) = credentials(vec![(secret_key(&source), "rt-1".into())], &url, Some("client-1"));
+        let credential = creds.credential(Auth::Microsoft, &source).unwrap();
+        assert!(matches!(&credential, Credential::AccessToken(t) if t == "at-1"));
+        assert!(!format!("{credential:?}").contains("at-1"), "a credential never prints");
+        let form = forms.recv().unwrap();
+        assert!(form.contains("grant_type=refresh_token") && form.contains("refresh_token=rt-1"), "{form}");
+        assert_eq!(
+            *saved.lock().unwrap(),
+            vec![(secret_key(&source), "rt-2".to_string())],
+            "the new refresh token is kept"
+        );
+
+        let s = sync(&db, &source, &credential, &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!(s.inserted, 1);
+        let commands = seen.recv().unwrap();
+        assert!(commands.iter().any(|c| c.contains("AUTHENTICATE XOAUTH2 ")), "{commands:?}");
+        assert!(!commands.iter().any(|c| c.to_ascii_uppercase().contains("LOGIN")), "no password is ever sent");
+
+        // The next check within the hour uses the token it has: the token
+        // endpoint, which answers once, is not asked again.
+        assert!(matches!(creds.credential(Auth::Microsoft, &source), Ok(Credential::AccessToken(t)) if t == "at-1"));
+        creds.forget(&source);
+        assert!(creds.credential(Auth::Microsoft, &source).is_err(), "forgotten, it has to ask again");
+    }
+
+    #[test]
+    fn a_token_the_server_turns_down_asks_for_a_new_sign_in() {
+        let (port, seen) = serve(vec![Mailbox { name: "INBOX", validity: 1, messages: vec![] }], "at-good");
+        let (db, source) = db_for(port);
+        let err =
+            sync(&db, &source, &Credential::AccessToken("at-stale".into()), &mut |_, _| {}, &|| false).unwrap_err();
+        assert!(matches!(&err, ImapError::SignIn(why) if why == "AUTHENTICATE failed."), "{err:?}");
+        assert!(err.to_string().contains("Sign in again under Your mail"));
+        let commands = seen.recv().unwrap();
+        assert!(commands.contains(&"(challenge answered with \"\")".to_string()), "{commands:?}");
+        assert_eq!(db.get_source(&source).unwrap().unwrap().status, "failed");
+    }
+
+    #[test]
+    fn credentials_say_what_is_missing_and_what_to_do() {
+        let (url, _forms) = super::super::oauth::fake::token_endpoint(vec![(
+            400,
+            r#"{"error":"invalid_grant","error_description":"AADSTS70008: expired"}"#.into(),
+        )]);
+        let (none, _) = credentials(vec![], &url, Some("client-1"));
+        assert!(none.credential(Auth::Password, "s1").unwrap_err().contains("New password"));
+        assert!(none.credential(Auth::Microsoft, "s1").unwrap_err().contains("Sign in again under Your mail"));
+        let (unconfigured, _) = credentials(vec![(secret_key("s1"), "rt".into())], &url, None);
+        assert!(unconfigured.credential(Auth::Microsoft, "s1").unwrap_err().contains("can't sign in with Microsoft"));
+        let (lapsed, saved) = credentials(vec![(secret_key("s1"), "rt".into())], &url, Some("client-1"));
+        assert_eq!(
+            lapsed.credential(Auth::Microsoft, "s1").unwrap_err(),
+            "Microsoft wants you to sign in again for this mailbox. Do it under Your mail."
+        );
+        assert!(saved.lock().unwrap().is_empty());
+        let (with_password, _) = credentials(vec![(secret_key("s1"), "app-pass".into())], &url, None);
+        assert!(
+            matches!(with_password.credential(Auth::Password, "s1"), Ok(Credential::Password(p)) if p == "app-pass")
+        );
+    }
+
+    #[test]
+    fn a_new_sign_in_takes_the_place_of_the_old_one_and_of_its_token() {
+        let (url, forms) = super::super::oauth::fake::token_endpoint(vec![
+            (200, r#"{"access_token":"at-1","refresh_token":"rt-2","expires_in":3599}"#.into()),
+            (200, r#"{"access_token":"at-9","expires_in":3599}"#.into()),
+        ]);
+        let (creds, saved) = credentials(vec![(secret_key("s1"), "rt-1".into())], &url, Some("client-1"));
+        assert!(matches!(creds.credential(Auth::Microsoft, "s1"), Ok(Credential::AccessToken(t)) if t == "at-1"));
+        assert!(forms.recv().unwrap().contains("refresh_token=rt-1"));
+
+        let kept = creds.settle("s1", || (creds.save)(&secret_key("s1"), "rt-new"));
+        assert!(kept.is_ok());
+        // The token from the old sign-in is not used again: the new sign-in
+        // is traded for one.
+        assert!(matches!(creds.credential(Auth::Microsoft, "s1"), Ok(Credential::AccessToken(t)) if t == "at-9"));
+        let form = forms.recv().unwrap();
+        assert!(form.contains("refresh_token=rt-new"), "{form}");
+        assert_eq!(
+            *saved.lock().unwrap(),
+            vec![(secret_key("s1"), "rt-2".to_string()), (secret_key("s1"), "rt-new".to_string())],
+            "no refresh token was handed back the second time, so the new sign-in stays"
+        );
+    }
+
+    #[test]
+    fn a_microsoft_mailbox_takes_no_password() {
+        let (port, _) = serve(vec![Mailbox { name: "INBOX", validity: 1, messages: vec![] }], "pw");
+        let (db, source) = db_for(port);
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        config.account.auth = Auth::Microsoft;
+        db.set_source_config(&source, &serde_json::to_value(&config).unwrap()).unwrap();
+        let err = replace_password(&db, &source, "pw", |_| Ok(())).unwrap_err();
+        assert!(matches!(err, PasswordError::SignsInWithMicrosoft));
     }
 
     #[test]
@@ -1313,7 +1661,7 @@ mod tests {
             "pw",
         );
         let (db, source) = db_for(port);
-        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(db.count_conversations().unwrap(), 1);
 
         // Ada follows up in a later check, replying to her own message.
@@ -1353,7 +1701,7 @@ mod tests {
             serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
         cfg.account.port = port2;
         db.set_source_config(&source, &serde_json::to_value(&cfg).unwrap()).unwrap();
-        let s = sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        let s = sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(s.fetched, 1, "only the new message");
         assert_eq!(db.count_conversations().unwrap(), 1, "it joined the existing thread");
     }
@@ -1375,13 +1723,13 @@ mod tests {
         };
         let (port, _) = serve(make(1), "pw");
         let (db, source) = db_for(port);
-        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         let (port2, _) = serve(make(2), "pw");
         let mut cfg: ImapSourceConfig =
             serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
         cfg.account.port = port2;
         db.set_source_config(&source, &serde_json::to_value(&cfg).unwrap()).unwrap();
-        let s = sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        let s = sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(s.renumbered, vec!["INBOX".to_string()]);
         assert_eq!(s.fetched, 1);
         assert_eq!(s.inserted, 0);
@@ -1392,7 +1740,7 @@ mod tests {
     fn a_wrong_password_says_so_and_marks_the_source_failed() {
         let (port, _) = serve(vec![Mailbox { name: "INBOX", validity: 1, messages: vec![] }], "right");
         let (db, source) = db_for(port);
-        let err = sync(&db, &source, "wrong", &mut |_, _| {}, &|| false).unwrap_err();
+        let err = sync(&db, &source, &pw("wrong"), &mut |_, _| {}, &|| false).unwrap_err();
         assert!(matches!(err, ImapError::Login(_)), "{err}");
         assert!(err.to_string().contains("app password"));
         let s = db.get_source(&source).unwrap().unwrap();
@@ -1405,7 +1753,7 @@ mod tests {
         let inbox = vec![(1, mail("a@x", "Ada <ada@x>", None, "Mon, 1 Sep 2026 09:00:00 +0000", "Lunch?"))];
         let (port, _) = serve(vec![Mailbox { name: "INBOX", validity: 1, messages: inbox }], "right");
         let (db, source) = db_for(port);
-        sync(&db, &source, "right", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &source, &pw("right"), &mut |_, _| {}, &|| false).unwrap();
         let before = db.refresh_source_counts(&source).unwrap();
         assert_eq!(before, 1);
         record_failure(&db, &source, "I don't have a password I can use for this mailbox.").unwrap();
@@ -1470,7 +1818,7 @@ mod tests {
         let (port, _) = serve(boxes(), "pw");
         let (db, source) = db_for(port);
         let calls = std::cell::Cell::new(0);
-        let err = sync(&db, &source, "pw", &mut |_, _| {}, &|| {
+        let err = sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| {
             calls.set(calls.get() + 1);
             calls.get() > 1
         })
@@ -1485,7 +1833,7 @@ mod tests {
         let mut cfg = cfg;
         cfg.account.port = port2;
         db.set_source_config(&source, &serde_json::to_value(&cfg).unwrap()).unwrap();
-        let s = sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        let s = sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(s.inserted, CHUNK + 5, "the next check reads all of it");
     }
 
@@ -1522,7 +1870,7 @@ mod tests {
             "pw",
         );
         let (db, source) = db_for(port);
-        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(db.count_conversations().unwrap(), 1);
         let waiting = db.threads_awaiting_reply(10).unwrap();
         assert_eq!(waiting.len(), 1);
@@ -1565,7 +1913,7 @@ mod tests {
             "pw",
         );
         let (db, source) = db_for(port);
-        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(db.count_conversations().unwrap(), 1);
         assert!(db.threads_awaiting_reply(10).unwrap().is_empty(), "the user replied last");
     }
@@ -1626,7 +1974,7 @@ mod tests {
             "pw",
         );
         let (db, source) = db_for(port);
-        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
 
         let people = db.sent_folder_people().unwrap();
         let listed: Vec<(&str, usize, usize)> =
@@ -1678,7 +2026,7 @@ mod tests {
             "pw",
         );
         let (db, source) = db_for(port);
-        let s = sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        let s = sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!((s.inserted, s.duplicates), (1, 1));
         assert_eq!(db.count_self_messages(None, None).unwrap(), 1, "the copy the user sent is the one kept");
         assert_eq!(db.count_participants().unwrap(), 0, "nobody is made up for the copy that was dropped");
@@ -1727,7 +2075,7 @@ mod tests {
             "pw",
         );
         let (db, source) = db_for(port);
-        sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(db.count_messages().unwrap(), 3, "everything is read; nothing is thrown away");
         let waiting = db.threads_awaiting_reply(10).unwrap();
         assert_eq!(waiting.len(), 1);
@@ -1755,7 +2103,7 @@ mod tests {
             "pw",
         );
         let (db, source) = db_for(port);
-        let s = sync(&db, &source, "pw", &mut |_, _| {}, &|| false).unwrap();
+        let s = sync(&db, &source, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!((s.too_large, s.fetched, s.inserted), (1, 2, 2));
         let commands = seen.recv().unwrap();
         assert!(
@@ -1798,7 +2146,7 @@ mod tests {
         };
         let (port, _) = serve(boxes(), "pw");
         let (db, first) = db_for(port);
-        sync(&db, &first, "pw", &mut |_, _| {}, &|| false).unwrap();
+        sync(&db, &first, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         let (port2, _) = serve(boxes(), "pw");
         let config = ImapSourceConfig {
             account: ImapAccount {
@@ -1806,6 +2154,7 @@ mod tests {
                 port: port2,
                 username: "c@example.com".into(),
                 security: Security::Plain,
+                auth: Auth::Password,
             },
             folders: vec![],
             sent_folder: None,
@@ -1822,7 +2171,7 @@ mod tests {
             })
             .unwrap()
             .id;
-        let s = sync(&db, &second, "pw", &mut |_, _| {}, &|| false).unwrap();
+        let s = sync(&db, &second, &pw("pw"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!((s.inserted, s.duplicates), (0, 2));
         assert_eq!(db.count_messages().unwrap(), 2);
         assert_eq!(db.count_self_messages(None, None).unwrap(), 1, "the user's reply is counted once");
@@ -1847,8 +2196,14 @@ mod tests {
     #[test]
     fn a_probe_finds_the_folders_and_warns_about_a_missing_sent_folder() {
         let (port, _) = serve(vec![Mailbox { name: "INBOX", validity: 1, messages: vec![] }], "pw");
-        let account = ImapAccount { host: "localhost".into(), port, username: "c".into(), security: Security::Plain };
-        let p = probe(&account, "pw").unwrap();
+        let account = ImapAccount {
+            host: "localhost".into(),
+            port,
+            username: "c".into(),
+            security: Security::Plain,
+            auth: Auth::Password,
+        };
+        let p = probe(&account, &pw("pw")).unwrap();
         assert_eq!(p.folders, vec!["INBOX".to_string()]);
         assert!(p.sent_folder.is_none());
         assert!(p.warnings.iter().any(|w| w.contains("sent folder")));

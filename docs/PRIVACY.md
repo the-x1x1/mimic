@@ -14,7 +14,9 @@ Four things, all of them the user's choice and all of them visible in the interf
 
 **Drafting.** The provider selected in Settings receives the assembled prompt: the message being replied to, the intent the user typed, a handful of their own past messages, the recipient's display name and relationship, and the measured description of how they write. When that provider is the local one, this does not leave the machine at all, and the top bar says "Local model". When it is a hosted provider, the top bar says "Sends to Claude" and the Settings description spells out exactly what is transmitted.
 
-**A connected mailbox.** When the user connects one, Mimic logs in to _their_ mail server over TLS with the app password they gave it, and reads — the inbox and the sent folder, with `EXAMINE` and `BODY.PEEK[]`, so nothing is marked as read, moved or deleted. What travels is the login and the requests for mail; what comes back stays on this computer. It checks on the schedule in Settings (every 15 minutes by default, or only when asked), and the home screen says that it does. Until a mailbox is connected, nothing arrives on its own, and the screens say that instead.
+**A connected mailbox.** When the user connects one, Mimic logs in to _their_ mail server over TLS, with the app password they gave it or the Microsoft sign-in below, and reads — the inbox and the sent folder, with `EXAMINE` and `BODY.PEEK[]`, so nothing is marked as read, moved or deleted. What travels is the login and the requests for mail; what comes back stays on this computer. It checks on the schedule in Settings (every 15 minutes by default, or only when asked), and the home screen says that it does. Until a mailbox is connected, nothing arrives on its own, and the screens say that instead.
+
+**Signing in with Microsoft.** Outlook.com, Hotmail and Microsoft 365 mailboxes take no password. For those, the user signs in in their own browser, on Microsoft's page, and Mimic never sees the password. What Microsoft hands back is a sign-in that lasts (a refresh token); when Mimic checks the mailbox it sends that, with Mimic's client id, to Microsoft's sign-in service for an access token that lasts about an hour, and then reads the mailbox as above. No mail and nothing about it goes to the sign-in service, and nothing does for a mailbox with an app password.
 
 **Update checks.** A request to the GitHub releases endpoint carrying the current version. Switched off with `updates.automatic`.
 
@@ -38,7 +40,7 @@ The dialog says all of this before it happens, in sentences rather than a table 
 
 The preview is produced by the same code path as the deletion with the writes skipped, so it cannot understate the consequences. Tested in `privacy::tests::a_preview_changes_nothing_and_matches_what_deletion_does`.
 
-**Deleting a source** removes everything imported through it, and any person Mimic only ever saw through it. For a connected mailbox it also removes the stored app password, and stops the checking. A thread can hold mail from two sources — an export and the mailbox it came from join by Message-ID — and deleting one of them removes exactly that source's messages: a thread it owned that also holds the other's mail is handed to the other source rather than removed, and the report counts only what actually went.
+**Deleting a source** removes everything imported through it, and any person Mimic only ever saw through it. For a connected mailbox it also removes the stored app password or Microsoft sign-in, and stops the checking. Microsoft isn't told: to withdraw Mimic's access there too, remove it from the apps with access to your Microsoft account. A thread can hold mail from two sources — an export and the mailbox it came from join by Message-ID — and deleting one of them removes exactly that source's messages: a thread it owned that also holds the other's mail is handed to the other source rather than removed, and the report counts only what actually went.
 
 **Connecting a mailbox** adds its address to the user's own addresses only after the login works, and only when the user ticks that it is theirs — a shared mailbox (team@, support@) is left out, so what colleagues sent from it is not read as the user's writing.
 
@@ -48,7 +50,7 @@ None of these are recoverable. `Db::open` writes a database backup before a sche
 
 ## Credentials
 
-Provider API keys and mailbox app passwords (under `imap:<source id>`) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth.
+Provider API keys, mailbox app passwords and a Microsoft mailbox's sign-in (each under `imap:<source id>`) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth. The hour-long access token a sign-in is traded for is kept in memory only and never written.
 
 ## What Mimic will not do
 

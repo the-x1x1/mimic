@@ -67,6 +67,31 @@ export function useSetMailboxPassword() {
   });
 }
 
+/** Whether this copy of Mimic can sign in to a mailbox with Microsoft. It can't change while it runs. */
+export function useMailSignIn() {
+  return useQuery({
+    queryKey: qk.mailSignIn,
+    queryFn: ipc.mailSignInAvailable,
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Sign a connected Microsoft mailbox in again. Resolves once the browser has
+ * come back and the new sign-in opened the mailbox.
+ */
+export function useSignInMailboxAgain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceId: string) => ipc.signInMailboxAgain(sourceId),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.dashboard, qk.providers]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
 /** Turn a finished import job's result into the sentence the tray shows. */
 export function summarizeImport(result: unknown): string | null {
   const parsed = ImportSummary.safeParse(result);

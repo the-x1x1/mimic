@@ -734,10 +734,33 @@ describe("connecting a mailbox", () => {
     const { guessMailHost } = await import("../src");
     expect(guessMailHost("c@gmail.com")?.host).toBe("imap.gmail.com");
     expect(guessMailHost("c@icloud.com")?.port).toBe(993);
-    // Outlook.com is known, and known not to work with a password.
-    expect(guessMailHost("C@Outlook.com")?.supported).toBe(false);
+    // Outlook.com is known, and signs in with Microsoft rather than a password.
+    expect(guessMailHost("C@Outlook.com")).toMatchObject({
+      host: "outlook.office365.com",
+      signIn: "microsoft",
+    });
+    expect(guessMailHost("c@gmail.com")?.signIn).toBeUndefined();
+    // Microsoft's addresses in other countries sign in the same way.
+    for (const a of ["c@hotmail.co.uk", "c@outlook.fr", "c@live.com.au", "c@windowslive.com"]) {
+      expect(guessMailHost(a)?.signIn).toBe("microsoft");
+    }
+    // Other people's domains that only look like Microsoft's keep the password.
+    for (const a of ["c@liveworld.com", "c@live.io", "c@outlook.co", "c@msn.ai", "c@passport.me"]) {
+      expect(guessMailHost(a)).toBeNull();
+    }
+    expect(guessMailHost("c@outlook.example.com")).toBeNull();
     expect(guessMailHost("c@formicaria.us")).toBeNull();
     expect(guessMailHost("not an address")).toBeNull();
+  });
+
+  it("reads how a connected mailbox signs in from its settings", async () => {
+    const { mailboxAuth } = await import("../src");
+    const imap = (account: Record<string, unknown>) => ({ connector: "imap", config: { account } });
+    expect(mailboxAuth(imap({ username: "c@outlook.com", auth: "microsoft" }))).toBe("microsoft");
+    expect(mailboxAuth(imap({ username: "c@gmail.com", auth: "password" }))).toBe("password");
+    // Connected before there was a choice.
+    expect(mailboxAuth(imap({ username: "c@gmail.com" }))).toBe("password");
+    expect(mailboxAuth({ connector: "mbox", config: {} })).toBeNull();
   });
 });
 

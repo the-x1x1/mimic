@@ -164,6 +164,20 @@ export const ipc = {
    */
   setMailboxPassword: (sourceId: string, password: string) =>
     call("set_mailbox_password", Source, { sourceId, password }),
+  /** Whether this copy of Mimic can sign in to a mailbox with Microsoft. */
+  mailSignInAvailable: () => call("mail_sign_in_available", z_bool),
+  /**
+   * Sign in with Microsoft in the browser, and look at the mailbox without
+   * importing anything. Resolves once the browser has come back.
+   */
+  signInToMailbox: (email: string) => call("sign_in_to_mailbox", ImapProbe, { email }),
+  /** Connect the mailbox just signed in to. */
+  connectSignedInMailbox: (email: string, isMine: boolean) =>
+    call("connect_signed_in_mailbox", Source, { email, isMine }),
+  /** Stop a sign-in waiting on the browser, and forget one not yet connected. */
+  cancelMailSignIn: () => call("cancel_mail_sign_in", z_void),
+  /** Sign a connected Microsoft mailbox in again, keeping everything read from it. */
+  signInMailboxAgain: (sourceId: string) => call("sign_in_mailbox_again", Source, { sourceId }),
   deleteSource: (sourceId: string) => call("delete_source", DeletionReport, { sourceId }),
   pickSourceFile: (title: string, extensions: string[]) =>
     call("pick_source_file", z_string.nullable(), { title, extensions }),

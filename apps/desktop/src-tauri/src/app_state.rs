@@ -29,6 +29,27 @@ pub struct AppState {
     pub log_dir: PathBuf,
     /// This process's hold on the data folder, for as long as the app runs.
     pub instance: mimic_core::instance::InstanceLock,
+    /// What mailboxes sign in with, shared with the mailbox check, so a
+    /// sign-in made here replaces what the check has kept.
+    pub mail_credentials: Arc<mimic_core::sources::imap::Credentials>,
+    /// A mailbox sign-in waiting on the browser.
+    pub sign_in: MailSignIn,
+}
+
+/// A mailbox sign-in: one at a time, stoppable, and — between signing in
+/// and saying "connect" — what it brought back, held in memory only.
+#[derive(Default)]
+pub struct MailSignIn {
+    pub active: AtomicBool,
+    pub cancel: AtomicBool,
+    pub pending: std::sync::Mutex<Option<PendingSignIn>>,
+}
+
+/// A mailbox signed in to and looked at, not yet connected.
+pub struct PendingSignIn {
+    pub email: String,
+    pub refresh_token: String,
+    pub probe: mimic_core::sources::imap::ImapProbe,
 }
 
 pub type SharedState = Arc<AppState>;
