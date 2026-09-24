@@ -22,6 +22,7 @@ pub mod mime;
 pub mod mimic_json;
 pub mod normalize;
 pub mod oauth;
+pub mod whatsapp;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
@@ -109,6 +110,29 @@ pub struct ValidationReport {
     /// Gmail's "Sent" label, or a file whose name says it is the Sent folder.
     #[serde(default)]
     pub sent_folder: usize,
+    /// For a source that knows people only by the names a phone saved them
+    /// under (WhatsApp), everyone who wrote, most messages first, so the user
+    /// can say which is theirs. Empty for any other source.
+    #[serde(default)]
+    pub names: Vec<WriterName>,
+}
+
+/// Someone who wrote in a chat that knows people only by name, as the import
+/// will know them — so saying which is the user adds exactly the address the
+/// import matches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterName {
+    pub name: String,
+    /// The kind of address the import gives them: `handle` or `phone`.
+    pub kind: String,
+    pub value: String,
+    /// What matching compares, as the user's own addresses store it.
+    pub normalized: String,
+    pub messages: usize,
+    /// A chat here is named after them: in one between two people, the one
+    /// it is with, which is seldom the user.
+    pub chat_named_after: bool,
 }
 
 /// What mail programs call the folder of what the user sent, lower-cased:
@@ -185,7 +209,7 @@ pub trait CommunicationSource: Send + Sync {
 
 /// Every connector this build ships.
 pub fn all() -> Vec<Box<dyn CommunicationSource>> {
-    vec![Box::new(mimic_json::MimicJsonSource), Box::new(mbox::MboxSource)]
+    vec![Box::new(mimic_json::MimicJsonSource), Box::new(mbox::MboxSource), Box::new(whatsapp::WhatsAppSource)]
 }
 
 pub fn by_connector(connector: &str) -> SourceResult<Box<dyn CommunicationSource>> {

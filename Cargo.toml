@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/mimic-core", "crates/keychain", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.10.0-alpha.18"
+version = "0.10.0-alpha.19"
 edition = "2021"
 # 1.89: std::fs::File::try_lock, for the one-Mimic-at-a-time lock (instance.rs).
 rust-version = "1.89"
@@ -29,6 +29,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # The IMAP connector's TLS: the same rustls and root store reqwest already uses.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
+# WhatsApp exports from an iPhone, and with media, are zips: read with the zip
+# crate the updater already builds (without its other formats), inflated by
+# flate2's Rust backend.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+flate2 = "1"
 tempfile = "3"
 mimic-core = { path = "crates/mimic-core" }
 mimic-keychain = { path = "crates/keychain" }

@@ -6,6 +6,7 @@ import {
   Adjustment,
   PersonConversations,
   SearchPage,
+  ValidationReport,
   describeFound,
   hasWordsToFind,
   canPutOnList,
@@ -1186,5 +1187,28 @@ describe("finding what was said", () => {
     expect(hasWordsToFind("résumé")).toBe(true);
     expect(hasWordsToFind("42")).toBe(true);
     expect(hasWordsToFind('""')).toBe(false);
+  });
+});
+
+describe("a WhatsApp chat, before it is imported", () => {
+  it("parses the check: what was read, what was left out, and every name that wrote", () => {
+    const report = ValidationReport.parse(read(contractFixture("validation_report.json")));
+    expect(report.ok).toBe(true);
+    expect(report.names.map((w) => [w.name, w.kind, w.normalized, w.chatNamedAfter])).toEqual([
+      ["Ada", "handle", "whatsapp:ada", true],
+      ["C", "handle", "whatsapp:c", false],
+    ]);
+    // What the user would add is what the import matches.
+    const ids = report.frequentIdentifiers.map(([id]) => id);
+    expect(report.names.every((w) => ids.includes(w.value))).toBe(true);
+    expect(report.warnings.some((w) => w.includes("no words of yours"))).toBe(true);
+  });
+
+  it("reads a check from a source that knows no names as having none", () => {
+    const older: Record<string, unknown> = {
+      ...ValidationReport.parse(read(contractFixture("validation_report.json"))),
+    };
+    delete older.names;
+    expect(ValidationReport.parse(older).names).toEqual([]);
   });
 });

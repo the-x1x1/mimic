@@ -28,6 +28,8 @@ hex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 webpki-roots.workspace = true
+zip.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

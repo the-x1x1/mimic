@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "blockers": [],
+  "warnings": [
+    "Only 12 messages. That is enough to import, but a voice profile needs a few hundred of your own messages to say anything useful.",
+    "2 messages — photos, voice messages, calls, deleted messages — have no words of yours, so they're left out."
+  ],
+  "conversations": 1,
+  "messages": 12,
+  "frequentIdentifiers": [
+    ["whatsapp:Ada", 6],
+    ["whatsapp:C", 6]
+  ],
+  "earliest": "2026-01-13T04:02:00Z",
+  "latest": "2026-01-16T18:03:00Z",
+  "sentFolder": 0,
+  "names": [
+    {
+      "name": "Ada",
+      "kind": "handle",
+      "value": "whatsapp:Ada",
+      "normalized": "whatsapp:ada",
+      "messages": 6,
+      "chatNamedAfter": true
+    },
+    {
+      "name": "C",
+      "kind": "handle",
+      "value": "whatsapp:C",
+      "normalized": "whatsapp:c",
+      "messages": 6,
+      "chatNamedAfter": false
+    }
+  ]
+}

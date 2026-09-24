@@ -1,6 +1,6 @@
 [project]
 name = "mimic-engine"
-version = "0.10.0a18"
+version = "0.10.0a19"
 description = "Mimic text engine: embeddings, similarity search and held-out evaluation. Runs as a stdio NDJSON sidecar of the Mimic desktop app."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.19] — 2026-09-23
+
+WhatsApp chats.
+
+### Added
+
+- **Bring in a WhatsApp chat.** In WhatsApp, open a chat and use **Export chat**; then under Your mail → Add a source, choose **WhatsApp chat** and the file it made — the `.txt`, or the `.zip` from an iPhone or with media. I read each message with who wrote it and when, messages of several lines included, from Android and iPhone exports alike, with a 12- or 24-hour clock.
+- **Say which name is yours.** WhatsApp knows people only by the name your phone saved them under, not by an address, so before importing I list everyone who wrote and ask **Which of these is you?** The name you pick becomes one of your addresses, as any address does — and if I'd already filed messages under that name as someone else, I show you who and what would move first. I ask again before taking the name the chat is named after (usually the other person) or a second name, and you can take a name back before importing. Until you say, your messages in the chat read as someone else's.
+- Dates in an export don't say whether they're day or month first. I read it from the chat itself — a 13th settles it, and so does which reading keeps the messages in order — and when nothing does, I read them day first and say so before you import.
+- Photos, voice messages, stickers, calls, locations, polls and deleted messages have no words of yours, so they're left out, and the check says how many. WhatsApp's own lines — "Messages and calls are end-to-end encrypted", "Ada added Bob" — are left out too.
+- Exporting the same chat again later from the same phone and importing it adds only what's new — as long as the file keeps the name WhatsApp gave it and the contact hasn't been renamed.
+
 ## [0.10.0-alpha.18] — 2026-09-23
 
 Find what was said.

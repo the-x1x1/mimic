@@ -812,3 +812,49 @@ fn mail_labelled_sent_from_an_unknown_address_is_asked_about() {
     assert_eq!(db.count_threads_awaiting_reply().unwrap(), 0, "Ada was answered, and so was Bob");
     assert!(db.sent_folder_people().unwrap().is_empty());
 }
+
+/// A WhatsApp chat: the check names who wrote, the user says which name is
+/// theirs by adding its handle, and their messages are theirs; importing the
+/// same export again adds nothing.
+#[test]
+fn a_whatsapp_chat_is_the_users_once_they_say_which_name_is_theirs() {
+    let db = Db::open_in_memory().unwrap();
+    db.set_user_identity("C").unwrap();
+    db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
+    let path = fixture("import/WhatsApp Chat with Ada.txt");
+
+    let whatsapp = mimic_core::sources::by_connector("whatsapp").unwrap();
+    let report = whatsapp.validate(&path).unwrap();
+    assert!(report.ok, "{report:?}");
+    let names: Vec<(&str, usize, bool)> =
+        report.names.iter().map(|w| (w.name.as_str(), w.messages, w.chat_named_after)).collect();
+    assert_eq!(names, [("Ada", 6, true), ("C", 6, false)], "the chat is named after Ada");
+    assert!(report.warnings.iter().any(|w| w.starts_with("2 messages")), "{:?}", report.warnings);
+    check_fixture("validation_report.json", &serde_json::to_value(&report).unwrap());
+
+    // The name the user said was theirs, as the check gave it.
+    let c = report.names.iter().find(|w| w.name == "C").unwrap();
+    db.add_user_identifier(IdentifierKind::parse(&c.kind).unwrap(), &c.value).unwrap();
+    assert_eq!(c.value, mimic_core::sources::whatsapp::handle_of("C"));
+    let source = db
+        .create_source(&NewSource {
+            connector: "whatsapp".into(),
+            name: "Ada".into(),
+            channel: "chat".into(),
+            location: Some(path.to_string_lossy().into()),
+            config: Value::Null,
+        })
+        .unwrap();
+    let summary = run_import(&db, &source.id);
+    assert_eq!(summary.conversations, 1);
+    assert_eq!(summary.inserted, 12);
+    assert_eq!(summary.from_self, 6);
+    assert_eq!(summary.participants_created, 1, "Ada, and nobody for WhatsApp's own lines");
+    assert_eq!(db.count_self_messages(Some("chat"), None).unwrap(), 6);
+    let ada = db.list_participants(10).unwrap().into_iter().find(|p| p.participant.display_name == "Ada").unwrap();
+    assert_eq!((ada.message_count, ada.sent_by_user), (12, 6), "the whole chat, and the user's half of it");
+    assert_eq!(ada.participant.identifiers[0].value, "whatsapp:Ada");
+
+    let again = run_import(&db, &source.id);
+    assert_eq!((again.inserted, again.duplicates), (0, 12), "the same export again adds nothing");
+}
