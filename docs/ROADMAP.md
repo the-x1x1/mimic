@@ -36,7 +36,7 @@ Make the model of the person better, not the prompt longer.
 ## Phase 4 — Connectors
 
 - Done in 0.10.0-alpha.3: IMAP, read-only, inbox and sent, with a per-folder watermark and a schedule. Done in 0.10.0-alpha.14: signing in with Microsoft (OAuth 2.0 with PKCE, `AUTHENTICATE XOAUTH2`), which Outlook.com and Hotmail require, and every Microsoft 365 mailbox has since 2022–23. Still open: signing in with Google, and a first real connection to each major provider.
-- Done in 0.10.0-alpha.12: mail in the sent folder, or labelled `Sent` in a Gmail export, from an address the user didn't give is asked about by name. Still open: knowing the folder for other exports (a Thunderbird or Apple Mail export is one mbox per folder, and its name is the only clue), and marking mail imported before it.
+- Done in 0.10.0-alpha.12: mail in the sent folder, or labelled `Sent` in a Gmail export, from an address the user didn't give is asked about by name. Done in 0.10.0-alpha.15: a file named as the Sent folder (a Thunderbird or Apple Mail export is one mbox per folder, and its name is the only clue) is read as one, and importing a file again gives mail read by an earlier version the readings it lacked. Still open: a connected mailbox's mail from before the reading, and exports that say nothing about the folder.
 - Platform exports: iMessage, WhatsApp, Signal, Slack, Discord.
 - Incremental sync for file sources (IMAP has it).
 
@@ -54,7 +54,7 @@ Done: the dashboard of threads awaiting a reply; background drafting for them be
 
 Done in 0.10.0-alpha.3: with a mailbox connected, each check is followed by assisted drafting when that is on, so replies are prepared as mail arrives.
 
-Done in 0.10.0-alpha.4: mail that looks automated from its headers (`sources::automated`) is left out of what is waiting, counted, and shown on request; any thread can be marked as needing no reply until its next message, or kept on the list against the headers; assisted drafting uses the same definition (`db::repo_waiting`). Not done: nothing decides that a person's thread needs no reply — that stays the user's call; mail imported before 0.10.0-alpha.4 has no reading of its headers until its source is removed and added again (importing the same source again adds nothing).
+Done in 0.10.0-alpha.4: mail that looks automated from its headers (`sources::automated`) is left out of what is waiting, counted, and shown on request; any thread can be marked as needing no reply until its next message, or kept on the list against the headers; assisted drafting uses the same definition (`db::repo_waiting`). Not done: nothing decides that a person's thread needs no reply — that stays the user's call; mail imported before 0.10.0-alpha.4 has no reading of its headers until it is read again — from 0.10.0-alpha.15 importing a file again gives it one; a connected mailbox's older mail keeps none.
 
 Done in 0.10.0-alpha.5: senders that have only ever sent automated mail are left out of People and of every person picker, counted, and shown on request.
 

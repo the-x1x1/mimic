@@ -40,8 +40,9 @@ pub(crate) struct Mail {
     /// Why the headers say a machine sent it, if they do. Decided here because
     /// the headers are not kept after parsing.
     pub(crate) automated: Option<super::automated::Automated>,
-    /// It was in the user's own Sent folder: read from it over IMAP, or
-    /// labelled "Sent" in a Gmail export. What is there is usually what the
+    /// It was in the user's own Sent folder: read from it over IMAP,
+    /// labelled "Sent" in a Gmail export, or in a file whose name says it is
+    /// the Sent folder (`sent_folder_file`). What is there is usually what the
     /// user sent, so whoever it is filed under is often the user under an
     /// address Mimic doesn't know yet — and is asked about, never assumed.
     pub(crate) sent: bool,
@@ -57,7 +58,7 @@ impl CommunicationSource for MboxSource {
             connector: "mbox",
             display_name: "Email mailbox (mbox)",
             channel: "email",
-            description: "A standard .mbox file, as exported by Gmail Takeout, Thunderbird and most mail clients.",
+            description: "A standard .mbox file, as exported by Gmail Takeout, Thunderbird and most mail clients. For Apple Mail, choose the file named mbox inside the exported folder.",
             location_kind: LocationKind::File,
             extensions: &["mbox", "mbx"],
         }
@@ -84,6 +85,11 @@ impl CommunicationSource for MboxSource {
 
     fn validate(&self, location: &Path) -> SourceResult<ValidationReport> {
         let mut report = validate_by_dry_run(self, location)?;
+        if self.discover(location)?.iter().any(|p| sent_folder_file(p)) {
+            report
+                .warnings
+                .push("A file here is named as your Sent folder. If mail in it came from an address you haven't given me, I'll ask whether it's you.".into());
+        }
         if report.messages > 0 {
             let singletons = report.conversations;
             if singletons == report.messages && report.messages > 5 {
@@ -104,13 +110,38 @@ impl CommunicationSource for MboxSource {
         // their headers plus bodies are held — not the raw text.
         let mut mails = Vec::new();
         for path in self.discover(location)? {
+            let first = mails.len();
             read_mbox(&path, &mut mails)?;
+            // A Thunderbird or Apple Mail export is one file per folder, and
+            // the file's name is the only thing that says which folder.
+            if sent_folder_file(&path) {
+                for m in &mut mails[first..] {
+                    m.sent = true;
+                }
+            }
         }
         for convo in thread(mails) {
             sink(convo)?;
         }
         Ok(())
     }
+}
+
+/// Whether a file's name says it is the Sent folder: `Sent` (Thunderbird's
+/// own file), `Sent.mbox`, `Gesendete Elemente.mbx`, or Apple Mail's
+/// `Sent Messages.mbox/mbox`, whose folder carries the name.
+fn sent_folder_file(path: &Path) -> bool {
+    let name = |p: &Path| p.file_name().and_then(|n| n.to_str()).map(str::to_string);
+    let Some(mut file) = name(path) else { return false };
+    if file.eq_ignore_ascii_case("mbox") {
+        match path.parent().and_then(name) {
+            Some(folder) => file = folder,
+            None => return false,
+        }
+    }
+    let lower = file.to_lowercase();
+    let stem = [".mbox", ".mbx"].iter().find_map(|ext| lower.strip_suffix(ext)).unwrap_or(lower.as_str());
+    super::is_sent_folder_name(stem)
 }
 
 fn read_mbox(path: &Path, out: &mut Vec<Mail>) -> SourceResult<()> {
@@ -693,5 +724,73 @@ mod tests {
         redirected.sent = true;
         let convos = thread(vec![redirected]);
         assert!(convos[0].messages[0].metadata.get("sentFolder").is_none());
+    }
+
+    /// Two messages from the user's work address, one of them passed on.
+    const SENT_MBOX: &str = concat!(
+        "From c@work.example Mon Feb 02 09:00:00 2026\n",
+        "From: C at work <c@work.example>\n",
+        "Subject: numbers\n",
+        "Date: Mon, 2 Feb 2026 09:00:00 +0000\n",
+        "Message-ID: <s1@work.example>\n",
+        "\n",
+        "sending them over now\n",
+        "\n",
+        "From c@work.example Mon Feb 02 10:00:00 2026\n",
+        "Resent-From: C at work <c@work.example>\n",
+        "From: Ada <ada@example.com>\n",
+        "Subject: lunch\n",
+        "Date: Mon, 2 Feb 2026 10:00:00 +0000\n",
+        "Message-ID: <r1@example.com>\n",
+        "\n",
+        "lunch on thursday?\n",
+    );
+
+    #[test]
+    fn a_file_named_as_the_sent_folder_is_read_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let apple = dir.path().join("Sent Messages.mbox");
+        std::fs::create_dir(&apple).unwrap();
+        let named = [
+            dir.path().join("Sent"),
+            dir.path().join("Sent.mbox"),
+            dir.path().join("Gesendete Elemente.MBX"),
+            dir.path().join("Éléments envoyés.mbox"),
+            apple.join("mbox"),
+        ];
+        for path in &named {
+            std::fs::write(path, SENT_MBOX).unwrap();
+            let convos = import(path);
+            let all: Vec<_> = convos.iter().flat_map(|c| &c.messages).collect();
+            let sent = all.iter().find(|m| m.external_id == "s1@work.example").unwrap();
+            let passed_on = all.iter().find(|m| m.external_id == "r1@example.com").unwrap();
+            assert_eq!(sent.metadata["sentFolder"], serde_json::json!(true), "{path:?}");
+            assert!(passed_on.metadata.get("sentFolder").is_none(), "passed on, so its writer is someone else");
+            let report = MboxSource.validate(path).unwrap();
+            assert_eq!(report.sent_folder, 1);
+            assert!(
+                report.warnings.iter().any(|w| w.starts_with("A file here is named as your Sent folder")),
+                "{path:?}"
+            );
+        }
+
+        for other in ["Inbox.mbox", "Sent Archive.mbox", "Unsent.mbox", "mail.mbox"] {
+            let path = dir.path().join(other);
+            std::fs::write(&path, SENT_MBOX).unwrap();
+            let convos = import(&path);
+            assert!(
+                convos.iter().flat_map(|c| &c.messages).all(|m| m.metadata.get("sentFolder").is_none()),
+                "{other} says nothing about the folder"
+            );
+            let report = MboxSource.validate(&path).unwrap();
+            assert_eq!(report.sent_folder, 0);
+            assert!(!report.warnings.iter().any(|w| w.contains("Sent folder")));
+        }
+        // A folder of an export's files: only what came from the Sent file.
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("Sent.mbox"), SENT_MBOX).unwrap();
+        std::fs::write(folder.path().join("Inbox.mbox"), MBOX).unwrap();
+        let report = MboxSource.validate(folder.path()).unwrap();
+        assert_eq!(report.sent_folder, 1);
     }
 }

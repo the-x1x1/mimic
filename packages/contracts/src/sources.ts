@@ -49,6 +49,8 @@ export const ValidationReport = z.object({
   frequentIdentifiers: z.array(z.tuple([z.string(), z.number()])),
   earliest: z.string().nullable(),
   latest: z.string().nullable(),
+  /** Messages read as from the user's Sent folder: Gmail's label, or the file's name. */
+  sentFolder: z.number(),
 });
 export type ValidationReport = z.infer<typeof ValidationReport>;
 
@@ -60,6 +62,10 @@ export const ImportSummary = z.object({
   fromSelf: z.number(),
   unattributed: z.number(),
   participantsCreated: z.number(),
+  /** Messages already here that reading them again marked as from the Sent folder. */
+  sentFolderMarked: z.number().optional(),
+  /** Messages already here that reading them again marked as sent by a machine. */
+  automatedMarked: z.number().optional(),
 });
 export type ImportSummary = z.infer<typeof ImportSummary>;
 
@@ -73,6 +79,11 @@ export function describeImport(s: ImportSummary): string {
   if (s.duplicates > 0) parts.push(`${s.duplicates} already imported`);
   if (s.unattributed > 0) parts.push(`${s.unattributed} with no identifiable author`);
   if (s.empty > 0) parts.push(`${s.empty} with no text`);
+  // What an earlier version couldn't tell about mail it had already read.
+  const sent = s.sentFolderMarked ?? 0;
+  const automated = s.automatedMarked ?? 0;
+  if (sent > 0) parts.push(`${sent} already here now read as from your Sent folder`);
+  if (automated > 0) parts.push(`${automated} already here now read as sent by a machine`);
   return parts.join(", ");
 }
 

@@ -105,6 +105,62 @@ pub struct ValidationReport {
     pub frequent_identifiers: Vec<(String, usize)>,
     pub earliest: Option<String>,
     pub latest: Option<String>,
+    /// Messages read as from the user's Sent folder (`metadata.sentFolder`):
+    /// Gmail's "Sent" label, or a file whose name says it is the Sent folder.
+    #[serde(default)]
+    pub sent_folder: usize,
+}
+
+/// What mail programs call the folder of what the user sent, lower-cased:
+/// Thunderbird, Apple Mail and Gmail in English, and Outlook and the usual
+/// clients in the languages most mail is written in. A file of that name is
+/// read as the user's Sent folder.
+const SENT_FOLDER_NAMES: &[&str] = &[
+    "sent",
+    "sent items",
+    "sent messages",
+    "sent mail",
+    // German
+    "gesendet",
+    "gesendete elemente",
+    "gesendete objekte",
+    // French
+    "envoyés",
+    "éléments envoyés",
+    "messages envoyés",
+    // Spanish and Portuguese
+    "enviados",
+    "elementos enviados",
+    "itens enviados",
+    "e-mails enviados",
+    // Italian
+    "posta inviata",
+    "inviati",
+    // Dutch
+    "verzonden",
+    "verzonden items",
+    "verzonden berichten",
+    // Swedish, Danish and Norwegian
+    "skickat",
+    "skickade objekt",
+    "sendt",
+    "sendt post",
+    "sendte elementer",
+    "sendt e-post",
+    // Finnish and Polish
+    "lähetetyt",
+    "lähetetyt kohteet",
+    "wysłane",
+    "elementy wysłane",
+];
+
+/// Whether a folder's name says it holds what the user sent.
+pub fn is_sent_folder_name(name: &str) -> bool {
+    // A Mac writes a file's name with its accents apart from their letters
+    // ("e" and a combining acute): put back together the ones the names above
+    // use, so a folder copied from a Mac is known too.
+    let name = name.trim().to_lowercase().replace("e\u{301}", "é").replace("a\u{308}", "ä");
+    SENT_FOLDER_NAMES.contains(&name.as_str())
 }
 
 /// Implemented by every connector.
@@ -149,6 +205,9 @@ pub fn validate_by_dry_run(source: &dyn CommunicationSource, location: &Path) ->
         report.conversations += 1;
         for m in &convo.messages {
             report.messages += 1;
+            if m.metadata.get("sentFolder").and_then(Value::as_bool) == Some(true) {
+                report.sent_folder += 1;
+            }
             for id in &m.author.identifiers {
                 if !id.normalized().is_empty() {
                     *seen.entry(id.value.clone()).or_default() += 1;
@@ -191,6 +250,19 @@ pub fn validate_by_dry_run(source: &dyn CommunicationSource, location: &Path) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sent_folder_is_known_by_its_name_in_the_usual_languages_and_as_a_mac_writes_it() {
+        for name in ["Sent", " sent items ", "Gesendete Elemente", "Éléments envoyés", "Lähetetyt", "Wysłane"] {
+            assert!(is_sent_folder_name(name), "{name}");
+        }
+        // As macOS writes it: the accents as combining marks.
+        assert!(is_sent_folder_name("E\u{301}le\u{301}ments envoye\u{301}s"));
+        assert!(is_sent_folder_name("La\u{308}hetetyt"));
+        for name in ["Sent Archive", "Unsent", "Inbox", "Drafts", "Sentinel"] {
+            assert!(!is_sent_folder_name(name), "{name}");
+        }
+    }
 
     #[test]
     fn every_connector_has_a_distinct_key_and_a_known_channel() {

@@ -117,8 +117,10 @@ export function SourcesPage() {
             </tbody>
           </table>
           <p className="muted small">
-            Re-importing the same file adds nothing: messages are identified by the source they came
-            from and their own id, so a second run finds only duplicates.
+            Importing the same file again adds only what&rsquo;s new: messages are known by the
+            source they came from and their own id. Mail read by an earlier version gets what that
+            version couldn&rsquo;t tell &mdash; whether it came from your Sent folder, and whether a
+            machine sent it.
           </p>
         </Card>
       )}

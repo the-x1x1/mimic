@@ -13,6 +13,18 @@ use super::repo_sources::CHANNELS;
 use super::{Conversation, Db, DbError, DbResult, Message};
 use crate::ids::{new_id, now_rfc3339, sha256_hex};
 
+/// What reading a message again found out about it, for `Db::add_readings`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reading {
+    pub external_id: String,
+    /// Its author was the user.
+    pub by_user: bool,
+    /// Its author's identifiers, as `(kind, normalized value)`.
+    pub author: Vec<(String, String)>,
+    /// What to add where the stored copy has nothing under the key.
+    pub add: serde_json::Map<String, Value>,
+}
+
 /// One message of a conversation, as the screen shows it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -357,6 +369,60 @@ impl Db {
         let ids = serde_json::to_string(external_ids).unwrap_or_else(|_| "[]".into());
         let rows = stmt.query_map(params![source_id, ids], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Give a message this source already stores a reading its headers gave
+    /// this time and the stored copy lacks — made by a version that couldn't
+    /// make it yet, or from a copy read before. Each key in `reading.add` is
+    /// set only where the stored metadata has none: never changed, never
+    /// removed. And only when the stored copy has the same author as the one
+    /// read now — the user's own message (`self`, when `by_user`), or a
+    /// person holding one of `reading.author`'s identifiers — so a reading of
+    /// the user's Sent copy never lands on a mailing list's copy of the same
+    /// message, filed under the list. Returns which keys were added, per
+    /// message changed.
+    pub fn add_readings(&self, source_id: &str, readings: &[Reading]) -> DbResult<Vec<Vec<String>>> {
+        if readings.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.transaction(|tx| {
+            let mut find = tx.prepare_cached(
+                "SELECT m.id, m.metadata_json FROM messages m
+                 WHERE m.source_id = ?1 AND m.external_id = ?2
+                   AND ((m.direction = 'self' AND ?3)
+                        OR EXISTS (SELECT 1 FROM participant_identifiers pi, json_each(?4) j
+                                   WHERE pi.participant_id = m.participant_id
+                                     AND pi.kind = json_extract(j.value, '$[0]')
+                                     AND pi.normalized_value = json_extract(j.value, '$[1]')))",
+            )?;
+            let mut update = tx.prepare_cached("UPDATE messages SET metadata_json = ?2 WHERE id = ?1")?;
+            let mut added = Vec::new();
+            for reading in readings {
+                let author = serde_json::to_string(&reading.author).unwrap_or_else(|_| "[]".into());
+                let found = find
+                    .query_row(params![source_id, reading.external_id, reading.by_user, author], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })
+                    .optional()?;
+                let Some((id, stored)) = found else { continue };
+                let mut metadata = match serde_json::from_str::<Value>(&stored) {
+                    Ok(Value::Object(m)) => m,
+                    _ => continue,
+                };
+                let mut keys = Vec::new();
+                for (key, value) in &reading.add {
+                    if !metadata.contains_key(key) {
+                        metadata.insert(key.clone(), value.clone());
+                        keys.push(key.clone());
+                    }
+                }
+                if !keys.is_empty() {
+                    update.execute(params![id, Value::Object(metadata).to_string()])?;
+                    added.push(keys);
+                }
+            }
+            Ok(added)
+        })
     }
 
     /// The position of a conversation's last message, or `None` when it has

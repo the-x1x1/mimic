@@ -32,7 +32,9 @@ pub use repo_evaluations::{EvaluationCaseRow, EvaluationRow, Exchange, NewEvalua
 pub use repo_identity::{
     AddressAdded, AddressOwner, AddressPreview, Claimed, HeldAddress, Reconciled, SentFolderPerson,
 };
-pub use repo_messages::{word_count, ConversationPage, ImportCounts, NewMessage, SelfScope, ThreadMessage, Toward};
+pub use repo_messages::{
+    word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
+};
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
 pub use repo_sources::channel_is_known;
 pub use repo_waiting::{

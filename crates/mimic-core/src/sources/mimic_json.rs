@@ -177,11 +177,14 @@ impl CommunicationSource for MimicJsonSource {
                     metadata: match &m.metadata {
                         Value::Object(map) => {
                             let mut map = map.clone();
-                            // `automated` is Mimic's reading of email headers,
-                            // and a file in this format has none to read. Left
-                            // in, it would let a file claim a person was a
-                            // machine, in words that say the headers did.
+                            // `automated` and `sentFolder` are Mimic's readings
+                            // of email headers and mail folders, and a file in
+                            // this format has neither. Left in, they would let
+                            // a file claim a person was a machine, or that
+                            // someone was in the user's Sent folder, in words
+                            // that say the headers or the folder did.
                             map.remove("automated");
+                            map.remove("sentFolder");
                             Value::Object(map)
                         }
                         _ => Value::Null,
@@ -247,7 +250,7 @@ mod tests {
         let (_d, path) = write(
             r#"{"channel": "email", "conversations": [{"id": "t", "messages": [
                 {"from": {"name": "Ada", "email": "ada@example.com"}, "body": "hello",
-                 "metadata": {"automated": true, "subject": "hi"}}
+                 "metadata": {"automated": true, "sentFolder": true, "subject": "hi"}}
             ]}]}"#,
         );
         let mut got = Vec::new();
@@ -259,6 +262,7 @@ mod tests {
             .unwrap();
         let meta = &got[0].messages[0].metadata;
         assert!(meta.get("automated").is_none());
+        assert!(meta.get("sentFolder").is_none(), "nor that it was in the user's Sent folder");
         assert_eq!(meta["subject"], "hi", "everything else in it is kept as it was");
     }
 
