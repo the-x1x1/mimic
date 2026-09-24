@@ -3,5 +3,5 @@
 Runs as a stdio NDJSON sidecar of the Mimic desktop app.
 """
 
-__version__ = "0.10.0a14"
+__version__ = "0.10.0a15"
 PROTOCOL_VERSION = 1

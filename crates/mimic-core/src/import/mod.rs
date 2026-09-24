@@ -43,7 +43,21 @@ pub struct ImportSummary {
     /// Messages whose author could not be matched to anyone.
     pub unattributed: usize,
     pub participants_created: usize,
+    /// Messages already here that reading them again marked as from the
+    /// user's Sent folder: read before Mimic looked for it (0.10.0-alpha.12),
+    /// or before the file's name counted (0.10.0-alpha.15).
+    #[serde(default)]
+    pub sent_folder_marked: usize,
+    /// Messages already here that reading them again marked as sent by a
+    /// machine: read before Mimic read the headers for it (0.10.0-alpha.4).
+    #[serde(default)]
+    pub automated_marked: usize,
 }
+
+/// What reading a message again can add to its stored copy: what the
+/// connector reads from headers that are not kept, so a copy stored before
+/// the reading existed can only get it by being read again.
+const READINGS: [&str; 2] = ["sentFolder", "automated"];
 
 /// Import one already-registered source. `on_progress` is called with
 /// `(conversations_done, messages_done)`; returning `Err` from `should_stop`
@@ -74,6 +88,7 @@ pub fn import_source(
         participants: HashMap::new(),
         summary: ImportSummary::default(),
         messages_done: 0,
+        read_again: HashSet::new(),
     };
 
     let result = connector.import(path, &mut |convo| {
@@ -135,6 +150,7 @@ impl<'a> Importer<'a> {
                 participants: HashMap::new(),
                 summary: ImportSummary::default(),
                 messages_done: 0,
+                read_again: HashSet::new(),
             },
         })
     }
@@ -184,6 +200,8 @@ struct ImportState<'a> {
     participants: HashMap<String, Option<String>>,
     summary: ImportSummary,
     messages_done: usize,
+    /// Messages already stored that this import has offered a reading to.
+    read_again: HashSet<String>,
 }
 
 impl ImportState<'_> {
@@ -238,14 +256,23 @@ impl ImportState<'_> {
         let mut batch: Vec<NewMessage> = Vec::with_capacity(convo.messages.len().min(BATCH));
         let mut counts = ImportCounts::default();
         let mut seen: HashSet<&str> = HashSet::new();
+        let mut readings = Vec::new();
         for (i, raw) in convo.messages.iter().enumerate() {
+            let first_copy = seen.insert(raw.external_id.as_str());
+            // Stored already, maybe by a version that couldn't read what the
+            // headers say about it: what this read found is offered to it —
+            // from the copy a first import would have kept, the first, and
+            // never from another copy of it (a list's, say, with its own
+            // headers), once per import.
+            if first_copy && already.contains(&raw.external_id) && self.read_again.insert(raw.external_id.clone()) {
+                if let Some(reading) = self.reading(raw) {
+                    readings.push(reading);
+                }
+            }
             // Kept once: a copy another source has, or a second copy here —
             // the same message read from two folders, where the connector
             // puts the copy to keep first. Nobody is made up for the other.
-            if elsewhere.contains(&raw.external_id)
-                || already.contains(&raw.external_id)
-                || !seen.insert(raw.external_id.as_str())
-            {
+            if elsewhere.contains(&raw.external_id) || already.contains(&raw.external_id) || !first_copy {
                 counts.duplicates += 1;
                 continue;
             }
@@ -279,6 +306,14 @@ impl ImportState<'_> {
         if !batch.is_empty() {
             counts = add(counts, self.db.insert_messages(&batch)?);
         }
+        for keys in self.db.add_readings(&self.source_id, &readings)? {
+            if keys.iter().any(|k| k == "sentFolder") {
+                self.summary.sent_folder_marked += 1;
+            }
+            if keys.iter().any(|k| k == "automated") {
+                self.summary.automated_marked += 1;
+            }
+        }
         if joined.is_some() && counts.inserted > 0 {
             // Messages numbered from zero have just joined a conversation that
             // already had some; put it back in time order, because "who spoke
@@ -302,6 +337,26 @@ impl ImportState<'_> {
         self.summary.empty += counts.empty;
         self.messages_done += counts.inserted + counts.duplicates + counts.empty;
         Ok(())
+    }
+
+    /// What reading `raw` again says that its stored copy may lack, and whose
+    /// it must be to take it (`Db::add_readings`). Nobody is attributed or
+    /// made up for it.
+    fn reading(&self, raw: &sources::RawMessage) -> Option<crate::db::Reading> {
+        let add: serde_json::Map<String, serde_json::Value> =
+            READINGS.iter().filter_map(|k| raw.metadata.get(*k).map(|v| (k.to_string(), v.clone()))).collect();
+        if add.is_empty() {
+            return None;
+        }
+        let author: Vec<(String, String)> = raw
+            .author
+            .identifiers
+            .iter()
+            .filter(|i| i.kind != crate::db::IdentifierKind::DisplayName && !i.normalized().is_empty())
+            .map(|i| (i.kind.as_str().to_string(), i.normalized()))
+            .collect();
+        let by_user = raw.author.identifiers.iter().any(|i| self.user_ids.contains(&i.key()));
+        Some(crate::db::Reading { external_id: raw.external_id.clone(), by_user, author, add })
     }
 
     /// Decide who wrote a message. The user's own messages carry no
@@ -589,6 +644,127 @@ mod tests {
         assert_eq!((s.inserted, s.duplicates, s.participants_created), (0, 1, 0));
         assert_eq!(db.list_participants(10).unwrap().len(), 2, "Ada and Bob, and nobody new");
         assert_eq!(links(&db), before);
+    }
+
+    /// One mail as an mbox holds it.
+    fn mail(id: &str, from: &str, date: &str, extra: &str, body: &str) -> String {
+        format!(
+            "From x@x Mon Feb 02 09:00:00 2026\nFrom: {from}\nSubject: s\nDate: {date}\nMessage-ID: <{id}>\n{extra}\n{body}\n\n"
+        )
+    }
+
+    #[test]
+    fn importing_again_gives_mail_read_before_what_could_not_be_told_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let own = mail("own@home.example", "C <c@home.example>", "Mon, 2 Feb 2026 09:00:00 +0000", "", "on my way");
+        let work =
+            mail("work@work.example", "C at work <c@work.example>", "Mon, 2 Feb 2026 10:00:00 +0000", "", "numbers");
+        let away = mail(
+            "away@example.com",
+            "Ada <ada@example.com>",
+            "Mon, 2 Feb 2026 11:00:00 +0000",
+            "Auto-Submitted: auto-replied\n",
+            "I'm away until Monday",
+        );
+        let news = mail(
+            "news@brand.example",
+            "Brand <news@brand.example>",
+            "Mon, 2 Feb 2026 12:00:00 +0000",
+            "List-Unsubscribe: <https://brand.example/u>\n",
+            "twenty percent off",
+        );
+        // A post to a list, as the list sent it back: its own address as the sender.
+        let post_from_list = mail(
+            "post@lists.example",
+            "The List <list@lists.example>",
+            "Mon, 2 Feb 2026 13:00:00 +0000",
+            "List-Id: <the.lists.example>\nList-Post: <mailto:list@lists.example>\n",
+            "my question for the list",
+        );
+        // The user's post to an announcement list, which came back with the
+        // user still as its sender and the list's headers added: read now,
+        // that copy says a machine sent it. The Sent copy is the one kept.
+        let announced = |extra: &str| {
+            mail(
+                "announce@home.example",
+                "C <c@home.example>",
+                "Mon, 2 Feb 2026 14:00:00 +0000",
+                extra,
+                "we launch on friday",
+            )
+        };
+        let announced_by_list = announced("List-Unsubscribe: <https://lists.example/u>\n");
+        let announced_sent = announced("");
+        std::fs::write(dir.path().join("Inbox.mbox"), format!("{away}{news}{post_from_list}{announced_by_list}"))
+            .unwrap();
+        std::fs::write(dir.path().join("Sent.mbox"), format!("{own}{work}{announced_sent}")).unwrap();
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::Email, "c@home.example").unwrap();
+        let source = db
+            .create_source(&NewSource {
+                connector: "mbox".into(),
+                name: "Thunderbird".into(),
+                channel: "email".into(),
+                location: Some(dir.path().to_string_lossy().into()),
+                config: serde_json::Value::Null,
+            })
+            .unwrap()
+            .id;
+        run(&db, &source).unwrap();
+        let metadata = |id: &str| -> serde_json::Value {
+            let raw: String = db
+                .conn()
+                .query_row("SELECT metadata_json FROM messages WHERE external_id = ?1", [id], |r| r.get(0))
+                .unwrap();
+            serde_json::from_str(&raw).unwrap()
+        };
+        assert_eq!(metadata("work@work.example")["sentFolder"], serde_json::json!(true), "read from the Sent file");
+
+        // As a version that read neither would have stored them, except one
+        // reading an earlier version made differently, which stays.
+        db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_remove(metadata_json, '$.sentFolder', '$.automated')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_set(metadata_json, '$.automated', 'bulk') WHERE external_id = 'news@brand.example'",
+                [],
+            )
+            .unwrap();
+        assert!(db.sent_folder_people().unwrap().is_empty());
+        // The user's own copy of the list post is in the Sent file now.
+        let post_from_c = mail(
+            "post@lists.example",
+            "C at work <c@work.example>",
+            "Mon, 2 Feb 2026 13:00:00 +0000",
+            "",
+            "my question for the list",
+        );
+        std::fs::write(dir.path().join("Sent.mbox"), format!("{own}{work}{announced_sent}{post_from_c}")).unwrap();
+
+        let s = run(&db, &source).unwrap();
+        assert_eq!((s.inserted, s.duplicates, s.participants_created), (0, 8, 0));
+        assert_eq!(s.sent_folder_marked, 3, "the user's two and C at work's; not the list's copy of the post");
+        assert_eq!(s.automated_marked, 1, "the automatic reply; the newsletter's reading was there already");
+        assert_eq!(metadata("away@example.com")["automated"], serde_json::json!("auto_reply"));
+        assert_eq!(metadata("news@brand.example")["automated"], serde_json::json!("bulk"), "never changed");
+        assert!(
+            metadata("post@lists.example").get("sentFolder").is_none(),
+            "filed under the list, not the Sent copy's writer"
+        );
+        assert!(
+            metadata("announce@home.example").get("automated").is_none(),
+            "what the list's copy says is not said of the copy that was kept"
+        );
+        let asked: Vec<String> = db.sent_folder_people().unwrap().into_iter().map(|p| p.address).collect();
+        assert_eq!(asked, vec!["c@work.example".to_string()]);
+
+        let again = run(&db, &source).unwrap();
+        assert_eq!((again.sent_folder_marked, again.automated_marked), (0, 0), "nothing is added twice");
     }
 
     #[test]

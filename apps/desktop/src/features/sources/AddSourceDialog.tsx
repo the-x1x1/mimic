@@ -103,6 +103,15 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
                       : ""}
                     .
                   </p>
+                  {report.sentFolder > 0 ? (
+                    <p className="muted small">
+                      {report.sentFolder === 1
+                        ? "1 of them is from your Sent folder."
+                        : `${report.sentFolder.toLocaleString()} of them are from your Sent folder.`}{" "}
+                      If any are from an address you haven&rsquo;t given me, I&rsquo;ll ask whether
+                      it&rsquo;s you.
+                    </p>
+                  ) : null}
                   {report.blockers.map((b) => (
                     <p key={b} className="danger">
                       {b}

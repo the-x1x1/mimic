@@ -318,6 +318,37 @@ describe("import summaries name what was skipped", () => {
     });
     expect(line).not.toContain("already imported");
     expect(line).not.toContain("no identifiable author");
+    expect(line).not.toContain("already here");
+  });
+
+  it("says what reading mail again found out about what was already here", () => {
+    const line = describeImport({
+      conversations: 4,
+      inserted: 0,
+      duplicates: 40,
+      empty: 0,
+      fromSelf: 0,
+      unattributed: 0,
+      participantsCreated: 0,
+      sentFolderMarked: 12,
+      automatedMarked: 3,
+    });
+    expect(line).toContain("12 already here now read as from your Sent folder");
+    expect(line).toContain("3 already here now read as sent by a machine");
+  });
+
+  it("reads a summary written before those were counted", async () => {
+    const { ImportSummary } = await import("../src");
+    const old = {
+      conversations: 1,
+      inserted: 2,
+      duplicates: 0,
+      empty: 0,
+      fromSelf: 1,
+      unattributed: 0,
+      participantsCreated: 1,
+    };
+    expect(ImportSummary.parse(old).sentFolderMarked).toBeUndefined();
   });
 });
 

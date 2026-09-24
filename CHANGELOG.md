@@ -2,6 +2,25 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.15] — 2026-09-23
+
+Your Sent folder, from any mail program.
+
+### Added
+
+- **A Sent folder from Thunderbird or Apple Mail counts as your Sent folder.** Those programs keep and export one file per folder, and until now only a Gmail export said which folder a message was in, so the question "Is that you?" about the addresses you write from never came up for anyone else. Now a file named as a Sent folder is read as one, except mail you passed on: `Sent` (Thunderbird's own file), `Sent.mbox`, Apple Mail's `Sent Messages.mbox` (choose the file named `mbox` inside it), and the names Outlook.com, Exchange and other servers give it in English, German, French, Spanish, Portuguese, Italian, Dutch, the Nordic languages and Polish — `Sent Items`, `Gesendete Elemente`, `Éléments envoyés` — when Thunderbird or Apple Mail holds a copy of that account. Before you import, I say so and how many of its messages count. (Outlook's own exports are .pst files, which I can't read.)
+- **A connected mailbox's sent folder is found by its name in those languages too** when the server doesn't mark it and the name has no accents (`Gesendete Elemente`, `Enviados`, `INBOX.Verzonden`).
+- **You can choose a file with no extension**, which is how Thunderbird keeps each folder: the file picker offers All files as well.
+- **A file in Mimic's own format can no longer say a message was in your Sent folder**, as it already couldn't say a machine sent one: only a mailbox's folder, Gmail's label or a file's name can.
+
+### Fixed
+
+- **Importing a file again catches up mail an earlier version read.** Whether a message came from your Sent folder (from 0.10.0-alpha.12) and whether a machine sent it (from 0.10.0-alpha.4) is read from its headers, which I don't keep, so mail read before then had neither, and importing the same file again added nothing. Now **Import again** gives mail already here what it lacked, and says how many messages it marked. Nothing already read is overwritten, only what's missing is added, and it comes only from the copy of a message a first import of the same files would keep — not from another copy of it, such as your post to a mailing list as the list sent it back.
+
+### Not in this release
+
+- A connected mailbox isn't read again, so its mail from before those readings still has none.
+
 ## [0.10.0-alpha.14] — 2026-09-23
 
 Outlook.com and Microsoft 365, signed in with Microsoft.

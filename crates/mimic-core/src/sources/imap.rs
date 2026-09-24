@@ -525,7 +525,8 @@ fn skip_quoted(s: &str) -> &str {
 }
 
 /// Pick the folders to read: the inbox, and the sent folder by attribute
-/// first, by name second.
+/// first, by the names the common servers use second, and by its name in
+/// another language (`sources::is_sent_folder_name`) last.
 pub fn choose_folders(listed: &[(Vec<String>, String)]) -> (Vec<String>, Option<String>) {
     let inbox = listed
         .iter()
@@ -538,6 +539,13 @@ pub fn choose_folders(listed: &[(Vec<String>, String)]) -> (Vec<String>, Option<
         .find(|(a, _)| a.iter().any(|x| x == "\\sent") && selectable(a))
         .or_else(|| {
             SENT_NAMES.iter().find_map(|want| listed.iter().find(|(a, n)| n.to_lowercase() == *want && selectable(a)))
+        })
+        .or_else(|| {
+            // The last part of the name, for servers that keep folders under
+            // the inbox (`INBOX.Gesendet`). A name with an accent comes in
+            // IMAP's own encoding and isn't decoded, so it isn't matched.
+            let last = |n: &str| n.rsplit(['/', '.']).next().unwrap_or(n).to_string();
+            listed.iter().find(|(a, n)| super::is_sent_folder_name(&last(n)) && selectable(a))
         })
         .map(|(_, n)| n.clone());
     let mut folders = vec![inbox];
@@ -1217,6 +1225,10 @@ mod tests {
 
         let by_name = vec![(vec![], "INBOX".to_string()), (vec![], "[Gmail]/Sent Mail".to_string())];
         assert_eq!(choose_folders(&by_name).1.as_deref(), Some("[Gmail]/Sent Mail"));
+        let in_german = vec![(vec![], "INBOX".to_string()), (vec![], "Gesendete Elemente".to_string())];
+        assert_eq!(choose_folders(&in_german).1.as_deref(), Some("Gesendete Elemente"));
+        let nested = vec![(vec![], "INBOX".to_string()), (vec![], "INBOX.Verzonden".to_string())];
+        assert_eq!(choose_folders(&nested).1.as_deref(), Some("INBOX.Verzonden"));
 
         let none = vec![(vec![], "INBOX".to_string()), (vec!["\\noselect".into()], "Sent".to_string())];
         assert_eq!(

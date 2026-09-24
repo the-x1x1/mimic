@@ -501,6 +501,8 @@ pub async fn pick_source_file(
         .file()
         .set_title(title.unwrap_or_else(|| "Choose a file".into()))
         .add_filter("Supported exports", &exts)
+        // Thunderbird keeps each folder as a file with no extension ("Sent").
+        .add_filter("All files", &["*"])
         .pick_file(move |p| {
             let _ = tx.send(p.map(|f| f.to_string()));
         });
