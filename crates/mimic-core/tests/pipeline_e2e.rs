@@ -510,7 +510,24 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert!(db
         .mark_thread(&kept.conversation_id, &kept.last_message_id, Some(mimic_core::db::ThreadMark::NeedsReply))
         .unwrap());
+    // Another way of saying its draft, beside it, so the fixture carries one
+    // for the zod suite.
+    let first = kept.draft.clone().expect("assisted drafting wrote one");
+    let shorter = mimic_core::generation::compose_another(
+        &db,
+        &provider,
+        &first.id,
+        mimic_core::generation::Adjustment::Shorter,
+        None,
+    )
+    .unwrap();
     let quiet = mimic_core::dashboard::dashboard(&db, 25, true, true).unwrap();
+    assert_eq!(quiet.awaiting[0].draft.as_ref().map(|d| d.id.clone()), Some(first.id.clone()));
+    assert_eq!(
+        quiet.awaiting[0].alternatives.iter().map(|d| d.id.clone()).collect::<Vec<_>>(),
+        std::slice::from_ref(&shorter.id)
+    );
+    assert_eq!(quiet.pending_drafts.len(), summary.drafted, "a draft and its other way are one draft waiting");
     assert_eq!(quiet.waiting_within_days, Some(30));
     // Bob's was the only thread the export left waiting.
     assert_eq!(waiting, 1);
@@ -526,6 +543,7 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert_eq!(db.threads_awaiting_reply(50).unwrap().len(), 1, "assisted drafting reads the same list");
 
     check_fixture("dashboard.json", &serde_json::to_value(&quiet).unwrap());
+    db.resolve_draft(&shorter.id, "discarded", None).unwrap();
 
     // Back to any age for the rest. Carol's thread has no draft, so the draft
     // counts below are unchanged by it.
@@ -539,7 +557,11 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert_eq!(resolved.outcome.as_deref(), Some("sent_unedited"));
     let later = mimic_core::dashboard::dashboard(&db, 25, true, false).unwrap();
     assert_eq!(later.pending_drafts.len(), summary.drafted - 1);
-    assert_eq!(later.outcomes.resolved, 1);
+    assert_eq!(
+        (later.outcomes.resolved, later.outcomes.sent_unedited, later.outcomes.discarded),
+        (2, 1, 1),
+        "the one approved, and the other way put aside above"
+    );
 }
 
 /// Situations over a real import: what the classifier filed, the situation a

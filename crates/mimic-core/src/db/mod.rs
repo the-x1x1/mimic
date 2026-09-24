@@ -28,7 +28,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::ids::now_rfc3339;
 
 pub use models::*;
-pub use repo_drafts::{DraftOutcomes, NewDraft};
+pub use repo_drafts::{DraftOutcomes, NewDraft, ALREADY_CHOSEN, ALREADY_DECIDED, DRAFT_GONE};
 pub use repo_evaluations::{EvaluationCaseRow, EvaluationRow, Exchange, NewEvaluation, NewEvaluationCase};
 pub use repo_identity::{
     AddressAdded, AddressOwner, AddressPreview, Claimed, HeldAddress, Reconciled, SentFolderPerson,

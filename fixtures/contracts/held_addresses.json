@@ -1,13 +1,13 @@
 [
   {
     "identifier": {
-      "id": "c320cf2b-5b1d-43cb-a7af-7c37c55fbd18",
+      "id": "c8c52f03-e26d-402c-820e-becdcbe9d23e",
       "kind": "email",
       "value": "c@example.com",
       "normalizedValue": "c@example.com"
     },
     "owner": {
-      "participantId": "81c4d1cd-99d6-4fc1-a5a5-e8f05a982a67",
+      "participantId": "73eb83f0-8221-4e08-b690-d29bb290fa4d",
       "displayName": "C",
       "messages": 20,
       "otherAddresses": [],

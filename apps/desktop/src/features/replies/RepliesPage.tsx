@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Button, InlineError } from "@mimic/ui";
 import {
+  ADJUSTMENT_LABELS,
+  Adjustment,
+  adjustmentOf,
   type Dashboard,
   type DashboardThread,
   type Draft,
@@ -19,7 +22,7 @@ import {
   describeWaiting,
 } from "@mimic/contracts";
 import { useDashboard, useMarkThread, useStartAssistDrafts } from "@/hooks/useDashboard";
-import { useGenerateDraft, useResolveDraft } from "@/hooks/useCompose";
+import { useGenerateDraft, useResolveDraft, useWriteAnother } from "@/hooks/useCompose";
 import { useSituations } from "@/hooks/useVoice";
 import { formatRelative } from "@/lib/format";
 import { toast } from "@/state/toast";
@@ -474,6 +477,7 @@ export function Thread({
           // draft is a different panel.
           key={draft.id}
           draft={draft}
+          alternatives={thread.draft?.id === draft.id ? thread.alternatives : []}
           onDone={() => {
             setDoneWith(draft.id);
             setWritten(null);
@@ -682,68 +686,162 @@ function KeptOnTheList({
  * only thing that teaches Mimic anything. Neither sends: Mimic has no send
  * path, deliberately, and adding one is a decision to make on purpose rather
  * than by accident.
+ *
+ * Beside the draft, any other ways of saying it the user asked for: each is
+ * one model call, asked for one at a time and named by how it differs. Using
+ * any of them puts the rest aside as passed over, not turned down, and
+ * "None of these" puts them all aside (`Db::resolve_draft`). What was typed
+ * into the first draft survives others arriving and going, and focus goes to
+ * what arrived, or to what is next, with the status line saying which.
  */
-export function DraftReview({ draft, onDone }: { draft: Draft; onDone: () => void }) {
+export function DraftReview({
+  draft,
+  alternatives = [],
+  onDone,
+}: {
+  draft: Draft;
+  /** Other ways of saying it already on offer beside it, oldest first. */
+  alternatives?: Draft[];
+  onDone: () => void;
+}) {
   const resolve = useResolveDraft();
-  const [text, setText] = useState(draft.generatedText);
-  const [editing, setEditing] = useState(false);
+  const another = useWriteAnother();
+  // Written here: shown at once, before the screen reads them back.
+  const [written, setWritten] = useState<Draft[]>([]);
+  const [putAside, setPutAside] = useState<ReadonlySet<string>>(() => new Set());
+  // Which way to move focus to, and a count so asking twice asks again.
+  const [focus, setFocus] = useState<{ id: string; n: number } | null>(null);
+  const [said, setSaid] = useState("");
   const [telling, setTelling] = useState(false);
   const [note, setNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
-  const edited = text !== draft.generatedText;
   const situation = SituationChoice.safeParse(draft.context["situation"]);
   const situationLine = describeSituation(situation.success ? situation.data : null);
 
-  async function use() {
+  const others: Draft[] = [];
+  for (const d of [...alternatives, ...written]) {
+    if (d.alternativeTo === draft.id && !putAside.has(d.id) && !others.some((o) => o.id === d.id)) {
+      others.push(d);
+    }
+  }
+  const offered = new Set(others.map(adjustmentOf));
+  const busy = resolve.isPending || another.isPending;
+  const error = another.error ?? resolve.error;
+  const focusOn = (id: string) => setFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }));
+
+  const labelOf = (d: Draft) => {
+    const a = adjustmentOf(d);
+    return a ? ADJUSTMENT_LABELS[a] : "Another way";
+  };
+
+  async function use(d: Draft, text: string) {
+    another.reset();
+    setSaid("");
+    const edited = text !== d.generatedText;
     await navigator.clipboard.writeText(text).catch(() => undefined);
     await resolve.mutateAsync({
-      draftId: draft.id,
+      draftId: d.id,
       outcome: edited ? "sent_edited" : "sent_unedited",
       finalText: text,
     });
+    // What was changed in a version asked for another way was changed from
+    // that request, so nothing is learned from it (`sent_drafts_for_learning`).
     toast.success(
-      edited ? "Copied. I noticed what you changed." : "Copied.",
+      edited && adjustmentOf(d) === null ? "Copied. I noticed what you changed." : "Copied.",
       "Paste it into your email and send it — I don't send anything myself.",
     );
     onDone();
   }
 
-  async function drop() {
-    await resolve.mutateAsync({ draftId: draft.id, outcome: "discarded", finalText: null });
-    onDone();
+  async function drop(d: Draft) {
+    another.reset();
+    setSaid("");
+    await resolve.mutateAsync({ draftId: d.id, outcome: "discarded", finalText: null });
+    if (d.id === draft.id) {
+      onDone();
+      return;
+    }
+    const at = others.findIndex((o) => o.id === d.id);
+    const next = others[at + 1] ?? others[at - 1] ?? draft;
+    setPutAside((set) => new Set(set).add(d.id));
+    setSaid(`Put aside: ${labelOf(d)}.${next.id === draft.id ? " Your first draft is here." : ""}`);
+    focusOn(next.id);
   }
+
+  async function writeAnother(adjustment: Adjustment) {
+    resolve.reset();
+    setSaid("Writing it another way…");
+    try {
+      const d = await another.mutateAsync({ draftId: draft.id, adjustment });
+      setWritten((w) => [...w, d]);
+      setSaid(`Here it is ${ADJUSTMENT_LABELS[adjustment].toLowerCase()}, beside the first.`);
+      focusOn(d.id);
+    } catch {
+      // Said below, from the mutation's own error.
+      setSaid("");
+    }
+  }
+
+  const quietly = (p: Promise<unknown>) =>
+    void p.catch(() => {
+      // Said below, from the mutation's own error.
+    });
 
   return (
     <div className="thread__part thread__part--ruled">
-      <div className="letter-label letter-label--mine">I&rsquo;d say</div>
-      {editing ? (
-        <>
-          <label htmlFor={`draft-${draft.id}`} className="muted small">
-            Change whatever you like. I&rsquo;ll notice what you changed and write more like that
-            next time.
-          </label>
-          <textarea
-            id={`draft-${draft.id}`}
-            className="letter letter--mine"
-            rows={5}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            autoFocus
+      {/* One tree however many ways there are, so what was typed into the
+          first survives others arriving and going. */}
+      <div className={others.length > 0 ? "thread__ways" : undefined}>
+        <DraftWay
+          draft={draft}
+          label={others.length > 0 ? "As I first wrote it" : "I’d say"}
+          busy={busy}
+          focus={focus?.id === draft.id ? focus.n : 0}
+          onUse={(text) => quietly(use(draft, text))}
+          onDrop={others.length > 0 ? undefined : () => quietly(drop(draft))}
+        />
+        {others.map((d) => (
+          <DraftWay
+            key={d.id}
+            draft={d}
+            label={labelOf(d)}
+            busy={busy}
+            focus={focus?.id === d.id ? focus.n : 0}
+            onUse={(text) => quietly(use(d, text))}
+            onDrop={() => quietly(drop(d))}
           />
-        </>
-      ) : (
-        <p className="letter letter--mine">{text}</p>
-      )}
+        ))}
+      </div>
+      {offered.size < Adjustment.options.length ? (
+        <div className="thread__another" role="group" aria-label="Write it another way">
+          <span className="muted small" aria-hidden="true">
+            Write it another way:
+          </span>
+          {Adjustment.options
+            .filter((a) => !offered.has(a))
+            .map((a) => (
+              <Button
+                key={a}
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void writeAnother(a)}
+              >
+                {ADJUSTMENT_LABELS[a]}
+              </Button>
+            ))}
+        </div>
+      ) : null}
+      <p className="muted small" role="status">
+        {said}
+      </p>
+      {error ? <InlineError>{error.message}</InlineError> : null}
       <div className="thread__actions">
-        <Button variant="primary" onClick={use} disabled={resolve.isPending}>
-          Use this
-        </Button>
-        <Button onClick={() => setEditing((v) => !v)}>
-          {editing ? "Done changing" : "Change it"}
-        </Button>
-        <Button variant="ghost" onClick={drop} disabled={resolve.isPending}>
-          Not this one
-        </Button>
+        {others.length > 0 ? (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => quietly(drop(draft))}>
+            None of these
+          </Button>
+        ) : null}
         <span className="spacer" />
         <button type="button" className="linkish" onClick={() => setTelling((v) => !v)}>
           {telling ? "Never mind" : "Tell me what to do differently"}
@@ -799,6 +897,73 @@ export function DraftReview({ draft, onDone }: { draft: Draft; onDone: () => voi
           : "You didn't tell me what you wanted to say, so this comes from their message and how you usually write — worth a read before you use it."}{" "}
         &ldquo;Use this&rdquo; copies it so you can paste it into your email. I never send anything.
       </p>
+    </div>
+  );
+}
+
+/** One way of saying it: the words, changed if the user likes, and using it. */
+function DraftWay({
+  draft,
+  label,
+  busy,
+  focus,
+  onUse,
+  onDrop,
+}: {
+  draft: Draft;
+  label: string;
+  busy: boolean;
+  /** Changes, above 0, when focus should move to this way's heading. */
+  focus: number;
+  onUse: (text: string) => void;
+  /** Absent for the first draft beside others: "None of these" puts that aside. */
+  onDrop?: () => void;
+}) {
+  const [text, setText] = useState(draft.generatedText);
+  const [editing, setEditing] = useState(false);
+  const heading = useId();
+  const adjusted = adjustmentOf(draft);
+  const headingRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focus > 0) headingRef.current?.focus();
+  }, [focus]);
+  return (
+    <div className="thread__way" role="group" aria-labelledby={heading}>
+      <div id={heading} ref={headingRef} tabIndex={-1} className="letter-label letter-label--mine">
+        {label}
+      </div>
+      {editing ? (
+        <>
+          <label htmlFor={`draft-${draft.id}`} className="muted small">
+            {adjusted
+              ? `Change whatever you like. This one was written ${ADJUSTMENT_LABELS[adjusted].toLowerCase()}, so what you change in it won’t change how I write.`
+              : "Change whatever you like. I’ll notice what you changed and write more like that next time."}
+          </label>
+          <textarea
+            id={`draft-${draft.id}`}
+            className="letter letter--mine"
+            rows={5}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            autoFocus
+          />
+        </>
+      ) : (
+        <p className="letter letter--mine">{text}</p>
+      )}
+      <div className="thread__actions">
+        <Button variant="primary" onClick={() => onUse(text)} disabled={busy}>
+          Use this
+        </Button>
+        <Button onClick={() => setEditing((v) => !v)}>
+          {editing ? "Done changing" : "Change it"}
+        </Button>
+        {onDrop ? (
+          <Button variant="ghost" onClick={onDrop} disabled={busy}>
+            Not this one
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

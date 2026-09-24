@@ -3,6 +3,7 @@ import { Button, Card, Field, InlineError } from "@mimic/ui";
 import {
   ADJUSTMENT_LABELS,
   Adjustment,
+  adjustmentOf,
   CHANNEL_LABELS,
   Channel,
   composeReadiness,
@@ -68,9 +69,19 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
       : undefined,
   );
   const dirty = draft !== null && edited !== draft.generatedText;
+  // A draft asked for shorter, longer or in another register is not read for
+  // habits: what is changed in it was changed from that request.
+  const adjusted = draft ? adjustmentOf(draft) : null;
 
   async function run(adjustment?: Adjustment) {
     const result = await generate.mutateAsync({ ...request, adjustment: adjustment ?? null });
+    // The draft it replaces was passed over for this one, not left pending
+    // for ever: recorded as regenerated, which is neither sent nor turned down.
+    if (draft && draft.outcome === null) {
+      await resolve
+        .mutateAsync({ draftId: draft.id, outcome: "regenerated", finalText: null })
+        .catch(() => undefined);
+    }
     setDraft(result);
     setEdited(result.generatedText);
   }
@@ -83,8 +94,12 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
       finalText: edited,
     });
     toast.success(
-      dirty ? "Saved, and Mimic noted what you changed" : "Saved",
-      dirty ? undefined : "Nothing to learn from this one — you sent it as written.",
+      dirty && !adjusted ? "Saved, and Mimic noted what you changed" : "Saved",
+      adjusted
+        ? `This one was written ${ADJUSTMENT_LABELS[adjusted].toLowerCase()}, so Mimic doesn't learn your habits from it.`
+        : dirty
+          ? undefined
+          : "Nothing to learn from this one — you sent it as written.",
     );
     setDraft(null);
     setEdited("");
@@ -239,9 +254,11 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                 </Button>
               </div>
               <p className="muted small">
-                {dirty
-                  ? "Mimic will compare what it wrote with what you send, and use the difference."
-                  : "Telling Mimic what you actually sent is the only way it improves. Nothing is sent for you."}
+                {adjusted
+                  ? `This draft was written ${ADJUSTMENT_LABELS[adjusted].toLowerCase()}, so Mimic won't learn your habits from what you change in it. Nothing is sent for you.`
+                  : dirty
+                    ? "Mimic will compare what it wrote with what you send, and use the difference."
+                    : "Telling Mimic what you actually sent is the only way it improves. Nothing is sent for you."}
               </p>
             </Card>
           ) : null}

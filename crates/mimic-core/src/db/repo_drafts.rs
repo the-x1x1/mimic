@@ -11,7 +11,21 @@ use super::models::{json_col, json_obj};
 use super::{Db, DbError, DbResult, Draft, DraftFeedback};
 use crate::ids::{new_id, now_rfc3339};
 
-const COLS: &str = "id, participant_id, conversation_id, channel, situation_id, incoming_message, intent, generated_text, final_text, provider, model, context_json, prompt_hash, evidence_json, created_at, resolved_at, outcome, incoming_message_id";
+/// Why another way of a draft is not written or kept: the draft was used or
+/// put aside first.
+pub const ALREADY_CHOSEN: &str =
+    "That draft was used or put aside, so there's nothing to write another way of. Nothing else was kept.";
+
+/// Why another way of a draft is not written or kept: the draft went with
+/// its person or its mail.
+pub const DRAFT_GONE: &str =
+    "That draft isn't here any more — its person or its mail was removed — so there's nothing to write another way of.";
+
+/// Why a draft is not decided again: something was already recorded about
+/// it, perhaps from another window, or with the rest of its set.
+pub const ALREADY_DECIDED: &str = "That draft was already used or put aside, so nothing was changed.";
+
+const COLS: &str = "id, participant_id, conversation_id, channel, situation_id, incoming_message, intent, generated_text, final_text, provider, model, context_json, prompt_hash, evidence_json, created_at, resolved_at, outcome, incoming_message_id, alternative_to";
 
 /// A draft answers message `?2` (text `?3`): by its recorded id, or — only
 /// for drafts written before migration 9 recorded ids — by the text it
@@ -44,6 +58,7 @@ fn map(r: &Row<'_>) -> rusqlite::Result<Draft> {
         resolved_at: r.get(15)?,
         outcome: r.get(16)?,
         incoming_message_id: r.get(17)?,
+        alternative_to: r.get(18)?,
     })
 }
 
@@ -63,6 +78,9 @@ pub struct NewDraft {
     pub context: Value,
     pub prompt_hash: String,
     pub evidence: Value,
+    /// The first draft this one is another way of saying, for drafts written
+    /// to be shown beside it. Always a first draft, never an alternative.
+    pub alternative_to: Option<String>,
 }
 
 /// Measured draft outcomes. Every field is `None` until there is something to
@@ -85,14 +103,19 @@ pub struct DraftOutcomes {
 impl Db {
     /// Record a draft. Addressed to nobody if the person it was written for
     /// is gone by the time it is saved — folded back into the user while the
-    /// model was writing — as drafts already saved to them are kept.
+    /// model was writing — as drafts already saved to them are kept. Another
+    /// way of a first draft is kept only while that draft is still there and
+    /// not yet used or put aside: written for a choice already made, it would
+    /// be offered beside nothing.
     pub fn create_draft(&self, new: &NewDraft) -> DbResult<Draft> {
         let id = new_id();
-        self.conn().execute(
+        let n = self.conn().execute(
             "INSERT INTO drafts(id, participant_id, conversation_id, channel, situation_id, incoming_message,
                                 intent, generated_text, provider, model, context_json, prompt_hash, evidence_json, created_at,
-                                incoming_message_id)
-             VALUES (?1,(SELECT id FROM participants WHERE id = ?2),?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                                incoming_message_id, alternative_to)
+             SELECT ?1,(SELECT id FROM participants WHERE id = ?2),?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16
+             WHERE ?16 IS NULL
+                OR EXISTS (SELECT 1 FROM drafts WHERE id = ?16 AND outcome IS NULL AND alternative_to IS NULL)",
             params![
                 id,
                 new.participant_id,
@@ -108,10 +131,26 @@ impl Db {
                 new.prompt_hash,
                 new.evidence.to_string(),
                 now_rfc3339(),
-                new.incoming_message_id
+                new.incoming_message_id,
+                new.alternative_to
             ],
         )?;
+        if n == 0 {
+            let there = new.alternative_to.as_deref().map(|first| self.get_draft(first)).transpose()?.flatten();
+            return Err(DbError::Invalid(if there.is_some() { ALREADY_CHOSEN } else { DRAFT_GONE }.into()));
+        }
         self.get_draft(&id)?.ok_or(DbError::NotFound(id))
+    }
+
+    /// The other ways of saying a first draft that are still on offer beside
+    /// it, oldest first.
+    pub fn alternatives_of(&self, first: &str) -> DbResult<Vec<Draft>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM drafts WHERE alternative_to = ?1 AND outcome IS NULL ORDER BY created_at, id"
+        ))?;
+        let rows = stmt.query_map([first], map)?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
     pub fn get_draft(&self, id: &str) -> DbResult<Option<Draft>> {
@@ -127,17 +166,52 @@ impl Db {
 
     /// Record what happened to a draft. `final_text` is what the user sent;
     /// pass `None` when it was discarded.
+    ///
+    /// A draft shown beside other ways of saying it is one of a set, and what
+    /// happens to one decides the rest, in the same transaction: using any of
+    /// them puts every other still on offer aside as `regenerated` — passed
+    /// over for another way, not turned down — and putting the first aside
+    /// puts its alternatives aside with it. Putting an alternative aside
+    /// leaves the others as they are. A draft already decided is not decided
+    /// again: a second window's Use this on a draft passed over would
+    /// otherwise make two drafts of one set sent.
     pub fn resolve_draft(&self, id: &str, outcome: &str, final_text: Option<&str>) -> DbResult<Draft> {
         if !["sent_unedited", "sent_edited", "discarded", "regenerated"].contains(&outcome) {
             return Err(DbError::Invalid(format!("unknown draft outcome {outcome:?}")));
         }
-        let n = self.conn().execute(
-            "UPDATE drafts SET outcome = ?1, final_text = ?2, resolved_at = ?3 WHERE id = ?4",
-            params![outcome, final_text, now_rfc3339(), id],
-        )?;
-        if n == 0 {
-            return Err(DbError::NotFound(id.into()));
-        }
+        self.transaction(|tx| {
+            let now = now_rfc3339();
+            let n = tx.execute(
+                "UPDATE drafts SET outcome = ?1, final_text = ?2, resolved_at = ?3 WHERE id = ?4 AND outcome IS NULL",
+                params![outcome, final_text, now, id],
+            )?;
+            if n == 0 {
+                let there: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM drafts WHERE id = ?1)", [id], |r| r.get(0))?;
+                return Err(if there { DbError::Invalid(ALREADY_DECIDED.into()) } else { DbError::NotFound(id.into()) });
+            }
+            let (first, is_first): (String, bool) = tx.query_row(
+                "SELECT COALESCE(alternative_to, id), alternative_to IS NULL FROM drafts WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            match outcome {
+                "sent_unedited" | "sent_edited" => {
+                    tx.execute(
+                        "UPDATE drafts SET outcome = 'regenerated', resolved_at = ?2
+                         WHERE outcome IS NULL AND id <> ?3 AND (id = ?1 OR alternative_to = ?1)",
+                        params![first, now, id],
+                    )?;
+                }
+                "discarded" | "regenerated" if is_first => {
+                    tx.execute(
+                        "UPDATE drafts SET outcome = ?3, resolved_at = ?2 WHERE outcome IS NULL AND alternative_to = ?1",
+                        params![first, now, outcome],
+                    )?;
+                }
+                _ => {}
+            }
+            Ok(())
+        })?;
         self.get_draft(id)?.ok_or_else(|| DbError::NotFound(id.into()))
     }
 
@@ -196,10 +270,11 @@ impl Db {
     /// Drafts the user has not resolved yet, newest first. A draft is
     /// "pending" purely because nothing has been recorded about what happened
     /// to it — there is no separate approval state to drift out of step.
+    /// Other ways of saying a draft are offered with it, not counted apart.
     pub fn pending_drafts(&self, limit: usize) -> DbResult<Vec<Draft>> {
         let conn = self.conn();
         let sql =
-            format!("SELECT {COLS} FROM drafts WHERE outcome IS NULL ORDER BY created_at DESC, id DESC LIMIT {limit}");
+            format!("SELECT {COLS} FROM drafts WHERE outcome IS NULL AND alternative_to IS NULL ORDER BY created_at DESC, id DESC LIMIT {limit}");
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], map)?;
         rows.map(|r| r.map_err(DbError::from)).collect()
@@ -212,7 +287,9 @@ impl Db {
     /// draft the user writes after dropping one is newer than the drop, and is
     /// offered. A draft answers the message it was written for: once someone
     /// writes again, a draft for their earlier message is no longer a reply to
-    /// anything on screen.
+    /// anything on screen. Only a first draft is returned — its other ways
+    /// come with it (`alternatives_of`) — and one of those other ways put
+    /// aside has not dealt with the message; one used has.
     pub fn pending_draft_for_message(
         &self,
         conversation_id: &str,
@@ -224,11 +301,13 @@ impl Db {
             .query_row(
                 &format!(
                     "SELECT {COLS} FROM drafts d
-                     WHERE d.conversation_id = ?1 AND d.outcome IS NULL AND {FOR_MESSAGE}
+                     WHERE d.conversation_id = ?1 AND d.outcome IS NULL AND d.alternative_to IS NULL
+                       AND {FOR_MESSAGE}
                        AND NOT EXISTS (
                          SELECT 1 FROM drafts d2
                          WHERE d2.conversation_id = ?1
-                           AND d2.outcome IN ('sent_unedited','sent_edited','discarded')
+                           AND (d2.outcome IN ('sent_unedited','sent_edited')
+                                OR (d2.outcome = 'discarded' AND d2.alternative_to IS NULL))
                            AND d2.resolved_at > d.created_at
                            AND {FOR_MESSAGE_D2})
                      ORDER BY d.created_at DESC, d.id DESC LIMIT 1"
@@ -254,12 +333,17 @@ impl Db {
 
     /// Every draft the user sent, with who it went to, what Mimic wrote and
     /// what went out: `(participant_id, generated_text, final_text)`, oldest
-    /// first. Discarded and unresolved drafts are not evidence of anything.
+    /// first. Discarded and unresolved drafts are not evidence of anything,
+    /// and nor is a draft written with an adjustment — another way the user
+    /// asked for, or Compose's Shorter and the rest: what was changed in it
+    /// was changed from what the user asked for, not from how Mimic writes,
+    /// so trimming a Longer draft back down says nothing about length.
     pub fn sent_drafts_for_learning(&self) -> DbResult<Vec<(Option<String>, String, String)>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT participant_id, generated_text, final_text FROM drafts
              WHERE outcome IN ('sent_unedited','sent_edited') AND final_text IS NOT NULL
+               AND json_extract(context_json, '$.adjustment') IS NULL
              ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
@@ -336,6 +420,7 @@ mod tests {
             context: json!({"layers": ["global"]}),
             prompt_hash: "h".into(),
             evidence: json!({"examples": 0}),
+            alternative_to: None,
         }
     }
 
@@ -377,6 +462,70 @@ mod tests {
         assert_eq!(out.unedited_rate, Some(0.5), "discarded drafts are not in the denominator");
         // "I will send the deck tomorrow morning." (7 words) -> "deck tomorrow" (2).
         assert_eq!(out.mean_length_delta, Some(5.0));
+    }
+
+    fn beside(db: &Db, first: &Draft, text: &str) -> Draft {
+        db.create_draft(&NewDraft { alternative_to: Some(first.id.clone()), ..draft(text) }).unwrap()
+    }
+
+    fn outcome(db: &Db, d: &Draft) -> Option<String> {
+        db.get_draft(&d.id).unwrap().unwrap().outcome
+    }
+
+    #[test]
+    fn using_any_way_of_saying_it_passes_the_others_over_rather_than_turning_them_down() {
+        let db = Db::open_in_memory().unwrap();
+        let first = db.create_draft(&draft("Sure, I'll send the deck tomorrow.")).unwrap();
+        let shorter = beside(&db, &first, "Tomorrow!");
+        let longer = beside(&db, &first, "Sure — I'll send the deck first thing tomorrow, with the notes.");
+        assert_eq!(db.pending_drafts(10).unwrap().len(), 1, "a set is one draft waiting");
+        let offered: Vec<String> = db.alternatives_of(&first.id).unwrap().into_iter().map(|d| d.id).collect();
+        assert_eq!(offered, [shorter.id.clone(), longer.id.clone()], "oldest first");
+
+        db.resolve_draft(&shorter.id, "sent_unedited", Some("Tomorrow!")).unwrap();
+        assert_eq!(outcome(&db, &shorter).as_deref(), Some("sent_unedited"));
+        assert_eq!(outcome(&db, &first).as_deref(), Some("regenerated"));
+        assert_eq!(outcome(&db, &longer).as_deref(), Some("regenerated"));
+        // A second window still showing the set can't make a second one sent.
+        let again = db.resolve_draft(&longer.id, "sent_unedited", Some(&longer.generated_text));
+        assert!(matches!(again, Err(DbError::Invalid(ref m)) if m == ALREADY_DECIDED));
+        assert_eq!(outcome(&db, &longer).as_deref(), Some("regenerated"));
+        let out = db.measured_draft_outcomes().unwrap();
+        assert_eq!((out.resolved, out.sent_unedited, out.discarded), (3, 1, 0), "nothing was turned down");
+    }
+
+    #[test]
+    fn putting_the_first_aside_puts_its_other_ways_aside_and_one_other_way_only_itself() {
+        let db = Db::open_in_memory().unwrap();
+        let first = db.create_draft(&draft("Sure, tomorrow.")).unwrap();
+        let shorter = beside(&db, &first, "Tomorrow.");
+        let casual = beside(&db, &first, "yep tmrw");
+
+        db.resolve_draft(&shorter.id, "discarded", None).unwrap();
+        assert_eq!((outcome(&db, &first), outcome(&db, &casual)), (None, None), "the rest stay on offer");
+        let offered: Vec<String> = db.alternatives_of(&first.id).unwrap().into_iter().map(|d| d.id).collect();
+        assert_eq!(offered, std::slice::from_ref(&casual.id));
+
+        db.resolve_draft(&first.id, "discarded", None).unwrap();
+        assert_eq!(outcome(&db, &casual).as_deref(), Some("discarded"));
+        assert!(db.pending_drafts(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn another_way_is_kept_only_beside_a_first_draft_still_on_offer() {
+        let db = Db::open_in_memory().unwrap();
+        let first = db.create_draft(&draft("Sure, tomorrow.")).unwrap();
+        let other = beside(&db, &first, "Tomorrow.");
+        let refused = |to: &str| {
+            let r = db.create_draft(&NewDraft { alternative_to: Some(to.into()), ..draft("x") });
+            matches!(r, Err(DbError::Invalid(ref m)) if m == ALREADY_CHOSEN)
+        };
+        assert!(refused(&other.id), "another way of another way is not a set of its own");
+        let gone = db.create_draft(&NewDraft { alternative_to: Some("gone".into()), ..draft("x") });
+        assert!(matches!(gone, Err(DbError::Invalid(ref m)) if m == DRAFT_GONE));
+        db.resolve_draft(&first.id, "sent_edited", Some("Sure, tomorrow at 9.")).unwrap();
+        assert!(refused(&first.id), "a choice already made");
+        assert_eq!(db.recent_drafts(10).unwrap().len(), 2, "nothing refused was kept");
     }
 
     #[test]

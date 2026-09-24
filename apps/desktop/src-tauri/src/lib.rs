@@ -134,6 +134,7 @@ pub fn run() {
             commands::voice::delete_voice_preference,
             commands::compose::preview_generation_context,
             commands::compose::generate_draft,
+            commands::compose::write_another_draft,
             commands::compose::resolve_draft,
             commands::compose::add_draft_preference,
             commands::compose::list_recent_drafts,

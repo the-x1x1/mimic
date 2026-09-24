@@ -30,6 +30,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 11, name: "evaluations", sql: include_str!("migrations/0011_evaluations.sql") },
     Migration { version: 12, name: "situation_readings", sql: include_str!("migrations/0012_situation_readings.sql") },
     Migration { version: 13, name: "message_search", sql: include_str!("migrations/0013_message_search.sql") },
+    Migration { version: 14, name: "draft_alternatives", sql: include_str!("migrations/0014_draft_alternatives.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -84,7 +85,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 13);
+        assert_eq!(latest_version(), 14);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -178,7 +179,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
         assert!(column_names(&conn, "participants").contains(&"kept_apart".to_string()));
         let cases = column_names(&conn, "evaluation_cases");
@@ -428,7 +429,7 @@ mod tests {
                       ('m2', 'c', 's', 'm2', NULL, 'self', 'email', 'thanks, reading it now', 'h2', 't');",
         )
         .unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![13]);
+        assert_eq!(migrate_to(&mut conn, 13).unwrap(), vec![13]);
         let found = |conn: &Connection, q: &str| -> Vec<String> {
             conn.prepare("SELECT message_id FROM message_search WHERE message_search MATCH ?1 ORDER BY message_id")
                 .unwrap()
@@ -488,9 +489,35 @@ mod tests {
             [],
         )
         .unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11, 12, 13]);
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11, 12, 13, 14]);
         let apart: i64 =
             conn.query_row("SELECT kept_apart FROM participants WHERE id = 'p'", [], |r| r.get(0)).unwrap();
         assert_eq!(apart, 0, "only the user's own no sets it");
+    }
+
+    /// Drafts written before other ways existed are first drafts, and an
+    /// alternative goes with the draft it is another way of.
+    #[test]
+    fn drafts_from_before_the_upgrade_are_first_drafts_and_alternatives_go_with_theirs() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&mut conn, 13).unwrap();
+        let draft = |id: &str| {
+            format!(
+                "INSERT INTO drafts(id, channel, generated_text, provider, model, prompt_hash, created_at)
+                 VALUES ('{id}', 'email', 'Sure.', 'mock', 'm', 'h', 't');"
+            )
+        };
+        conn.execute_batch(&draft("old")).unwrap();
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![14]);
+        let first: Option<String> =
+            conn.query_row("SELECT alternative_to FROM drafts WHERE id = 'old'", [], |r| r.get(0)).unwrap();
+        assert_eq!(first, None);
+
+        conn.execute_batch(&draft("other")).unwrap();
+        conn.execute("UPDATE drafts SET alternative_to = 'old' WHERE id = 'other'", []).unwrap();
+        conn.execute("DELETE FROM drafts WHERE id = 'old'", []).unwrap();
+        let left: i64 = conn.query_row("SELECT COUNT(*) FROM drafts", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0, "another way of a draft that is gone goes too");
     }
 }

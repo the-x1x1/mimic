@@ -23,6 +23,7 @@ const draft = (over: Partial<Draft> = {}): Draft => ({
   resolvedAt: null,
   outcome: null,
   incomingMessageId: "m2",
+  alternativeTo: null,
   ...over,
 });
 

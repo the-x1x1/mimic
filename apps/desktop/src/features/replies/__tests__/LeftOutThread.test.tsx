@@ -22,6 +22,7 @@ const left = (over: Partial<DashboardThread> = {}): DashboardThread => ({
   participant: null,
   hasRelationshipProfile: false,
   draft: null,
+  alternatives: [],
   automated: null,
   mark: null,
   quiet: true,

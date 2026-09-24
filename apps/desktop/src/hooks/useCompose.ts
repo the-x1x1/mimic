@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ComposeRequest } from "@mimic/contracts";
+import type { Adjustment, ComposeRequest } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
@@ -29,6 +29,19 @@ export function useGenerateDraft() {
   });
 }
 
+/** Another way of saying a draft, written to be shown beside it. */
+export function useWriteAnother() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ draftId, adjustment }: { draftId: string; adjustment: Adjustment }) =>
+      ipc.writeAnotherDraft(draftId, adjustment),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.drafts });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+    },
+  });
+}
+
 export function useResolveDraft() {
   const qc = useQueryClient();
   return useMutation({
@@ -41,7 +54,10 @@ export function useResolveDraft() {
       outcome: string;
       finalText: string | null;
     }) => ipc.resolveDraft(draftId, outcome, finalText),
-    onSuccess: () => {
+    // Settled, not only succeeded: a draft decided elsewhere is refused, and
+    // the screen should catch up with what was decided rather than keep
+    // offering it.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: qk.drafts });
       qc.invalidateQueries({ queryKey: qk.draftOutcomes });
       qc.invalidateQueries({ queryKey: qk.dashboard });

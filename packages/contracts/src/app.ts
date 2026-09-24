@@ -335,6 +335,8 @@ export const DashboardThread = z.object({
   hasRelationshipProfile: z.boolean(),
   /** A draft written for `lastMessage`, never one written for an earlier message. */
   draft: Draft.nullable(),
+  /** Other ways of saying `draft` still on offer beside it, oldest first. Empty without one. */
+  alternatives: z.array(Draft).default([]),
   /** Why the last message looks automated, when it does. A reading, not a fact. */
   automated: AutomatedReason.nullable(),
   /** What the user said about this thread, while it still applies. */

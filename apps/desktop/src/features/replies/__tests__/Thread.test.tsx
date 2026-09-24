@@ -24,6 +24,7 @@ const draft: Draft = {
   createdAt: "2026-09-20T10:00:00Z",
   resolvedAt: null,
   outcome: null,
+  alternativeTo: null,
 };
 
 const thread = (over: Partial<DashboardThread> = {}): DashboardThread => ({
@@ -40,6 +41,7 @@ const thread = (over: Partial<DashboardThread> = {}): DashboardThread => ({
   participant: null,
   hasRelationshipProfile: false,
   draft,
+  alternatives: [],
   automated: null,
   mark: null,
   quiet: false,
@@ -80,6 +82,29 @@ describe("a card shows only the draft written for the message on it", () => {
     expect(
       message.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+describe("a card shows the other ways of saying its draft", () => {
+  it("shows another way already written beside the draft, named by how it differs", () => {
+    const shorter: Draft = {
+      ...draft,
+      id: "d2",
+      alternativeTo: "d1",
+      generatedText: "friday works!",
+      context: { adjustment: "shorter" },
+    };
+    setup(thread({ alternatives: [shorter] }));
+    expect(screen.getByRole("group", { name: "As I first wrote it" })).toHaveTextContent(
+      draft.generatedText,
+    );
+    expect(screen.getByRole("group", { name: "Shorter" })).toHaveTextContent("friday works!");
+  });
+
+  it("does not show another way of a draft that isn't the one on the card", () => {
+    const stale: Draft = { ...draft, id: "d9", alternativeTo: "d0", generatedText: "old words" };
+    setup(thread({ alternatives: [stale] }));
+    expect(screen.queryByText("old words")).toBeNull();
   });
 });
 

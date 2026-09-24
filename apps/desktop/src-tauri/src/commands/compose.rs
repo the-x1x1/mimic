@@ -24,7 +24,11 @@ async fn meaning(
     state: &SharedState,
     request: &mimic_core::generation::ComposeRequest,
 ) -> Option<mimic_core::retrieval::QueryVector> {
-    let incoming = request.incoming_message.as_deref().filter(|t| !t.trim().is_empty())?;
+    meaning_of(state, request.incoming_message.as_deref()).await
+}
+
+async fn meaning_of(state: &SharedState, incoming: Option<&str>) -> Option<mimic_core::retrieval::QueryVector> {
+    let incoming = incoming.filter(|t| !t.trim().is_empty())?;
     if !state.engine.is_ready() {
         return None;
     }
@@ -48,8 +52,31 @@ pub async fn generate_draft(
     Ok(draft)
 }
 
+/// Another way of saying a draft already written — shorter, longer, more
+/// casual or more professional — from the same request, to be shown beside
+/// it. One model call, like any draft; refused before it once the draft was
+/// used or put aside, or when a way of that kind is already beside it.
+#[tauri::command]
+pub async fn write_another_draft(
+    state: State<'_, SharedState>,
+    draft_id: String,
+    adjustment: mimic_core::generation::Adjustment,
+) -> CommandResult<mimic_core::db::Draft> {
+    let provider = state.active_provider()?;
+    let incoming = state.db.get_draft(&draft_id)?.and_then(|d| d.incoming_message);
+    let meaning = meaning_of(&state, incoming.as_deref()).await;
+    let db = state.db.clone();
+    let draft = tauri::async_runtime::spawn_blocking(move || {
+        mimic_core::generation::compose_another(&db, provider.as_ref(), &draft_id, adjustment, meaning)
+    })
+    .await
+    .map_err(|e| crate::error::CommandError::new("internal", e.to_string()))??;
+    Ok(draft)
+}
+
 /// Record the outcome of a draft. `finalText` is what the user actually sent.
-/// The difference between the two is the feedback.
+/// The difference between the two is the feedback. What happens to one of a
+/// set of ways of saying it decides the rest (`Db::resolve_draft`).
 #[tauri::command]
 pub async fn resolve_draft(
     state: State<'_, SharedState>,
