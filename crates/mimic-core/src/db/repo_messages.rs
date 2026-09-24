@@ -338,13 +338,60 @@ impl Db {
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 
-    /// Renumber a conversation's messages by time — timestamp, then the order
-    /// they were given in, then id — and re-derive reply links and latency
-    /// from the new order. Used when messages arrive in more than one batch.
+    /// Which of these message ids this source has stored already — an earlier
+    /// import of the same file, an earlier check of the same mailbox. The ids
+    /// go in as one JSON parameter, so a conversation of any length fits.
+    pub fn ids_in_source(
+        &self,
+        source_id: &str,
+        external_ids: &[String],
+    ) -> DbResult<std::collections::HashSet<String>> {
+        if external_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT external_id FROM messages
+             WHERE source_id = ?1 AND external_id IN (SELECT value FROM json_each(?2))",
+        )?;
+        let ids = serde_json::to_string(external_ids).unwrap_or_else(|_| "[]".into());
+        let rows = stmt.query_map(params![source_id, ids], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// The position of a conversation's last message, or `None` when it has
+    /// none yet.
+    pub fn last_position(&self, conversation_id: &str) -> DbResult<Option<i64>> {
+        Ok(self.conn().query_row(
+            "SELECT MAX(sequence_index) FROM messages WHERE conversation_id = ?1",
+            [conversation_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Whether every message in a conversation says when it was sent in a
+    /// form that can be read as a time, so that time can put them in order.
+    /// A chat export's times are stored as the file gives them: "03/02/2026
+    /// 09:14" is a date to a person and not to `julianday`, and a
+    /// conversation holding one keeps the order it was given.
+    pub fn every_message_timed(&self, conversation_id: &str) -> DbResult<bool> {
+        Ok(self.conn().query_row(
+            "SELECT NOT EXISTS (SELECT 1 FROM messages WHERE conversation_id = ?1 AND julianday(sent_at) IS NULL)",
+            [conversation_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Renumber a conversation's messages by time — the time each was sent,
+    /// read as a time rather than as text (so "10:00+01:00" comes before
+    /// "09:30Z"), then the order they were given in, then id — and re-derive
+    /// reply links and latency from the new order. A message with no time
+    /// that can be read comes first. Used when messages arrive in more than
+    /// one batch.
     pub fn resequence_by_time(&self, conversation_id: &str) -> DbResult<()> {
         self.conn().execute(
             "WITH ordered AS (
-               SELECT id, ROW_NUMBER() OVER (ORDER BY COALESCE(sent_at, ''), sequence_index, id) - 1 AS rn
+               SELECT id, ROW_NUMBER() OVER (ORDER BY julianday(sent_at), sequence_index, id) - 1 AS rn
                FROM messages WHERE conversation_id = ?1
              )
              UPDATE messages SET

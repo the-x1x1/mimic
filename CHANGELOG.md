@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.13] — 2026-09-23
+
+Importing again only adds what's new.
+
+### Fixed
+
+- **A later export of a chat goes after what was already there.** Importing a newer export of the same conversations numbered its new messages from the start, so they sat among the old ones, and the wrong message could decide whether someone is waiting on you. New messages now go after the ones already there, and into time order when every message says when it was sent.
+- **Reading a message again makes nobody up.** When a message I already had came back with its sender written differently — a new name, another address — I could add that sender to the conversation as someone new, even though I kept the copy I already had. Now I recognise a message I have before I look at who sent it.
+
 ## [0.10.0-alpha.12] — 2026-09-23
 
 Your Sent folder knows your addresses.

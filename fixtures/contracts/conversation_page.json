@@ -1,7 +1,7 @@
 {
   "messages": [
     {
-      "id": "7564660e-7036-48d6-8f06-14ad7afeaf89",
+      "id": "548b3775-d1ba-4dc9-b959-9cdacb216976",
       "direction": "other",
       "author": "Bob",
       "sentAt": "2026-01-25T18:00:00Z",
@@ -9,7 +9,7 @@
       "automated": null
     },
     {
-      "id": "3df56769-6db2-4c8f-af5a-905b043b99dc",
+      "id": "22ff963f-bd53-4405-a481-f404742333fd",
       "direction": "self",
       "author": null,
       "sentAt": "2026-01-25T18:02:00Z",
@@ -17,7 +17,7 @@
       "automated": null
     },
     {
-      "id": "17f4b334-1c99-46b2-8078-7f6ec180277d",
+      "id": "0ad5876a-bd95-4b1b-916d-eaced4fbba1a",
       "direction": "other",
       "author": "Bob",
       "sentAt": "2026-01-25T18:10:00Z",
@@ -25,7 +25,7 @@
       "automated": null
     },
     {
-      "id": "a6630de6-cc52-49b6-bd34-1bdf19798555",
+      "id": "ee242795-277f-4376-8cb8-df079ef60040",
       "direction": "self",
       "author": null,
       "sentAt": "2026-01-25T18:11:00Z",
