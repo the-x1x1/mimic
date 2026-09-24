@@ -40,6 +40,7 @@ export function FoldConfirm({
   owner,
   pending,
   changed = false,
+  focus = false,
   onYes,
   onNo,
 }: {
@@ -48,6 +49,8 @@ export function FoldConfirm({
   pending: boolean;
   /** The user said yes to an earlier version of this question. */
   changed?: boolean;
+  /** Take the keyboard to the answer when the question appears where it may not be noticed. */
+  focus?: boolean;
   onYes: () => void;
   onNo: () => void;
 }) {
@@ -62,7 +65,7 @@ export function FoldConfirm({
         ))}
       </ul>
       <div className="row gap-2">
-        <Button variant="primary" disabled={pending} onClick={onYes}>
+        <Button variant="primary" disabled={pending} autoFocus={focus} onClick={onYes}>
           {pending ? "Moving them over…" : "Yes, that's me"}
         </Button>
         <Button variant="ghost" disabled={pending} onClick={onNo}>

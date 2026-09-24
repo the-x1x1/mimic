@@ -41,7 +41,7 @@ Not done, and why:
 
 - Done in 0.10.0-alpha.3: IMAP, read-only, inbox and sent, with a per-folder watermark and a schedule. Done in 0.10.0-alpha.14: signing in with Microsoft (OAuth 2.0 with PKCE, `AUTHENTICATE XOAUTH2`), which Outlook.com and Hotmail require, and every Microsoft 365 mailbox has since 2022–23. Still open: signing in with Google, and a first real connection to each major provider.
 - Done in 0.10.0-alpha.12: mail in the sent folder, or labelled `Sent` in a Gmail export, from an address the user didn't give is asked about by name. Done in 0.10.0-alpha.15: a file named as the Sent folder (a Thunderbird or Apple Mail export is one mbox per folder, and its name is the only clue) is read as one, and importing a file again gives mail read by an earlier version the readings it lacked. Still open: a connected mailbox's mail from before the reading, and exports that say nothing about the folder.
-- Platform exports: iMessage, WhatsApp, Signal, Slack, Discord.
+- Platform exports. Done in 0.10.0-alpha.19: WhatsApp — a chat from Export chat, as a text file or a zip, with the user saying which name in it is theirs (`sources::whatsapp`). Still open: iMessage, Signal, Slack, Discord, and a real WhatsApp export from each phone and language.
 - Incremental sync for file sources (IMAP has it).
 
 ## Phase 5 — Reply assistant

@@ -112,7 +112,7 @@ export function useSentFolderPeople(enabled = true) {
 export function useRemoveIdentifier() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ipc.removeUserIdentifier,
+    mutationFn: (identifierId: string) => ipc.removeUserIdentifier(identifierId),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.identity }),
   });
 }

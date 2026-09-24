@@ -4,6 +4,7 @@ import { Button, Field, InlineError } from "@mimic/ui";
 import { CHANNEL_LABELS, Channel, type ValidationReport } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { useConnectors, useCreateSource, useStartImport } from "@/hooks/useSources";
+import { WhoIsYou } from "./WhoIsYou";
 
 /**
  * Adding a source is: pick a format, pick a file, see what Mimic found in it,
@@ -122,7 +123,8 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
                       {w}
                     </p>
                   ))}
-                  {report.frequentIdentifiers.length > 0 ? (
+                  {report.names.length > 0 ? <WhoIsYou names={report.names} /> : null}
+                  {report.names.length === 0 && report.frequentIdentifiers.length > 0 ? (
                     <p className="muted small">
                       Most frequent addresses:{" "}
                       {report.frequentIdentifiers

@@ -39,6 +39,23 @@ export const Source = z.object({
 });
 export type Source = z.infer<typeof Source>;
 
+/**
+ * Someone who wrote in a chat that knows people only by name, as the import
+ * will know them: saying which is the user adds exactly this address.
+ */
+export const WriterName = z.object({
+  name: z.string(),
+  /** `handle` (`whatsapp:<name>`) or `phone`, for a writer shown as a number. */
+  kind: z.string(),
+  value: z.string(),
+  /** What matching compares, as the user's own addresses store it. */
+  normalized: z.string(),
+  messages: z.number(),
+  /** A chat here is named after them: in one between two people, the one it is with. */
+  chatNamedAfter: z.boolean(),
+});
+export type WriterName = z.infer<typeof WriterName>;
+
 /** What `validate` found, before the user commits to importing. */
 export const ValidationReport = z.object({
   ok: z.boolean(),
@@ -51,6 +68,12 @@ export const ValidationReport = z.object({
   latest: z.string().nullable(),
   /** Messages read as from the user's Sent folder: Gmail's label, or the file's name. */
   sentFolder: z.number(),
+  /**
+   * For a source that knows people only by the name a phone saved them under
+   * (WhatsApp): everyone who wrote, most messages first, so the user can say
+   * which is theirs. Empty for any other source.
+   */
+  names: z.array(WriterName).default([]),
 });
 export type ValidationReport = z.infer<typeof ValidationReport>;
 
