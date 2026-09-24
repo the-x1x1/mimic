@@ -434,6 +434,28 @@ a.ui-btn {
   flex-direction: column;
   gap: var(--space-1);
 }
+/* Find: the words to look for, and what was found. */
+.find__words {
+  flex: 1 1 18rem;
+}
+.find__go {
+  align-self: flex-end;
+}
+.found__snippet {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--text-letter);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+/* A match is drawn in weight as well as colour, so it is not colour alone. */
+.found__snippet mark {
+  background: var(--accent-soft);
+  color: inherit;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  padding: 0 1px;
+}
 /* What one of the user's own messages is filed under as doing, and changing it. */
 fieldset.message-filing {
   margin: 0;

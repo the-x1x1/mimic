@@ -30,7 +30,11 @@ Five things, all of them the user's choice and all of them visible in the interf
 
 ## What is in the logs
 
-Job progress, error codes, counts and timings. **No message content by default.** Provider errors are truncated to one line and carry the status and the provider's own message, never the request body.
+Job progress, error codes, counts and timings. **No message content by default.** Provider errors are truncated to one line and carry the status and the provider's own message, never the request body. What the user types into Find is not logged.
+
+## Finding what was said
+
+Find (0.10.0-alpha.18) searches every message Mimic has read, the user's and everyone else's, in the database on this computer: nothing is sent anywhere to search. To do it, the database keeps a second copy of each message's text in a full-text index (`message_search`, docs/DATA_MODEL.md). That copy goes whenever the message goes — with a person, with a source, or with everything — and is removed from the index's own pages at once (FTS5's `secure-delete`), not left for a later merge. As with the messages themselves, SQLite may leave deleted bytes in free pages of the file until they are reused, and in its write-ahead log (`mimic.db-wal`) until the next checkpoint.
 
 ## Other people's words
 
@@ -40,7 +44,7 @@ Onboarding and the Sources screen both say the same thing: **train Mimic only on
 
 ## Deletion
 
-**Deleting a person** removes: their participant row and identifiers; their messages; every message in a conversation that existed only between them and the user, _including the user's own half of it_; the embeddings and the situation readings of all of those; the representative examples drawn from them; their relationship profile; any preferences set for them; drafts written to them. Every remaining profile that was computed over material including theirs is marked stale and must be recomputed.
+**Deleting a person** removes: their participant row and identifiers; their messages; every message in a conversation that existed only between them and the user, _including the user's own half of it_; the embeddings, the situation readings and the search index's copy of the text of all of those; the representative examples drawn from them; their relationship profile; any preferences set for them; drafts written to them. Every remaining profile that was computed over material including theirs is marked stale and must be recomputed.
 
 The dialog says all of this before it happens, in sentences rather than a table of counts, and it calls out the user's own messages specifically — people do not expect "delete Ada" to delete what they themselves wrote to her, and it does. Group conversations survive with that person's messages removed.
 

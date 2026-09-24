@@ -14,6 +14,7 @@ import {
   ConnectorInfo,
   ConversationPage,
   PersonConversations,
+  SearchPage,
   Dashboard,
   DeletionReport,
   DiagnosticsBundle,
@@ -50,6 +51,7 @@ import {
   CommandError,
   type ComposeRequest,
   type ImapAccount,
+  type SearchWho,
   type ThreadMark,
   type Toward,
 } from "@mimic/contracts";
@@ -131,6 +133,23 @@ export const ipc = {
   ) =>
     call("list_person_conversations", PersonConversations, {
       participantId,
+      beforeAt: before?.at ?? null,
+      beforeId: before?.id ?? null,
+      limit,
+    }),
+  /**
+   * Every message that says what was typed, newest first, the user's or
+   * other people's or both; read on from the last one shown.
+   */
+  searchMessages: (
+    query: string,
+    who: SearchWho,
+    before: { at: string; id: string } | null = null,
+    limit = 20,
+  ) =>
+    call("search_messages", SearchPage, {
+      query,
+      who,
       beforeAt: before?.at ?? null,
       beforeId: before?.id ?? null,
       limit,

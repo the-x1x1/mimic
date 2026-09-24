@@ -46,7 +46,7 @@ Not done, and why:
 
 ## Phase 5 — Reply assistant
 
-- Done in 0.10.0-alpha.10: the rest of each waiting thread's conversation, before and after the message on its card, read a page at a time when asked. (A reply was already written on the card for its own thread.) Done in 0.10.0-alpha.16: every conversation someone is in can be opened from People, with where it stands, and one left off the list put back on it. Still open: finding a conversation by what was said in it.
+- Done in 0.10.0-alpha.10: the rest of each waiting thread's conversation, before and after the message on its card, read a page at a time when asked. (A reply was already written on the card for its own thread.) Done in 0.10.0-alpha.16: every conversation someone is in can be opened from People, with where it stands, and one left off the list put back on it. Done in 0.10.0-alpha.18: finding what was said — every message, the user's and everyone else's, found by its words (`Db::search_messages` over the `message_search` index, migration 0013), newest first, each shown in its conversation (Find, in the bar). Still open: finding by meaning (only the messages drafts compare are read for meaning, and a search would need them all), words inside Chinese, Japanese or Thai text (the index doesn't split them), and searching one person's conversations from People.
 - Multiple drafts side by side.
 - Per-situation templates derived from the user's own patterns.
 

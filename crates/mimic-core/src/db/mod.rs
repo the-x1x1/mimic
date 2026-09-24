@@ -13,6 +13,7 @@ mod repo_identity;
 mod repo_jobs;
 mod repo_messages;
 pub mod repo_people;
+mod repo_search;
 mod repo_situations;
 mod repo_sources;
 mod repo_voice;
@@ -36,6 +37,7 @@ pub use repo_messages::{
     word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
 };
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
+pub use repo_search::{search_query, FoundMessage, SearchPage, SearchWho, SnippetPiece, COUNT_CAP as SEARCH_COUNT_CAP};
 pub use repo_situations::{FiledBy, Filing, FilingCounts};
 pub use repo_sources::channel_is_known;
 pub use repo_waiting::{
@@ -345,6 +347,7 @@ mod tests {
             "situations",
             "message_situations",
             "situation_readings",
+            "message_search",
             "voice_profiles",
             "voice_preferences",
             "representative_examples",
