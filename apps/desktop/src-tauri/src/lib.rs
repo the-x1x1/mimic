@@ -96,6 +96,7 @@ pub fn run() {
             commands::sources::cancel_mail_sign_in,
             commands::sources::sign_in_mailbox_again,
             commands::sources::pick_source_file,
+            commands::sources::pick_source_folder,
             commands::people::get_user_identity,
             commands::people::set_user_identity,
             commands::people::preview_user_address,

@@ -16,7 +16,8 @@ export const ConnectorInfo = z.object({
   displayName: z.string(),
   channel: z.string(),
   description: z.string(),
-  locationKind: z.enum(["file", "folder"]),
+  /** `fileOrFolder`: a file, or the folder it unzips to (a Discord package). */
+  locationKind: z.enum(["file", "folder", "fileOrFolder"]),
   extensions: z.array(z.string()),
 });
 export type ConnectorInfo = z.infer<typeof ConnectorInfo>;
@@ -39,13 +40,25 @@ export const Source = z.object({
 });
 export type Source = z.infer<typeof Source>;
 
+/** An address, as the import gives it and as the user's own are matched. */
+export const WriterAddress = z.object({
+  kind: z.string(),
+  value: z.string(),
+  /** What matching compares, as the user's own addresses store it. */
+  normalized: z.string(),
+});
+export type WriterAddress = z.infer<typeof WriterAddress>;
+
 /**
  * Someone who wrote in a chat that knows people only by name, as the import
  * will know them: saying which is the user adds exactly this address.
  */
 export const WriterName = z.object({
   name: z.string(),
-  /** `handle` (`whatsapp:<name>`) or `phone`, for a writer shown as a number. */
+  /**
+   * `handle` (`whatsapp:<name>`) or `phone`, for a writer shown as a number;
+   * `account_id` (`discord:<id>`) for a Discord package's account.
+   */
   kind: z.string(),
   value: z.string(),
   /** What matching compares, as the user's own addresses store it. */
@@ -53,8 +66,26 @@ export const WriterName = z.object({
   messages: z.number(),
   /** A chat here is named after them: in one between two people, the one it is with. */
   chatNamedAfter: z.boolean(),
+  /** Other addresses the import gives the same writer: a Discord account's email. */
+  also: z.array(WriterAddress).default([]),
 });
 export type WriterName = z.infer<typeof WriterName>;
+
+/**
+ * Which of the user's addresses makes this writer the user, if any: the one
+ * the import gives them first, then any other it gives them too (a Discord
+ * account's email). The import decides by the same match.
+ */
+export function yoursAs<T extends { kind: string; normalizedValue: string }>(
+  writer: WriterName,
+  identifiers: readonly T[],
+): T | null {
+  for (const a of [writer, ...writer.also]) {
+    const found = identifiers.find((i) => i.kind === a.kind && i.normalizedValue === a.normalized);
+    if (found) return found;
+  }
+  return null;
+}
 
 /** What `validate` found, before the user commits to importing. */
 export const ValidationReport = z.object({
@@ -71,9 +102,15 @@ export const ValidationReport = z.object({
   /**
    * For a source that knows people only by the name a phone saved them under
    * (WhatsApp): everyone who wrote, most messages first, so the user can say
-   * which is theirs. Empty for any other source.
+   * which is theirs; for a Discord package, its account. Empty for any other
+   * source.
    */
   names: z.array(WriterName).default([]),
+  /**
+   * Everything here is by the one writer in `names` (a Discord package), and
+   * is imported only once that writer is the user.
+   */
+  oneWriter: z.boolean().default(false),
 });
 export type ValidationReport = z.infer<typeof ValidationReport>;
 

@@ -112,6 +112,7 @@ pub fn retrieve_by_meaning(
     }
     let query = tokenize(incoming);
     let idf = inverse_document_frequency(&candidates);
+    let narrowed = chosen_for(filter);
     // What each candidate is compared with: the message it answered, or the
     // reply itself when it answered nothing stored.
     let compared = |c: &CandidateExchange| c.incoming_message_id.clone().unwrap_or_else(|| c.reply_message_id.clone());
@@ -145,14 +146,14 @@ pub fn retrieve_by_meaning(
                         let reason = match (close >= CLOSE_IN_MEANING, shared.is_empty()) {
                             (true, true) => "close in meaning".to_string(),
                             (true, false) => format!("close in meaning, and in wording: {}", shared.join(", ")),
-                            (false, true) => "same person and channel".to_string(),
+                            (false, true) => narrowed.to_string(),
                             (false, false) => format!("similar wording: {}", shared.join(", ")),
                         };
                         (MEANING_WEIGHT * close + (1.0 - MEANING_WEIGHT) * s, reason)
                     }
                     None => {
                         let reason = if shared.is_empty() {
-                            "same person and channel".to_string()
+                            narrowed.to_string()
                         } else {
                             format!("similar wording: {}", shared.join(", "))
                         };
@@ -186,6 +187,20 @@ pub fn retrieve_by_meaning(
     });
     scored.truncate(limit);
     Ok(scored)
+}
+
+/// Why an example that shares nothing with the message was chosen: what the
+/// filter narrowed on, and no more. A message found with no person asked for
+/// — one written to nobody, a Discord post — is not said to be to the same
+/// person.
+fn chosen_for(filter: &RetrievalFilter) -> &'static str {
+    match (&filter.conversation_id, &filter.participant_id, &filter.channel) {
+        (Some(_), _, _) => "same conversation",
+        (None, Some(_), Some(_)) => "same person and channel",
+        (None, Some(_), None) => "same person",
+        (None, None, Some(_)) => "same channel",
+        (None, None, None) => "one of your messages",
+    }
 }
 
 /// How many rows the filter may return before ranking. Bounded so a filter
@@ -459,6 +474,27 @@ mod tests {
         assert_eq!(hits[0].reply, "yeah im in", "the newest reply comes first");
         assert!(hits.iter().all(|h| h.score == 0.0));
         assert!(hits[0].reason.contains("nothing to match"));
+    }
+
+    #[test]
+    fn a_match_that_shares_no_words_says_only_what_it_was_chosen_for() {
+        let f = fixture();
+        let reason =
+            |filter: RetrievalFilter| retrieve(&f.db, "zebra xylophone", &filter, 1).unwrap()[0].reason.clone();
+        assert_eq!(reason(RetrievalFilter::default()), "one of your messages");
+        assert_eq!(reason(RetrievalFilter { channel: Some("chat".into()), ..Default::default() }), "same channel");
+        assert_eq!(
+            reason(RetrievalFilter {
+                participant_id: Some(f.ada.clone()),
+                channel: Some("email".into()),
+                ..Default::default()
+            }),
+            "same person and channel"
+        );
+        assert_eq!(
+            reason(RetrievalFilter { participant_id: Some(f.bob.clone()), ..Default::default() }),
+            "same person"
+        );
     }
 
     #[test]

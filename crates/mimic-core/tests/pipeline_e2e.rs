@@ -858,3 +858,70 @@ fn a_whatsapp_chat_is_the_users_once_they_say_which_name_is_theirs() {
     let again = run_import(&db, &source.id);
     assert_eq!((again.inserted, again.duplicates), (0, 12), "the same export again adds nothing");
 }
+
+/// A Discord package: only what the account wrote, imported only once the
+/// account is the user's — then all of it is theirs, nobody is made up, and
+/// nothing is left waiting.
+#[test]
+fn a_discord_package_is_the_users_own_writing_and_nothing_waits() {
+    let db = Db::open_in_memory().unwrap();
+    db.set_setting(mimic_core::db::WITHIN_DAYS_SETTING, &0).unwrap();
+    db.set_user_identity("C").unwrap();
+    db.add_user_identifier(IdentifierKind::Email, "c@work.example").unwrap();
+    let path = fixture("import/discord_package");
+
+    let report = mimic_core::sources::by_connector("discord").unwrap().validate(&path).unwrap();
+    assert!(report.ok, "{report:?}");
+    assert!(report.one_writer);
+    assert_eq!((report.conversations, report.messages), (2, 5));
+    let account: Vec<(&str, &str, &str)> =
+        report.names.iter().map(|w| (w.name.as_str(), w.kind.as_str(), w.value.as_str())).collect();
+    assert_eq!(account, [("C", "account_id", "discord:90001")]);
+    assert_eq!(report.names[0].also[0].value, "c@example.com");
+    check_fixture("discord_validation_report.json", &serde_json::to_value(&report).unwrap());
+
+    let source = db
+        .create_source(&NewSource {
+            connector: "discord".into(),
+            name: "Discord".into(),
+            channel: "chat".into(),
+            location: Some(path.to_string_lossy().into()),
+            config: Value::Null,
+        })
+        .unwrap();
+    // Not the user's yet: read as someone else's, every channel would wait.
+    let refused = import::import_source(&db, &source.id, &mut |_, _| {}, &|| false).unwrap_err();
+    assert!(matches!(refused, import::ImportError::NotYours { .. }), "{refused}");
+    let failed = db.get_source(&source.id).unwrap().unwrap();
+    assert_eq!(failed.status, "failed");
+    assert!(failed.last_error.unwrap()["message"].as_str().unwrap().contains("discord:90001"));
+    assert_eq!(db.count_participants().unwrap(), 0, "nothing was read");
+
+    // "That's me" adds the account's address.
+    db.add_user_identifier(IdentifierKind::AccountId, "discord:90001").unwrap();
+    let summary = run_import(&db, &source.id);
+    assert_eq!((summary.conversations, summary.inserted), (2, 5));
+    assert_eq!(summary.from_self, 5);
+    assert_eq!(summary.participants_created, 0, "nobody else is in a package");
+    assert_eq!(db.count_self_messages(Some("chat"), None).unwrap(), 5);
+    let dashboard = mimic_core::dashboard::dashboard(&db, 25, false, false).unwrap();
+    assert!(dashboard.awaiting.is_empty(), "the user wrote last in every one");
+
+    let again = run_import(&db, &source.id);
+    assert_eq!((again.inserted, again.duplicates), (0, 5));
+
+    // The account's email, already the user's, is as good as saying so.
+    let by_email = Db::open_in_memory().unwrap();
+    by_email.set_user_identity("C").unwrap();
+    by_email.add_user_identifier(IdentifierKind::Email, "C@Example.com").unwrap();
+    let source = by_email
+        .create_source(&NewSource {
+            connector: "discord".into(),
+            name: "Discord".into(),
+            channel: "chat".into(),
+            location: Some(path.to_string_lossy().into()),
+            config: Value::Null,
+        })
+        .unwrap();
+    assert_eq!(run_import(&by_email, &source.id).from_self, 5);
+}

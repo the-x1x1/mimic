@@ -2,6 +2,22 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.20] — 2026-09-23
+
+Your Discord messages.
+
+### Added
+
+- **Learn from what you've written on Discord.** Ask Discord for your data (Settings → Data & Privacy → Request all of my data); when the package arrives, add it under Your mail → Add a source → **Discord data package**, as the zip or the folder it unzips to. I read every message you sent — in direct messages, groups and servers — one conversation per channel.
+- A Discord package holds only what you wrote, never what anyone else said, so it teaches me how you write rather than how you reply to someone, and nothing from it waits on the home screen. I can show a draft some of them as messages you sent, never as replies to anything. The check says so before you import.
+- A package is one account's, so I import it only once that account is yours. If it has an email you've given me, it's yours already; otherwise I ask **Is this you?** first, and **Import** waits for your answer.
+- Mentions, channel links and custom emoji are written as `@someone`, `#channel` and `:name:`, since the package doesn't say who or what they were, and a time Discord shows as a timestamp is written as that time. A message that was only a picture or a file has no words and is left out. Importing a newer package later adds only what's new.
+
+### Fixed
+
+- An example I show beside a draft says only what it was chosen for: one written to nobody in particular is no longer called "same person and channel".
+- A file I can read no messages from no longer also warns that it has no timestamps.
+
 ## [0.10.0-alpha.19] — 2026-09-23
 
 WhatsApp chats.

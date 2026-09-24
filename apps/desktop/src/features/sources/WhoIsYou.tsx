@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { Button, InlineError } from "@mimic/ui";
-import type { AddressOwner, WriterName } from "@mimic/contracts";
+import { yoursAs, type AddressOwner, type WriterName } from "@mimic/contracts";
 import { FoldConfirm } from "@/features/identity/AddAddressForm";
 import {
   isStaleConfirmation,
@@ -22,8 +22,17 @@ const SHOWN = 8;
  * filed as someone's, the user is shown who and what would move; a second
  * name, or the one the chat is named after (in a chat between two, the other
  * person), is asked about first. Before importing, a name can be taken back.
+ * A Discord package is one account's, and is the user's already when the
+ * account's email is one of theirs.
  */
-export function WhoIsYou({ names }: { names: WriterName[] }) {
+export function WhoIsYou({
+  names,
+  connector = "whatsapp",
+}: {
+  names: WriterName[];
+  /** Which kind of source asks: what it knows people by decides what is said. */
+  connector?: string;
+}) {
   const identity = useIdentity();
   const preview = usePreviewAddress();
   const add = useAddIdentifier();
@@ -45,8 +54,7 @@ export function WhoIsYou({ names }: { names: WriterName[] }) {
   const error = add.error ?? preview.error ?? remove.error;
 
   const identifiers = identity.data?.identifiers ?? [];
-  const mineAs = (w: WriterName) =>
-    identifiers.find((i) => i.kind === w.kind && i.normalizedValue === w.normalized) ?? null;
+  const mineAs = (w: WriterName) => yoursAs(w, identifiers);
   const yours = names.filter((w) => mineAs(w) !== null);
   const shown = all ? names : names.slice(0, SHOWN);
 
@@ -107,14 +115,30 @@ export function WhoIsYou({ names }: { names: WriterName[] }) {
 
   return (
     <div className="stack gap-1" role="group" aria-labelledby={heading}>
-      <p id={heading}>
-        <strong>Which of these is you?</strong> WhatsApp knows people only by the name your phone
-        saved them under, so I need you to say which one wrote your messages. Until you do,
-        I&rsquo;ll read them as someone else&rsquo;s.
-      </p>
-      <p className="muted small">
-        Someone saved on your phone under exactly your name would be read as you too.
-      </p>
+      {connector === "discord" ? (
+        yours.length > 0 ? (
+          <p id={heading}>
+            <strong>This is you.</strong> A Discord package is everything one account wrote, and
+            this account is one of yours.
+          </p>
+        ) : (
+          <p id={heading}>
+            <strong>Is this you?</strong> A Discord package is everything one account wrote, so
+            I&rsquo;ll import it once you say it&rsquo;s yours.
+          </p>
+        )
+      ) : (
+        <>
+          <p id={heading}>
+            <strong>Which of these is you?</strong> WhatsApp knows people only by the name your
+            phone saved them under, so I need you to say which one wrote your messages. Until you
+            do, I&rsquo;ll read them as someone else&rsquo;s.
+          </p>
+          <p className="muted small">
+            Someone saved on your phone under exactly your name would be read as you too.
+          </p>
+        </>
+      )}
       {yours.length > 0 ? (
         <p className="small">
           I&rsquo;ll read what {yours.map((w) => w.name).join(" and ")} wrote as yours.

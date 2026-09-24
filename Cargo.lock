@@ -2291,7 +2291,7 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "mimic-core"
-version = "0.10.0-alpha.19"
+version = "0.10.0-alpha.20"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2316,7 +2316,7 @@ dependencies = [
 
 [[package]]
 name = "mimic-desktop"
-version = "0.10.0-alpha.19"
+version = "0.10.0-alpha.20"
 dependencies = [
  "anyhow",
  "hex",
@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "mimic-keychain"
-version = "0.10.0-alpha.19"
+version = "0.10.0-alpha.20"
 dependencies = [
  "chacha20poly1305",
  "rand 0.9.5",

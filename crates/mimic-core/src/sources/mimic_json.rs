@@ -311,6 +311,7 @@ mod tests {
         let r = MimicJsonSource.validate(&path).unwrap();
         assert!(!r.ok);
         assert_eq!(r.blockers, vec!["No messages could be read from this file."]);
+        assert!(r.warnings.is_empty(), "nothing is said about messages there are none of: {:?}", r.warnings);
 
         let (_d2, bad) = write("{not json");
         assert!(matches!(MimicJsonSource.validate(&bad), Err(SourceError::Malformed(_))));

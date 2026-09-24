@@ -222,6 +222,8 @@ export const ipc = {
   deleteSource: (sourceId: string) => call("delete_source", DeletionReport, { sourceId }),
   pickSourceFile: (title: string, extensions: string[]) =>
     call("pick_source_file", z_string.nullable(), { title, extensions }),
+  /** A folder to read from: an export unzipped (a Discord package). */
+  pickSourceFolder: (title: string) => call("pick_source_folder", z_string.nullable(), { title }),
 
   userIdentity: () => call("get_user_identity", UserIdentity.nullable()),
   setUserIdentity: (displayName: string) =>

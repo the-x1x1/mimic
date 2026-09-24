@@ -7,6 +7,8 @@ import {
   PersonConversations,
   SearchPage,
   ValidationReport,
+  WriterName,
+  yoursAs,
   describeFound,
   hasWordsToFind,
   canPutOnList,
@@ -1209,6 +1211,42 @@ describe("a WhatsApp chat, before it is imported", () => {
       ...ValidationReport.parse(read(contractFixture("validation_report.json"))),
     };
     delete older.names;
-    expect(ValidationReport.parse(older).names).toEqual([]);
+    delete older.oneWriter;
+    const parsed = ValidationReport.parse(older);
+    expect(parsed.names).toEqual([]);
+    expect(parsed.oneWriter).toBe(false);
+  });
+});
+
+describe("a Discord package, before it is imported", () => {
+  it("names its one account, with every address that makes it the user's", () => {
+    const report = ValidationReport.parse(read(contractFixture("discord_validation_report.json")));
+    expect(report.oneWriter).toBe(true);
+    expect(
+      report.names.map((w) => [w.name, w.kind, w.normalized, w.also.map((a) => a.normalized)]),
+    ).toEqual([["C", "account_id", "discord:90001", ["c@example.com"]]]);
+    expect(report.warnings.some((w) => w.includes("only what you wrote"))).toBe(true);
+  });
+
+  it("reads a writer from before other addresses were reported as having none", () => {
+    const report = ValidationReport.parse(read(contractFixture("validation_report.json")));
+    expect(report.names.every((w) => w.also.length === 0)).toBe(true);
+    const older = { ...report.names[0] } as Record<string, unknown>;
+    delete older.also;
+    expect(WriterName.parse(older).also).toEqual([]);
+  });
+
+  it("is the user's by the address the import gives it, or by any other it gives it too", () => {
+    const [account] = ValidationReport.parse(
+      read(contractFixture("discord_validation_report.json")),
+    ).names;
+    if (!account) throw new Error("the check names no account");
+    const id = (kind: string, normalizedValue: string) => ({ kind, normalizedValue });
+    expect(yoursAs(account, [id("email", "c@work.example")])).toBeNull();
+    expect(yoursAs(account, [id("email", "c@example.com")])).toEqual(id("email", "c@example.com"));
+    // The kind counts, not only the text.
+    expect(yoursAs(account, [id("handle", "discord:90001")])).toBeNull();
+    const both = [id("email", "c@example.com"), id("account_id", "discord:90001")];
+    expect(yoursAs(account, both)).toEqual(id("account_id", "discord:90001"));
   });
 });
