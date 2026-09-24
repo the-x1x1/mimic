@@ -50,6 +50,15 @@ def test_hello_and_health_report_which_encoder_is_in_use(tmp_path):
     assert "lexical fallback" in encoder["reason"]
 
 
+def test_the_encoder_is_looked_for_again_when_asked(tmp_path):
+    server, out = service(tmp_path)
+    resp, _ = call(server, out, "encoder.reload", {})
+    assert resp["ok"]
+    encoder = resp["result"]["encoder"]
+    assert encoder["provider"] == "lexical_v1"
+    assert encoder["semantic"] is False
+
+
 def test_embedding_is_deterministic_and_normalized(tmp_path, own_messages):
     server, out = service(tmp_path)
     texts = own_messages[:5]

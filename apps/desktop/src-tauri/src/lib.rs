@@ -5,6 +5,8 @@
 mod app_state;
 mod commands;
 mod error;
+#[cfg(test)]
+mod fixtures;
 mod logging;
 mod providers_config;
 mod secrets;
@@ -113,6 +115,13 @@ pub fn run() {
             commands::voice::start_voice_analysis,
             commands::voice::get_voice_profile,
             commands::voice::list_situations,
+            commands::encoder::get_encoder,
+            commands::encoder::download_encoder,
+            commands::voice::start_describing_voice,
+            commands::voice::get_situation_filing,
+            commands::voice::start_reading_situations,
+            commands::voice::decide_situations,
+            commands::voice::let_rules_decide,
             commands::voice::get_learning_overview,
             commands::voice::get_evaluation,
             commands::voice::start_evaluation,

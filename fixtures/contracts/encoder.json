@@ -1,0 +1,15 @@
+{
+  "offered": {
+    "id": "all-minilm-l6-v2",
+    "name": "all-MiniLM-L6-v2",
+    "description": "A small English sentence encoder: 384 numbers for a message, close together for messages that mean much the same thing.",
+    "bytes": 90871461,
+    "license": "Apache-2.0",
+    "homepage": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
+  },
+  "downloaded": false,
+  "inUse": false,
+  "reason": "all-MiniLM-L6-v2: model.onnx has not been downloaded; using the lexical fallback",
+  "wanted": 0,
+  "done": 0
+}

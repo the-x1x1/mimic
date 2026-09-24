@@ -36,6 +36,7 @@ pub use repo_messages::{
     word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
 };
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
+pub use repo_situations::{FiledBy, Filing, FilingCounts};
 pub use repo_sources::channel_is_known;
 pub use repo_waiting::{
     AwaitingReply, LeftOut, PersonConversation, PersonConversations, Standing, ThreadMark, WaitingWindow,
@@ -343,6 +344,7 @@ mod tests {
             "message_embeddings",
             "situations",
             "message_situations",
+            "situation_readings",
             "voice_profiles",
             "voice_preferences",
             "representative_examples",

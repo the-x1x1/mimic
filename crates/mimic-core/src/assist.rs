@@ -78,6 +78,20 @@ pub fn draft_waiting_threads(
     on_progress: &mut dyn FnMut(usize, usize),
     should_stop: &dyn Fn() -> bool,
 ) -> Result<AssistSummary, GenerationError> {
+    draft_waiting_threads_by_meaning(db, provider, &|_| None, limit, on_progress, should_stop)
+}
+
+/// `draft_waiting_threads`, with `meaning` turning each message answered
+/// into a vector when there is a sentence encoder, so the examples a draft
+/// is shown are found as they are for one the user asks for.
+pub fn draft_waiting_threads_by_meaning(
+    db: &Db,
+    provider: &dyn ModelProvider,
+    meaning: &dyn Fn(&str) -> Option<crate::retrieval::QueryVector>,
+    limit: usize,
+    on_progress: &mut dyn FnMut(usize, usize),
+    should_stop: &dyn Fn() -> bool,
+) -> Result<AssistSummary, GenerationError> {
     let mut summary = AssistSummary::default();
     if !is_enabled(db)? {
         summary.disabled = true;
@@ -116,6 +130,7 @@ pub fn draft_waiting_threads(
             intent: None,
             situation_id: None,
             adjustment: None,
+            meaning: meaning(&thread.last_message),
         };
         match compose(db, provider, &request) {
             Ok(_) => summary.drafted += 1,
@@ -132,13 +147,19 @@ pub fn draft_waiting_threads(
 /// Runs `draft_waiting_threads` as a background job.
 pub struct AssistExecutor {
     provider: Arc<dyn Fn() -> Option<Arc<dyn ModelProvider>> + Send + Sync>,
+    /// The engine, for the meaning of each message answered, when it has a
+    /// sentence encoder.
+    engine: Option<crate::engine::EngineClient>,
 }
 
 impl AssistExecutor {
     /// The provider is resolved at run time rather than captured, because the
     /// user can change it in Settings between runs.
-    pub fn shared(provider: Arc<dyn Fn() -> Option<Arc<dyn ModelProvider>> + Send + Sync>) -> Arc<dyn JobExecutor> {
-        Arc::new(AssistExecutor { provider })
+    pub fn shared(
+        provider: Arc<dyn Fn() -> Option<Arc<dyn ModelProvider>> + Send + Sync>,
+        engine: Option<crate::engine::EngineClient>,
+    ) -> Arc<dyn JobExecutor> {
+        Arc::new(AssistExecutor { provider, engine })
     }
 }
 
@@ -156,6 +177,7 @@ impl JobExecutor for AssistExecutor {
 
     fn execute(&self, ctx: JobContext) -> JobFuture {
         let resolve = self.provider.clone();
+        let engine = self.engine.clone().filter(|e| e.is_ready());
         Box::pin(async move {
             let db = ctx.db.clone();
             let progress_ctx = ctx.clone();
@@ -165,7 +187,20 @@ impl JobExecutor for AssistExecutor {
                 let mut on_progress =
                     |done: usize, total: usize| progress_ctx.progress(done as i64, total as i64, "drafting replies");
                 let should_stop = || cancel_ctx.check_cancel().is_err();
-                draft_waiting_threads(&db, provider.as_ref(), MAX_PER_RUN, &mut on_progress, &should_stop)
+                // Drafting runs off the async threads; the engine is asked on
+                // this one, as the drafts are written.
+                let meaning = |text: &str| {
+                    let embedder = crate::encoder::EngineEmbedder(engine.clone()?);
+                    tokio::runtime::Handle::current().block_on(crate::encoder::query_vector(&embedder, text))
+                };
+                draft_waiting_threads_by_meaning(
+                    &db,
+                    provider.as_ref(),
+                    &meaning,
+                    MAX_PER_RUN,
+                    &mut on_progress,
+                    &should_stop,
+                )
             })
             .map_err(|e| JobError::Failed(e.to_string()))?;
             Ok(serde_json::to_value(summary).unwrap_or(json!(null)))

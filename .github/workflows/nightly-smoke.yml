@@ -26,7 +26,7 @@ jobs:
         with:
           python-version-file: .python-version
       - run: pnpm install --frozen-lockfile
-      - run: cd engine; uv sync --all-extras --dev; uv run pytest
+      - run: cd engine; uv sync --extra directml --dev; uv run pytest
         shell: pwsh
       - run: pwsh -NoProfile -File scripts/package-engine.ps1
         shell: pwsh

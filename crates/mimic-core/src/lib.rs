@@ -22,6 +22,7 @@ pub mod assist;
 pub mod dashboard;
 pub mod db;
 pub mod diagnostics;
+pub mod encoder;
 pub mod engine;
 pub mod evaluation;
 pub mod generation;

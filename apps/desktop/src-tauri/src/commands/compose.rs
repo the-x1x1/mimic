@@ -11,17 +11,34 @@ use crate::SharedState;
 #[tauri::command]
 pub async fn preview_generation_context(
     state: State<'_, SharedState>,
-    request: mimic_core::generation::ComposeRequest,
+    mut request: mimic_core::generation::ComposeRequest,
 ) -> CommandResult<mimic_core::generation::GenerationContext> {
+    request.meaning = meaning(&state, &request).await;
     Ok(mimic_core::generation::build_context(&state.db, &request)?)
+}
+
+/// What is being answered, as a vector, when the engine has a sentence
+/// encoder: the examples a draft is shown are then found by meaning as well
+/// as by wording.
+async fn meaning(
+    state: &SharedState,
+    request: &mimic_core::generation::ComposeRequest,
+) -> Option<mimic_core::retrieval::QueryVector> {
+    let incoming = request.incoming_message.as_deref().filter(|t| !t.trim().is_empty())?;
+    if !state.engine.is_ready() {
+        return None;
+    }
+    let embedder = mimic_core::encoder::EngineEmbedder(state.engine.clone());
+    mimic_core::encoder::query_vector(&embedder, incoming).await
 }
 
 #[tauri::command]
 pub async fn generate_draft(
     state: State<'_, SharedState>,
-    request: mimic_core::generation::ComposeRequest,
+    mut request: mimic_core::generation::ComposeRequest,
 ) -> CommandResult<mimic_core::db::Draft> {
     let provider = state.active_provider()?;
+    request.meaning = meaning(&state, &request).await;
     let db = state.db.clone();
     // Provider calls are blocking HTTP; keep them off the async worker.
     let draft =

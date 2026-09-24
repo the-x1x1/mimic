@@ -96,13 +96,13 @@ export function formatShare(x: number): string {
 /**
  * What the "overall wording" measure used, said plainly: the lexical
  * encoder compares wording, not meaning, and a reader should not take it for
- * more.
+ * more; a sentence encoder compares meaning.
  */
 export function describeEncoder(provider: string | null): string | null {
   if (provider === null) return null;
   return provider.startsWith("lexical")
     ? `"Overall wording" was measured by ${provider}, which compares the words and letters used, not what they mean.`
-    : `"Overall wording" was measured by ${provider}.`;
+    : `"Overall wording" was measured by ${provider}, a sentence encoder on this computer, which compares what the replies mean.`;
 }
 
 /** What a measurement was taken on, in one line. */

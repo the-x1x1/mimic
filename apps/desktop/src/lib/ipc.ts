@@ -36,7 +36,10 @@ import {
   RepresentativeExample,
   SentFolderPerson,
   Settings,
+  SituationFiling,
+  EncoderView,
   SituationSummary,
+  Filing,
   Source,
   SystemStatus,
   UpdateState,
@@ -244,10 +247,22 @@ export const ipc = {
 
   voiceOverview: () => call("get_voice_overview", VoiceOverview),
   situations: () => call("list_situations", SituationSummary.array()),
+  situationFiling: () => call("get_situation_filing", SituationFiling),
+  encoder: () => call("get_encoder", EncoderView),
+  /** Download the sentence encoder this build offers; one download at a time. */
+  downloadEncoder: () => call("download_encoder", Job),
+  /** Have the model on this computer read what your messages are doing; refused without one. */
+  startReadingSituations: () => call("start_reading_situations", Job),
+  /** Say what one of your messages is doing: these situations, or none. */
+  decideSituations: (messageId: string, situationIds: string[]) =>
+    call("decide_situations", Filing, { messageId, situationIds }),
+  letRulesDecide: (messageId: string) => call("let_rules_decide", Filing, { messageId }),
   learning: () => call("get_learning_overview", LearningOverview),
   addVoiceNote: (participantId: string | null, note: string) =>
     call("add_voice_note", VoicePreference, { participantId, note }),
   startVoiceAnalysis: () => call("start_voice_analysis", Job),
+  /** Have the chosen provider put each measured layer into words, from its numbers alone. */
+  startDescribingVoice: () => call("start_describing_voice", Job),
   /** The latest measurement of the drafts, from the cases still here; null before the first. */
   evaluation: () => call("get_evaluation", EvaluationView.nullable()),
   startEvaluation: () => call("start_evaluation", Job),

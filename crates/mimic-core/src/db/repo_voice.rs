@@ -44,7 +44,15 @@ impl Db {
              ON CONFLICT(layer, scope_key, analysis_version) DO UPDATE SET
                participant_id = excluded.participant_id,
                metrics_json = excluded.metrics_json,
-               qualitative_json = excluded.qualitative_json,
+               -- A reading of the numbers in words is kept: it says which
+               -- numbers it was written from, so one of older numbers is
+               -- shown as that rather than lost.
+               qualitative_json = CASE
+                 WHEN json_extract(voice_profiles.qualitative_json, '$.description') IS NULL
+                   THEN excluded.qualitative_json
+                 ELSE json_set(excluded.qualitative_json, '$.description',
+                               json(json_extract(voice_profiles.qualitative_json, '$.description')))
+               END,
                sample_size = excluded.sample_size,
                computed_at = excluded.computed_at,
                stale = 0",
@@ -113,6 +121,76 @@ impl Db {
                 [p],
             )?,
             None => conn.execute("UPDATE voice_profiles SET stale = 1", [])?,
+        })
+    }
+
+    /// Mark stale the profiles a change to these conversations could move:
+    /// where one of them holds a message of the user's, the layer over
+    /// everything, the channels those messages went over, the people in
+    /// those conversations, and the situations those messages are filed
+    /// under. New messages change the replies around them too — how long the
+    /// user took to answer — so a conversation counts when anything in it
+    /// changed, not only when the user wrote the new message.
+    ///
+    /// A conversation holding nothing of the user's moves no profile, and a
+    /// scope with no profile yet is measured by the next analysis anyway.
+    pub fn mark_conversations_changed(&self, conversation_ids: &[String]) -> DbResult<usize> {
+        if conversation_ids.is_empty() {
+            return Ok(0);
+        }
+        let ids = serde_json::to_string(conversation_ids).unwrap_or_else(|_| "[]".into());
+        Ok(self.conn().execute(
+            "WITH touched AS (
+               SELECT DISTINCT conversation_id FROM messages
+               WHERE direction = 'self' AND conversation_id IN (SELECT value FROM json_each(?1))
+             )
+             UPDATE voice_profiles SET stale = 1
+             WHERE stale = 0 AND (
+               (layer = 'global' AND EXISTS (SELECT 1 FROM touched))
+               OR (layer = 'channel' AND scope_key IN (
+                     SELECT m.channel FROM messages m JOIN touched t ON t.conversation_id = m.conversation_id
+                     WHERE m.direction = 'self'))
+               OR (layer = 'relationship' AND scope_key IN (
+                     SELECT cp.participant_id FROM conversation_participants cp
+                     JOIN touched t ON t.conversation_id = cp.conversation_id))
+               OR (layer = 'situational' AND scope_key IN (
+                     SELECT ms.situation_id FROM message_situations ms
+                     JOIN messages m ON m.id = ms.message_id
+                     JOIN touched t ON t.conversation_id = m.conversation_id
+                     WHERE m.direction = 'self'))
+             )",
+            [ids],
+        )?)
+    }
+
+    /// Everyone the user has written to, with how many of the user's own
+    /// messages are in conversations they are in — the count a relationship
+    /// layer is measured over. However many people there are.
+    pub fn people_written_to(&self) -> DbResult<Vec<(String, String, i64)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT p.id, p.display_name, COUNT(m.id) FROM participants p
+             JOIN conversation_participants cp ON cp.participant_id = p.id
+             JOIN messages m ON m.conversation_id = cp.conversation_id AND m.direction = 'self'
+             GROUP BY p.id ORDER BY p.id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Remove one scope's profile, at every analysis version, and its
+    /// examples: what it described is no longer in the messages.
+    pub fn delete_voice_scope(&self, layer: VoiceLayer, scope_key: &str) -> DbResult<()> {
+        self.transaction(|tx| {
+            tx.execute(
+                "DELETE FROM representative_examples WHERE layer = ?1 AND scope_key = ?2",
+                params![layer.as_str(), scope_key],
+            )?;
+            tx.execute(
+                "DELETE FROM voice_profiles WHERE layer = ?1 AND scope_key = ?2",
+                params![layer.as_str(), scope_key],
+            )?;
+            Ok(())
         })
     }
 

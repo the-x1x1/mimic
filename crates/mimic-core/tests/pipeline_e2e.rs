@@ -129,6 +129,20 @@ fn analysis_produces_measurable_layers_and_honest_gaps() {
     assert_eq!(sms.sample_size, 2);
     assert_eq!(sms.metrics.emoji_rate, None, "two messages produce no rates at all");
 
+    // A reading of the global layer's numbers in words, as How you write →
+    // In words keeps one, so the fixture carries its shape.
+    let reading = voice::describe::Description {
+        text: "Short and lowercase, with no full stop at the end.".into(),
+        provider: "local".into(),
+        model: "llama3.2:3b".into(),
+        metrics_digest: voice::describe::metrics_digest(&global.metrics),
+        written_at: "2026-09-23T10:00:00.000Z".into(),
+    };
+    let global_layer = mimic_core::db::VoiceLayer::Global;
+    db.set_voice_description(global_layer, "", mimic_core::version::ANALYSIS_VERSION, &reading).unwrap();
+    let overview = voice::overview(&db).unwrap();
+    let described = overview.profiles.iter().find(|p| p.layer == "global").unwrap();
+    assert!(described.reading.as_ref().unwrap().current, "written from these numbers");
     check_fixture("voice_overview.json", &serde_json::to_value(&overview).unwrap());
 }
 

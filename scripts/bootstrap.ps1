@@ -25,7 +25,8 @@ pnpm install --frozen-lockfile
 Write-Host "`n== Python engine" -ForegroundColor Cyan
 Push-Location engine
 uv python install 3.12
-uv sync --all-extras --dev
+# One build of ONNX Runtime: DirectML on Windows (it runs on the CPU too), the plain one elsewhere.
+if ($IsWindows -or $env:OS -eq "Windows_NT") { uv sync --extra directml --dev } else { uv sync --extra onnx --dev }
 Pop-Location
 Write-Host "`n== Rust" -ForegroundColor Cyan
 cargo fetch

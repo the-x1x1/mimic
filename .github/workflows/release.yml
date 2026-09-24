@@ -96,7 +96,7 @@ jobs:
         run: |
           pnpm typecheck
           pnpm test
-          cd engine; uv sync --all-extras --dev; uv run pytest; cd ..
+          cd engine; uv sync --extra directml --dev; uv run pytest; cd ..
           # After the engine environment exists, so the four engine-protocol
           # tests run against a real child process instead of skipping.
           cargo test --workspace

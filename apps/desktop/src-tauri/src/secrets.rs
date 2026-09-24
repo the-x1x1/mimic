@@ -49,8 +49,18 @@ const FORMAT: u64 = 2;
 pub enum Protection {
     /// Sealed to the user's Windows account (DPAPI).
     Account,
+    /// Sealed with a key kept in the user's login Keychain (macOS). Compiled,
+    /// never yet run on a Mac (`mimic-keychain`).
+    Keychain,
     /// In a file only this user can open, not sealed.
     File,
+}
+
+impl Protection {
+    /// Whether values are sealed, not merely kept in a file.
+    pub fn seals(self) -> bool {
+        self != Protection::File
+    }
 }
 
 /// Seals a value before it is written and unseals it when it is read.
@@ -60,11 +70,12 @@ pub trait Sealer: Send + Sync {
     fn unseal(&self, sealed: &[u8]) -> io::Result<Vec<u8>>;
 }
 
-/// No sealing: what a build without DPAPI does, and says it does.
-#[cfg(any(not(windows), test))]
+/// No sealing: what a build with neither DPAPI nor the Keychain does, and
+/// says it does.
+#[cfg(any(not(any(windows, target_os = "macos")), test))]
 pub struct Unsealed;
 
-#[cfg(any(not(windows), test))]
+#[cfg(any(not(any(windows, target_os = "macos")), test))]
 impl Sealer for Unsealed {
     fn protection(&self) -> Protection {
         Protection::File
@@ -83,9 +94,38 @@ pub fn platform_sealer() -> Box<dyn Sealer> {
     {
         Box::new(dpapi::Dpapi)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(keychain::Keychain(mimic_keychain::KeyedSealer::new(mimic_keychain::login_keychain::LoginKeychain)))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         Box::new(Unsealed)
+    }
+}
+
+/// A [`Sealer`] over any key source: on macOS, the login Keychain. Not yet
+/// run on a Mac; see `mimic-keychain`.
+#[cfg(any(target_os = "macos", test))]
+mod keychain {
+    use std::io;
+
+    use mimic_keychain::{KeySource, KeyedSealer};
+
+    use super::{Protection, Sealer};
+
+    pub struct Keychain<K: KeySource>(pub KeyedSealer<K>);
+
+    impl<K: KeySource> Sealer for Keychain<K> {
+        fn protection(&self) -> Protection {
+            Protection::Keychain
+        }
+        fn seal(&self, plain: &[u8]) -> io::Result<Vec<u8>> {
+            self.0.seal(plain)
+        }
+        fn unseal(&self, sealed: &[u8]) -> io::Result<Vec<u8>> {
+            self.0.unseal(sealed)
+        }
     }
 }
 
@@ -414,13 +454,13 @@ impl FileSecretStore {
 
     /// On a build that seals, whether anything unsealed is still on disk.
     pub fn unsealed_left(&self) -> bool {
-        if self.sealer.protection() != Protection::Account {
+        if !self.sealer.protection().seals() {
             return false;
         }
         let state = self.read();
         self.dir.join(LEGACY).exists()
             || !state.from_old.is_empty()
-            || state.stored.values().any(|s| s.protection != Protection::Account)
+            || state.stored.values().any(|s| s.protection == Protection::File)
     }
 
     pub fn credential_state(&self) -> CredentialState {
@@ -628,9 +668,7 @@ impl FileSecretStore {
     /// was refused) is sealed now, or dropped if it still cannot be. Best
     /// effort: it is tried again at every start and save.
     fn tidy_marks(&self, state: &mut State) {
-        if self.sealer.protection() != Protection::Account
-            || state.taken.values().all(|m| m.protection != Protection::File)
-        {
+        if !self.sealer.protection().seals() || state.taken.values().all(|m| m.protection != Protection::File) {
             return;
         }
         let mut next = state.clone();
@@ -880,6 +918,43 @@ mod tests {
 
     fn old_exists(dir: &Path) -> bool {
         dir.join(LEGACY).exists()
+    }
+
+    /// The login Keychain's part, played by a key the test holds.
+    struct TestKey([u8; 32]);
+    impl mimic_keychain::KeySource for TestKey {
+        fn key(&self) -> io::Result<[u8; 32]> {
+            Ok(self.0)
+        }
+    }
+
+    fn keychain(dir: &Path, byte: u8) -> FileSecretStore {
+        let sealer = keychain::Keychain(mimic_keychain::KeyedSealer::new(TestKey([byte; 32])));
+        FileSecretStore::open_with(dir, Box::new(sealer)).unwrap()
+    }
+
+    #[test]
+    fn with_the_keychain_a_value_is_sealed_and_opens_only_with_its_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = keychain(dir.path(), 1);
+        store.set("provider.anthropic.apiKey", "sk-live-secret").unwrap();
+        assert!(!on_disk(dir.path()).contains("sk-live-secret"));
+        assert!(on_disk(dir.path()).contains("\"keychain\""), "{}", on_disk(dir.path()));
+        assert_eq!(store.protection(), Protection::Keychain);
+        assert!(!store.unsealed_left());
+        assert_eq!(
+            serde_json::to_value(store.credential_state()).unwrap()["protection"],
+            serde_json::json!("keychain")
+        );
+
+        let reopened = keychain(dir.path(), 1);
+        assert_eq!(reopened.get("provider.anthropic.apiKey").as_deref(), Some("sk-live-secret"));
+        // Another key — another Mac, another user — opens nothing, and
+        // deletes nothing.
+        let elsewhere = keychain(dir.path(), 2);
+        assert_eq!(elsewhere.get("provider.anthropic.apiKey"), None);
+        assert_eq!(elsewhere.locked(), vec!["provider.anthropic.apiKey"]);
+        assert_eq!(keychain(dir.path(), 1).get("provider.anthropic.apiKey").as_deref(), Some("sk-live-secret"));
     }
 
     #[test]

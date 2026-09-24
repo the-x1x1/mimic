@@ -2,6 +2,24 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.17] — 2026-09-23
+
+Finding your past replies by meaning, and the rest of how you write.
+
+### Added
+
+- **Past replies found by what they mean, not only by the words they share.** A draft is shown a few of your past replies to messages like the one you're answering. Until now I found them by shared words, so "drinks on friday?" never found "pub friday?". Under Settings → Finding your past replies by meaning you can download a small sentence encoder, all-MiniLM-L6-v2 (91 MB, from Hugging Face, Apache-2.0); after that I find them mostly by meaning and a little by wording, and a draft's "why" says which. It downloads only when you ask, and it's used only while every file matches the SHA-256 this version pins — a file that doesn't match is deleted, and one changed on disk later is never run. It runs on this computer: the messages you've answered, and your own, are read into it once, in the background, and from then on as mail comes in. Reading them for meaning sends nothing anywhere. The drafts I prepare in advance and the drafts measured under How close my drafts come find their examples the same way, and How close my drafts come measures "overall wording" by meaning with it.
+- **Say what one of your messages was doing.** The "When you say no", "When you thank someone" layers are measured over your messages filed by what they were doing, and the rules that file them can be wrong. Under any message of yours in a conversation — on the home screen or under People — there's now a line saying what it's filed under and by whom, with **Change** (or **What was this doing?** under one filed under nothing). What you say — one situation, several, or none of them — stands over the rules and over any model until you choose **Let the rules decide**. The layers it moves are measured again by themselves.
+- **A model on this computer can read what each message is doing.** How you write → What each message is doing counts how your messages came to be filed — by the rules, by a model, by you — and, with a model on this computer that's answering, has it read them: up to 400 at a time, the most recent first, replacing what the rules said. Reading them sends every one to the model, so I only do it with a model on this computer; a hosted one is never used for this.
+- **How you write, in words.** How you write → In words has the model you chose read each layer's numbers and say in two or three sentences how you write — short and warm, say, or careful and formal. Only the numbers go to it, with the greetings and sign-offs you use from my own short list ("hi", "thanks"): never a message, a phrase you wrote, or who a layer is about. If it doesn't answer, I say so rather than saying it finished. The reading is shown under the numbers as the model's reading, and a draft is given it beside the numbers, until the numbers change; a reading of older numbers is shown as that and given to no draft.
+- **Saved passwords on macOS are kept with the Keychain.** A build for macOS seals each saved key and password with a key kept in your login Keychain, as Windows builds seal them to your Windows account. There is no build for macOS yet, and this has been compiled for it but never run on a Mac.
+
+### Changed
+
+- **How you write is measured again by itself after new mail, and only where something changed.** After an import or a mailbox check that brought in anything, what it touched — the layer over everything, the channels and people and kinds of message it's in — is measured again in the background, and the rest is left as it was. The first measurement is still yours to start. Measuring reads your messages a page at a time rather than all at once, so a large mailbox no longer has to fit in memory to be measured, and the numbers are the same either way.
+- **A channel, person or kind of message with nothing left in it loses its layer** when it's measured again, rather than describing messages that are gone.
+- **A reply in a conversation with several people is one example, not one per person.**
+
 ## [0.10.0-alpha.16] — 2026-09-23
 
 Every conversation, not only what's waiting.

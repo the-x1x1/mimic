@@ -10,7 +10,7 @@ The original files the user imported from are never modified and never moved.
 
 ## What leaves the computer
 
-Four things, all of them the user's choice and all of them visible in the interface.
+Five things, all of them the user's choice and all of them visible in the interface.
 
 **Drafting.** The provider selected in Settings receives the assembled prompt: the message being replied to, the intent the user typed, a handful of their own past messages, the recipient's display name and relationship, and the measured description of how they write. When that provider is the local one, this does not leave the machine at all, and the top bar says "Local model". When it is a hosted provider, the top bar says "Sends to Claude" and the Settings description spells out exactly what is transmitted.
 
@@ -18,7 +18,13 @@ Four things, all of them the user's choice and all of them visible in the interf
 
 **Signing in with Microsoft.** Outlook.com, Hotmail and Microsoft 365 mailboxes take no password. For those, the user signs in in their own browser, on Microsoft's page, and Mimic never sees the password. What Microsoft hands back is a sign-in that lasts (a refresh token); when Mimic checks the mailbox it sends that, with Mimic's client id, to Microsoft's sign-in service for an access token that lasts about an hour, and then reads the mailbox as above. No mail and nothing about it goes to the sign-in service, and nothing does for a mailbox with an app password.
 
+**How you write, in words.** When the user asks (How you write → In words), the provider selected in Settings is given each measured layer's numbers — rates, counts, and the greetings and sign-offs from Mimic's own short lists — and nothing else: not a message, not a phrase the user wrote, not who a layer is about. The card names the provider, and says whether it is on this computer, before anything is sent.
+
+**The sentence encoder download.** When the user asks (Settings → Finding your past replies by meaning), Mimic downloads all-MiniLM-L6-v2 from Hugging Face: a request for two files at a pinned revision, carrying nothing about the user. The encoder then runs on this computer: reading messages for meaning sends nothing anywhere.
+
 **Update checks.** A request to the GitHub releases endpoint carrying the current version. Switched off with `updates.automatic`.
+
+**What stays here, though a model reads it.** Reading what each of the user's messages is doing (How you write → What each message is doing) sends every message to the model, so it is only ever done with a model on this computer: a hosted provider is refused, not used, whatever is selected for drafting. Reading messages for meaning is done by the downloaded encoder, in the engine, on this computer.
 
 **Nothing else.** No usage analytics, no crash reporting, no model training on the user's data. A diagnostics bundle is written locally and shared only if the user chooses to; it contains counts, schema versions and recent error events, never message bodies, never credentials, and by default paths are reduced to their file name.
 
@@ -34,7 +40,7 @@ Onboarding and the Sources screen both say the same thing: **train Mimic only on
 
 ## Deletion
 
-**Deleting a person** removes: their participant row and identifiers; their messages; every message in a conversation that existed only between them and the user, _including the user's own half of it_; the embeddings of all of those; the representative examples drawn from them; their relationship profile; any preferences set for them; drafts written to them. Every remaining profile that was computed over material including theirs is marked stale and must be recomputed.
+**Deleting a person** removes: their participant row and identifiers; their messages; every message in a conversation that existed only between them and the user, _including the user's own half of it_; the embeddings and the situation readings of all of those; the representative examples drawn from them; their relationship profile; any preferences set for them; drafts written to them. Every remaining profile that was computed over material including theirs is marked stale and must be recomputed.
 
 The dialog says all of this before it happens, in sentences rather than a table of counts, and it calls out the user's own messages specifically — people do not expect "delete Ada" to delete what they themselves wrote to her, and it does. Group conversations survive with that person's messages removed.
 
@@ -50,7 +56,7 @@ None of these are recoverable. `Db::open` writes a database backup before a sche
 
 ## Credentials
 
-Provider API keys, mailbox app passwords and a Microsoft mailbox's sign-in (each under `imap:<source id>`) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth. The hour-long access token a sign-in is traded for is kept in memory only and never written.
+Provider API keys, mailbox app passwords and a Microsoft mailbox's sign-in (each under `imap:<source id>`) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. A build for macOS would seal them with a key kept in your login Keychain (there is no such build yet, and that code has never run on a Mac). Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth. The hour-long access token a sign-in is traded for is kept in memory only and never written.
 
 ## What Mimic will not do
 

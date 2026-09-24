@@ -43,6 +43,7 @@ const message = (id: string, body: string, direction: "self" | "other" = "other"
   sentAt: "2026-09-01T10:00:00Z",
   body,
   automated: null,
+  filing: null,
 });
 
 function renderIt() {

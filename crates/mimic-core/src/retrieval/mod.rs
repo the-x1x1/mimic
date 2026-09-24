@@ -6,11 +6,15 @@
 //! relationship, situation, date range, conversation, source) is applied as a
 //! `WHERE` clause, and ranking only ever reorders what survived it.
 //!
-//! V1 ranks lexically: how much of the incoming message's vocabulary appears
-//! in the message being answered, weighted so that rare words count for more
-//! than common ones. This is a real signal and it is honest about being a
-//! shallow one. Embedding-backed ranking replaces the scorer behind the same
-//! `retrieve` signature in Phase 2; nothing above this module changes.
+//! Ranking is by wording: how much of the incoming message's vocabulary
+//! appears in the message being answered, weighted so that rare words count
+//! for more than common ones. That is a real signal, and a shallow one. With
+//! a sentence encoder downloaded (`crate::encoder`), the message being
+//! answered comes with a vector (`QueryVector`), and a candidate with a
+//! vector from the same encoder is ranked mostly by how close in meaning the
+//! two are — "drinks on friday?" finds "pub friday?" with no word in common —
+//! and a little by wording. A candidate without one is ranked by wording, as
+//! before.
 
 use std::collections::{HashMap, HashSet};
 
@@ -57,7 +61,26 @@ pub struct RetrievedExchange {
     pub score: f64,
     /// Plain-language reason, shown in the Compose evidence panel.
     pub reason: String,
+    /// Ranked by meaning as well as wording: the message being answered came
+    /// with a vector, and so did what this one answered.
+    #[serde(skip_serializing, default)]
+    pub by_meaning: bool,
 }
+
+/// The message being answered, as a vector made by the sentence encoder
+/// named by `version`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryVector {
+    pub version: String,
+    pub vector: Vec<f32>,
+}
+
+/// How much closeness in meaning counts, against wording, for a candidate
+/// that has a vector.
+const MEANING_WEIGHT: f64 = 0.75;
+
+/// Closeness in meaning at which the reason says so.
+const CLOSE_IN_MEANING: f64 = 0.5;
 
 /// Retrieve the user's most relevant past replies.
 ///
@@ -70,16 +93,39 @@ pub fn retrieve(
     filter: &RetrievalFilter,
     limit: usize,
 ) -> Result<Vec<RetrievedExchange>, DbError> {
+    retrieve_by_meaning(db, incoming, None, filter, limit)
+}
+
+/// `retrieve`, ranking by meaning too where `meaning` — the message being
+/// answered, as a vector — and a candidate's vector from the same encoder
+/// allow.
+pub fn retrieve_by_meaning(
+    db: &Db,
+    incoming: &str,
+    meaning: Option<&QueryVector>,
+    filter: &RetrievalFilter,
+    limit: usize,
+) -> Result<Vec<RetrievedExchange>, DbError> {
     let candidates = db.candidate_exchanges(filter, CANDIDATE_POOL)?;
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
     let query = tokenize(incoming);
     let idf = inverse_document_frequency(&candidates);
+    // What each candidate is compared with: the message it answered, or the
+    // reply itself when it answered nothing stored.
+    let compared = |c: &CandidateExchange| c.incoming_message_id.clone().unwrap_or_else(|| c.reply_message_id.clone());
+    let vectors = match meaning {
+        Some(q) if !query.is_empty() => {
+            db.vectors_for(&candidates.iter().map(compared).collect::<Vec<_>>(), &q.version)?
+        }
+        _ => HashMap::new(),
+    };
 
     let mut scored: Vec<RetrievedExchange> = candidates
         .into_iter()
         .map(|c| {
+            let mut by_meaning = false;
             let (score, reason) = if query.is_empty() {
                 (0.0, "most recent, with nothing to match against".to_string())
             } else {
@@ -88,14 +134,31 @@ pub fn retrieve(
                     query.iter().filter(|t| haystack.contains(*t)).map(|t| idf.get(t).copied().unwrap_or(1.0)).sum();
                 let total: f64 = query.iter().map(|t| idf.get(t).copied().unwrap_or(1.0)).sum();
                 let s = if total > 0.0 { overlap / total } else { 0.0 };
-                let shared: Vec<&str> =
-                    query.iter().filter(|t| haystack.contains(*t)).map(String::as_str).take(3).collect();
-                let reason = if shared.is_empty() {
-                    "same person and channel".to_string()
-                } else {
-                    format!("similar wording: {}", shared.join(", "))
-                };
-                (s, reason)
+                let mut shared: Vec<&str> =
+                    query.iter().filter(|t| haystack.contains(*t)).map(String::as_str).collect();
+                shared.sort_unstable();
+                shared.truncate(3);
+                let close = meaning.zip(vectors.get(&compared(&c))).and_then(|(q, v)| cosine(&q.vector, v));
+                by_meaning = close.is_some();
+                match close {
+                    Some(close) => {
+                        let reason = match (close >= CLOSE_IN_MEANING, shared.is_empty()) {
+                            (true, true) => "close in meaning".to_string(),
+                            (true, false) => format!("close in meaning, and in wording: {}", shared.join(", ")),
+                            (false, true) => "same person and channel".to_string(),
+                            (false, false) => format!("similar wording: {}", shared.join(", ")),
+                        };
+                        (MEANING_WEIGHT * close + (1.0 - MEANING_WEIGHT) * s, reason)
+                    }
+                    None => {
+                        let reason = if shared.is_empty() {
+                            "same person and channel".to_string()
+                        } else {
+                            format!("similar wording: {}", shared.join(", "))
+                        };
+                        (s, reason)
+                    }
+                }
             };
             RetrievedExchange {
                 reply_message_id: c.reply_message_id,
@@ -107,6 +170,7 @@ pub fn retrieve(
                 sent_at: c.sent_at,
                 score: (score * 1000.0).round() / 1000.0,
                 reason,
+                by_meaning,
             }
         })
         .collect();
@@ -138,6 +202,18 @@ fn tokenize(text: &str) -> HashSet<String> {
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'').to_lowercase())
         .filter(|w| w.len() > 1 && !STOP.contains(&w.as_str()))
         .collect()
+}
+
+/// Cosine similarity, clamped to 0..1; none when the vectors cannot be
+/// compared (different lengths) or one says nothing (all zero).
+fn cosine(a: &[f32], b: &[f32]) -> Option<f64> {
+    if a.len() != b.len() || a.is_empty() {
+        return None;
+    }
+    let dot: f64 = a.iter().zip(b).map(|(x, y)| f64::from(*x) * f64::from(*y)).sum();
+    let na: f64 = a.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
+    let nb: f64 = b.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
+    (na > 0.0 && nb > 0.0).then(|| (dot / (na * nb)).clamp(0.0, 1.0))
 }
 
 /// Rare words count for more. Without this, "the meeting" and "the deck"
@@ -173,16 +249,24 @@ impl Db {
         filter: &RetrievalFilter,
         limit: usize,
     ) -> Result<Vec<CandidateExchange>, DbError> {
+        // One row per reply, however many people its conversation has: the
+        // person it is shown against is the one who wrote what it answered,
+        // or else the conversation's first.
         let mut sql = String::from(
-            "SELECT m.id, m.body, prev.body, cp.participant_id, m.channel, m.sent_at, prev.id
+            "SELECT m.id, m.body, prev.body,
+                    COALESCE(prev.participant_id, (SELECT MIN(cp.participant_id) FROM conversation_participants cp
+                                                   WHERE cp.conversation_id = m.conversation_id)),
+                    m.channel, m.sent_at, prev.id
              FROM messages m
              LEFT JOIN messages prev ON prev.id = m.reply_to_message_id
-             LEFT JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id
              WHERE m.direction = 'self'",
         );
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(p) = &filter.participant_id {
-            sql.push_str(" AND cp.participant_id = ?");
+            sql.push_str(
+                " AND EXISTS (SELECT 1 FROM conversation_participants cp
+                              WHERE cp.conversation_id = m.conversation_id AND cp.participant_id = ?)",
+            );
             args.push(Box::new(p.clone()));
         }
         if let Some(c) = &filter.channel {
@@ -199,7 +283,8 @@ impl Db {
         }
         if let Some(r) = &filter.relationship {
             sql.push_str(
-                " AND EXISTS (SELECT 1 FROM participants p WHERE p.id = cp.participant_id AND p.relationship = ?)",
+                " AND EXISTS (SELECT 1 FROM conversation_participants cp JOIN participants p ON p.id = cp.participant_id
+                              WHERE cp.conversation_id = m.conversation_id AND p.relationship = ?)",
             );
             args.push(Box::new(r.clone()));
         }
@@ -233,7 +318,11 @@ impl Db {
                 reply: r.get(1)?,
                 incoming: r.get(2)?,
                 incoming_message_id: r.get(6)?,
-                participant_id: r.get(3)?,
+                // Asked for one person, it is shown against them.
+                participant_id: match &filter.participant_id {
+                    Some(p) => Some(p.clone()),
+                    None => r.get(3)?,
+                },
                 channel: r.get(4)?,
                 sent_at: r.get(5)?,
             })
@@ -414,6 +503,78 @@ mod tests {
             a.iter().map(|h| &h.reply_message_id).collect::<Vec<_>>(),
             b.iter().map(|h| &h.reply_message_id).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn a_reply_in_a_conversation_with_several_people_is_one_candidate() {
+        let f = fixture();
+        let ada_thread = f.db.latest_conversation_with(&f.ada).unwrap().unwrap().id;
+        f.db.link_conversation_participant(&ada_thread, &f.bob).unwrap();
+        let all = retrieve(&f.db, "", &RetrievalFilter::default(), 20).unwrap();
+        assert_eq!(all.len(), 3, "{all:#?}");
+        let mut ids: Vec<&String> = all.iter().map(|h| &h.reply_message_id).collect();
+        ids.dedup();
+        assert_eq!(ids.len(), 3);
+        let bob = RetrievalFilter { participant_id: Some(f.bob.clone()), ..Default::default() };
+        let to_bob = retrieve(&f.db, "", &bob, 20).unwrap();
+        assert_eq!(to_bob.len(), 3);
+        assert!(to_bob.iter().all(|h| h.participant_id.as_deref() == Some(f.bob.as_str())));
+        let friends = RetrievalFilter { relationship: Some("friend".into()), ..Default::default() };
+        assert_eq!(retrieve(&f.db, "", &friends, 20).unwrap().len(), 3);
+    }
+
+    /// The fixture's messages that were answered, with a vector each from the
+    /// encoder "v": the deck [1, 0], the call [0.6, 0.8], the pub [0, 1].
+    fn with_vectors(f: &Fixture) {
+        let id = |body: &str| -> String {
+            f.db.conn().query_row("SELECT id FROM messages WHERE body = ?1", [body], |r| r.get(0)).unwrap()
+        };
+        f.db.put_embeddings(
+            "v",
+            2,
+            &[
+                (id("can you send the quarterly deck"), vec![1.0, 0.0]),
+                (id("are you free for a call tuesday"), vec![0.6, 0.8]),
+                (id("pub friday?"), vec![0.0, 1.0]),
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn with_an_encoder_meaning_finds_what_wording_cannot() {
+        let f = fixture();
+        with_vectors(&f);
+        let drinks = QueryVector { version: "v".into(), vector: vec![0.1, 0.99] };
+        let asked = "drinks at the bar this weekend";
+        let hits = retrieve_by_meaning(&f.db, asked, Some(&drinks), &RetrievalFilter::default(), 3).unwrap();
+        assert_eq!(hits[0].reply, "yeah im in", "{hits:#?}");
+        assert_eq!(hits[0].reason, "close in meaning");
+        assert!(hits.iter().all(|h| h.by_meaning));
+        assert!(hits[0].score > hits[1].score);
+        // By wording alone there is nothing to go on.
+        assert!(retrieve(&f.db, asked, &RetrievalFilter::default(), 3).unwrap().iter().all(|h| h.score == 0.0));
+
+        // Another encoder's vectors are not compared with this one's, and a
+        // candidate without a vector is ranked by wording as before.
+        let other = QueryVector { version: "w".into(), vector: vec![0.1, 0.99] };
+        let by_words =
+            retrieve_by_meaning(&f.db, "send the deck", Some(&other), &RetrievalFilter::default(), 3).unwrap();
+        assert_eq!(by_words[0].reply, "Sending the deck this afternoon.");
+        assert!(by_words.iter().all(|h| !h.by_meaning), "no vector of that encoder, so by wording");
+        assert!(by_words[0].reason.starts_with("similar wording"), "{}", by_words[0].reason);
+    }
+
+    #[test]
+    fn meaning_and_wording_together_say_both() {
+        let f = fixture();
+        with_vectors(&f);
+        let deck = QueryVector { version: "v".into(), vector: vec![0.9, 0.1] };
+        let hits = retrieve_by_meaning(&f.db, "send the deck", Some(&deck), &RetrievalFilter::default(), 3).unwrap();
+        assert_eq!(hits[0].reply, "Sending the deck this afternoon.");
+        assert_eq!(hits[0].reason, "close in meaning, and in wording: deck, send");
+        assert_eq!(cosine(&[1.0, 0.0], &[0.0, 0.0]), None, "a vector of nothing is not compared");
+        assert_eq!(cosine(&[1.0, 0.0], &[1.0]), None);
     }
 
     #[test]

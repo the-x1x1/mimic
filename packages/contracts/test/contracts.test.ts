@@ -22,6 +22,8 @@ import {
   LearningOverview,
   Settings,
   SituationSummary,
+  SituationFiling,
+  EncoderView,
   VoiceOverview,
   Dashboard,
   canFinishOnboarding,
@@ -36,6 +38,7 @@ import {
   AddressAdded,
   AddressPreview,
   ConversationPage,
+  filedByPhrase,
   writerOf,
   EvaluationSystem,
   EvaluationView,
@@ -87,6 +90,29 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(thin).toBeDefined();
     expect(thin!.metrics.emojiRate).toBeNull();
     expect(thin!.metrics.sampleSize).toBeGreaterThan(0);
+    // A reading in words comes with the model that wrote it and whether it
+    // is of the numbers the layer has now.
+    const read_ = overview.profiles.find((p) => p.reading !== null)?.reading;
+    expect(read_?.current).toBe(true);
+    expect(read_?.model).toBeTruthy();
+    expect(overview.profiles.some((p) => p.reading === null)).toBe(true);
+  });
+
+  it("parses what the encoder is, and how much it has read", () => {
+    const view = EncoderView.parse(read(contractFixture("encoder.json")));
+    expect(view.offered?.id).toBe("all-minilm-l6-v2");
+    expect(view.offered!.bytes).toBeGreaterThan(90_000_000);
+    expect(view.downloaded).toBe(false);
+    expect(view.inUse).toBe(false);
+    expect(view.reason).toMatch(/lexical fallback/);
+  });
+
+  it("parses how the user's messages came to be filed, and the model that could read them", () => {
+    const view = SituationFiling.parse(read(contractFixture("situation_filing.json")));
+    expect(view.byYou).toBe(1);
+    expect(view.byRules).toBe(2);
+    expect(view.localProvider).toBe("local");
+    expect(view.localModel).toBeTruthy();
   });
 
   it("parses the generation context, including its human-readable evidence", () => {
@@ -810,7 +836,7 @@ describe("saved passwords are described as they are kept", () => {
   it("parses the provider state, with keys and never values", () => {
     const state = ProviderState.parse(read(contractFixture("provider_state.json")));
     expect(state.configuredSecrets).toEqual(["provider.anthropic.apiKey"]);
-    expect(["account", "file"]).toContain(state.credentials.protection);
+    expect(["account", "keychain", "file"]).toContain(state.credentials.protection);
     // The fixture has one password saved on another account, which is the
     // state the Settings screen has to explain.
     expect(state.credentials.locked).toEqual(["imap:elsewhere"]);
@@ -831,12 +857,23 @@ describe("saved passwords are described as they are kept", () => {
     const plain = describeCredentials(kept({ protection: "file" }));
     expect(plain).toMatch(/isn't locked to your account/);
     expect(plain).not.toMatch(/locked to your Windows account/);
+    const mac = describeCredentials(kept({ protection: "keychain", locked: ["imap:a"] }));
+    expect(mac).toMatch(/locked with a key kept in your login Keychain/);
+    expect(mac).toMatch(/macOS may ask you first/);
+    expect(mac).toMatch(/locked with a key I can't get from your Keychain/);
+    expect(mac).not.toMatch(/Windows/);
   });
 
   it("says when something unsealed is still on disk", () => {
     expect(describeCredentials(kept({ unsealedLeft: true }))).toMatch(
       /The file they were kept in before this version isn't locked and is still on this computer/,
     );
+    // On a Mac, nothing promises to lock what an earlier build saved.
+    const mac = describeCredentials(kept({ protection: "keychain", unsealedLeft: true }));
+    expect(mac).toMatch(
+      /Something saved before this version is still on this computer unlocked; entering those keys and passwords again locks them\./,
+    );
+    expect(mac).not.toMatch(/I'll move/);
   });
 
   it("says when the file could not be read, and what that means", () => {
@@ -995,6 +1032,15 @@ describe("the rest of the conversation a waiting message is part of", () => {
     expect(page.messages.some((m) => writerOf(m) === "You wrote")).toBe(true);
   });
 
+  it("files each of the user's own messages by what it is doing, and nobody else's", () => {
+    const page = ConversationPage.parse(read(contractFixture("conversation_page.json")));
+    for (const m of page.messages) expect(m.filing === null).toBe(m.direction !== "self");
+    expect(page.messages.some((m) => m.filing?.by === "rules")).toBe(true);
+    expect(filedByPhrase("rules")).toBe("by the rules");
+    expect(filedByPhrase("model")).toBe("as the model on this computer read it");
+    expect(filedByPhrase("you")).toBe("as you said");
+  });
+
   it("names who wrote each message without guessing", () => {
     const m = { id: "m", sentAt: null, body: "hi", automated: null };
     expect(writerOf({ ...m, direction: "self", author: null })).toBe("You wrote");
@@ -1036,7 +1082,8 @@ describe("the drafts measured against what the user wrote", () => {
   it("says a lexical encoder compares wording, not meaning", () => {
     expect(describeEncoder(null)).toBeNull();
     expect(describeEncoder("lexical_v1")).toContain("not what they mean");
-    expect(describeEncoder("minilm-l6")).not.toContain("not what they mean");
+    expect(describeEncoder("all-minilm-l6-v2")).not.toContain("not what they mean");
+    expect(describeEncoder("all-minilm-l6-v2")).toContain("compares what the replies mean");
   });
 
   it("puts the engine's notes on the split in the screen's words", () => {

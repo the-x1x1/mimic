@@ -1,6 +1,6 @@
 [project]
 name = "mimic-engine"
-version = "0.10.0a16"
+version = "0.10.0a17"
 description = "Mimic text engine: embeddings, similarity search and held-out evaluation. Runs as a stdio NDJSON sidecar of the Mimic desktop app."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -14,8 +14,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-onnx = ["onnxruntime>=1.18"]
-directml = ["onnxruntime-directml>=1.18; sys_platform == 'win32'"]
+# Running the sentence encoder: ONNX Runtime and the encoder's tokenizer. On
+# Windows the DirectML build (which also runs on the CPU) stands in for the
+# plain one; the two cannot be installed side by side.
+onnx = ["onnxruntime>=1.18", "tokenizers>=0.19,<1"]
+directml = ["onnxruntime-directml>=1.18; sys_platform == 'win32'", "tokenizers>=0.19,<1"]
 
 [project.scripts]
 mimic-engine = "mimic_engine.cli:main"

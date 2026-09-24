@@ -105,14 +105,36 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         mimic_core::sources::oauth::Provider::microsoft(),
         mimic_core::sources::oauth::microsoft_client_id().map(str::to_string),
     ));
+    // Reading what the user's messages are doing sends every one of them to
+    // the model, so it is only ever handed one on this computer.
+    let local_registry = providers.clone();
+    let local_db = db.clone();
+    let resolve_local: std::sync::Arc<
+        dyn Fn() -> Option<std::sync::Arc<dyn mimic_core::providers::ModelProvider>> + Send + Sync,
+    > = std::sync::Arc::new(move || {
+        let registry = local_registry.read().unwrap_or_else(|p| p.into_inner());
+        crate::app_state::local_provider(&registry, &local_db)
+    });
     let executor = std::sync::Arc::new(mimic_core::jobs::CompositeExecutor::new(vec![
         mimic_core::import::ImportExecutor::shared(),
         mimic_core::voice::AnalyzeExecutor::shared(),
-        mimic_core::assist::AssistExecutor::shared(resolve_provider.clone()),
+        mimic_core::assist::AssistExecutor::shared(resolve_provider.clone(), Some(engine.clone())),
         // Measuring the drafts writes with the same provider, and splits and
         // compares in the engine.
+        // Putting how the user writes into words: only the numbers go to the
+        // provider, with which of Mimic's own greetings and sign-offs the
+        // user uses, and only when the user asks.
+        mimic_core::voice::describe::DescribeExecutor::shared(resolve_provider.clone()),
         mimic_core::evaluation::EvaluateExecutor::shared(engine.clone(), resolve_provider),
         mimic_core::sources::imap::CheckMailboxExecutor::shared(mail_credentials.clone()),
+        mimic_core::situations::ReadExecutor::shared(resolve_local),
+        // The sentence encoder: downloaded when the user asks, then used to
+        // read their messages for meaning, a page at a time, in the engine.
+        mimic_core::encoder::DownloadExecutor::shared(mimic_core::encoder::Places {
+            manifests: crate::app_state::manifests_dir(resource_dir.as_deref(), repo_root.as_deref()),
+            encoders: paths.encoders_dir(),
+        }),
+        mimic_core::encoder::EmbedExecutor::shared(engine.clone()),
         // The endpoint and model are read per run for the same reason: a
         // download queued before the user changed either should use what is
         // configured when it starts, not when it was asked for.
@@ -236,6 +258,9 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                     if let Err(e) = st.engine.call("engine.configure", engine_config(&st)).await {
                         tracing::error!(target: "engine", error = %e, "engine.configure failed");
                     }
+                    // Anything not yet read for meaning — mail that came in
+                    // while a reading was stopped — is read now.
+                    crate::commands::encoder::read_for_meaning(&st).await;
                 }
                 Err(e) => {
                     tracing::error!(target: "engine", error = %e, "engine failed to start");
@@ -296,15 +321,47 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                             crate::commands::people::reconcile_identity(&st.db, &st.jobs, "after_job");
                         }
                         let _ = app2.emit("jobs://event", &ev);
+                        // New messages change how the user writes where they
+                        // landed: once it has been measured, what changed is
+                        // measured again by itself.
+                        let new_messages = ev.status == "completed"
+                            && (ev.kind == mimic_core::import::JOB_KIND
+                                || ev.kind == mimic_core::sources::imap::JOB_KIND);
+                        let measuring = new_messages && crate::commands::voice::measure_what_changed(&st.db, &st.jobs);
+                        // So does a model's reading of what they are doing,
+                        // however it ended: what it read is kept.
+                        let read = ev.kind == mimic_core::situations::READ_JOB_KIND
+                            && matches!(ev.status.as_str(), "completed" | "failed" | "canceled");
+                        if read {
+                            crate::commands::voice::measure_what_changed(&st.db, &st.jobs);
+                        }
+                        // New messages are read for meaning, when there is an
+                        // encoder; a new encoder is loaded, and everything read.
+                        // Asked in a task of its own, so the engine's answer
+                        // does not hold up the next event.
+                        if new_messages {
+                            let st = st.clone();
+                            tauri::async_runtime::spawn(async move {
+                                crate::commands::encoder::read_for_meaning(&st).await;
+                            });
+                        }
+                        if ev.status == "completed" && ev.kind == mimic_core::encoder::DOWNLOAD_JOB_KIND {
+                            let st = st.clone();
+                            tauri::async_runtime::spawn(async move {
+                                crate::commands::encoder::load_downloaded(&st).await;
+                            });
+                        }
                         // New messages or a new profile change what a prepared
                         // reply would say, so a finished import or analysis is
-                        // the moment to prepare them — but only if the user
-                        // asked for that, and never off the back of an assist
-                        // run itself.
-                        let follows_work = ev.status == "completed"
-                            && (ev.kind == mimic_core::import::JOB_KIND
-                                || ev.kind == mimic_core::voice::JOB_KIND
-                                || ev.kind == mimic_core::sources::imap::JOB_KIND);
+                        // the moment to prepare them — after the measuring,
+                        // when there is some — but only if the user asked for
+                        // that, and never off the back of an assist run itself.
+                        // Measuring what changed is followed however it ended,
+                        // so a failed one does not leave the mail undrafted.
+                        let ended = matches!(ev.status.as_str(), "completed" | "failed" | "canceled");
+                        let follows_work = (new_messages && !measuring)
+                            || (ev.status == "completed" && ev.kind == mimic_core::voice::JOB_KIND)
+                            || (ended && ev.kind == mimic_core::voice::CHANGED_JOB_KIND);
                         if follows_work && mimic_core::assist::is_enabled(&st.db).unwrap_or(false) {
                             match st.jobs.enqueue(mimic_core::assist::JOB_KIND, json!({})) {
                                 Ok(job) => tracing::info!(target: "assist", job = %job.id, "queued assisted drafting"),

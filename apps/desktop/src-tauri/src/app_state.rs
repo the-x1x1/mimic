@@ -56,13 +56,12 @@ pub type SharedState = Arc<AppState>;
 
 impl AppState {
     pub fn manifests_dir(&self) -> Option<PathBuf> {
-        if let Some(res) = &self.resource_dir {
-            let p = res.join("models").join("manifests");
-            if p.is_dir() {
-                return Some(p);
-            }
-        }
-        self.repo_root.as_ref().map(|r| r.join("models").join("manifests")).filter(|p| p.is_dir())
+        manifests_dir(self.resource_dir.as_deref(), self.repo_root.as_deref())
+    }
+
+    /// Where the sentence encoder's manifest and downloaded files are.
+    pub fn encoder_places(&self) -> mimic_core::encoder::Places {
+        mimic_core::encoder::Places { manifests: self.manifests_dir(), encoders: self.paths.encoders_dir() }
     }
 
     /// True while any job that must not be interrupted by an update is active.
@@ -87,6 +86,14 @@ impl AppState {
         Ok(registry.get(&id)?)
     }
 
+    /// The model on this computer to read the user's messages with: the one
+    /// they chose, when it is on this computer, or else the first that is.
+    /// Never a hosted one.
+    pub fn local_provider(&self) -> Option<Arc<dyn ModelProvider>> {
+        let registry = self.providers.read().unwrap_or_else(|p| p.into_inner());
+        local_provider(&registry, &self.db)
+    }
+
     /// Rebuild the registry from the current settings and secrets. Called at
     /// boot and whenever a provider setting changes.
     pub fn rebuild_providers(&self) {
@@ -95,6 +102,25 @@ impl AppState {
             *guard = ProviderRegistry::new(providers);
         }
     }
+}
+
+/// The encoder manifests bundled with the app, or in the repository when run
+/// from it.
+pub fn manifests_dir(resource_dir: Option<&std::path::Path>, repo_root: Option<&std::path::Path>) -> Option<PathBuf> {
+    if let Some(res) = resource_dir {
+        let p = res.join("models").join("manifests");
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    repo_root.map(|r| r.join("models").join("manifests")).filter(|p| p.is_dir())
+}
+
+/// `AppState::local_provider`, for a registry held elsewhere (a job's).
+pub fn local_provider(registry: &ProviderRegistry, db: &Db) -> Option<Arc<dyn ModelProvider>> {
+    let chosen = db.get_setting::<String>("generation.provider").ok().flatten();
+    let local = |id: &str| registry.get(id).ok().filter(|p| p.info().local);
+    chosen.as_deref().and_then(local).or_else(|| registry.list().iter().find(|p| p.local).and_then(|p| local(&p.id)))
 }
 
 /// Locate the repository root from the executable or CWD (dev only).
@@ -118,4 +144,24 @@ pub fn detect_repo_root() -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mimic_core::providers::mock::MockProvider;
+
+    #[test]
+    fn messages_are_read_only_with_a_model_on_this_computer() {
+        let db = Db::open_in_memory().unwrap();
+        let cloud: Arc<dyn ModelProvider> = Arc::new(MockProvider::named("cloud", false));
+        let near: Arc<dyn ModelProvider> = Arc::new(MockProvider::named("near", true));
+        let both = ProviderRegistry::new(vec![cloud.clone(), near]);
+        db.set_setting("generation.provider", &"cloud".to_string()).unwrap();
+        assert_eq!(local_provider(&both, &db).map(|p| p.info().id).as_deref(), Some("near"), "chosen, but hosted");
+        let hosted = ProviderRegistry::new(vec![cloud]);
+        assert!(local_provider(&hosted, &db).is_none(), "never a hosted one");
+        db.set_setting("generation.provider", &"near".to_string()).unwrap();
+        assert_eq!(local_provider(&both, &db).map(|p| p.info().id).as_deref(), Some("near"));
+    }
 }

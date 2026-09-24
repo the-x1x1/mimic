@@ -14,6 +14,8 @@ import {
 import { useDraftOutcomes } from "@/hooks/useCompose";
 import { countOf, formatRelative } from "@/lib/format";
 import { HowClose } from "./HowClose";
+import { InWords } from "./InWords";
+import { WhatEachIsDoing } from "./WhatEachIsDoing";
 
 const HABITS = [
   "medianWordsPerMessage",
@@ -98,6 +100,10 @@ export function VoicePage() {
 
       <HowClose />
 
+      <WhatEachIsDoing />
+
+      <InWords measured={(o?.profiles ?? []).filter((p) => p.measurable).length} />
+
       {(o?.profiles ?? []).map((p) => {
         const key = `${p.layer}|${p.scopeKey}`;
         const habits = HABITS.map((h) => describeMetric(h, p.metrics)).filter(
@@ -139,6 +145,15 @@ export function VoicePage() {
                       .slice(0, 6)
                       .map(([phrase, n]) => `“${phrase}” (${n}×)`)
                       .join(", ")}
+                  </p>
+                ) : null}
+                {p.reading ? (
+                  <p className="small">
+                    <span className="muted">
+                      In words, as {p.reading.model} read these numbers
+                      {p.reading.current ? "" : " before they last changed"}:
+                    </span>{" "}
+                    {p.reading.text}
                   </p>
                 ) : null}
               </>

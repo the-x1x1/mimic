@@ -18,15 +18,29 @@
 //! decides can be mistaken for something the user said (CLAUDE.md: a situation
 //! is never presented as a fact the user stated).
 //!
-//! A language model would do this better. It would also mean sending every
-//! message the user has ever written to it, which on a hosted provider is not
-//! a thing to do in a background job. The rules run on the machine, over the
-//! user's own messages only, and a model-backed classifier can replace
-//! `classify` behind the same signature when there is a local one to run it.
+//! A language model does this better, and with one on this computer the user
+//! can have it read their messages (`read_with_model`): what it says replaces
+//! what the rules said, message by message, and is stored as the model's
+//! (`classified_by = 'model'`). Only a local model is ever asked. Sending
+//! everything the user has written to a hosted provider in a background job is
+//! not a thing Mimic does, so a hosted one is refused rather than used.
+//!
+//! The user can say what any one of their messages is doing (`decide`), which
+//! beats both, and hand it back to the rules (`let_rules_decide`).
+//!
+//! A note the user types to go with a draft ("say no, busy that week") is
+//! read by the rules alone (`classify_note`): it is read as they write it,
+//! before the draft, and a model call there would slow every draft down for a
+//! short text the note cues read well.
+
+use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::{Db, DbError};
+use crate::db::{Db, DbError, Filing, Message};
+use crate::jobs::{JobContext, JobError, JobExecutor, JobFuture};
+use crate::providers::{GenerationRequest, ModelProvider, PromptMessage, ProviderError};
 
 /// Summed cue weight at which a message is filed under a situation.
 pub const RULE_THRESHOLD: f64 = 0.6;
@@ -484,49 +498,315 @@ fn strip_closing_line(body: &str) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct ClassifySummary {
     pub messages_considered: usize,
-    /// Messages filed under at least one situation.
+    /// Messages the rules filed under at least one situation.
     pub messages_classified: usize,
-    /// Rows written, per situation id, in vocabulary order.
+    /// The user's own messages filed under each situation afterwards, by the
+    /// rules or by the user, in vocabulary order.
     pub per_situation: Vec<(String, usize)>,
+    /// Situations a message joined or left in this pass. Their layers are
+    /// marked stale as it goes.
+    pub changed: BTreeSet<String>,
 }
 
-/// Re-file every one of the user's own messages. Rule rows are replaced
-/// wholesale; rows the user set by hand (`classified_by = 'user'`) are never
-/// touched, and a rule never adds a row where the user already made the call.
+/// File every one of the user's own messages again, a page at a time, each
+/// page in one transaction. A rule row changes only where the rules now say
+/// something else — so filing a corpus that has not changed writes nothing,
+/// and a stop part way leaves every message filed one way or the other, never
+/// half. Rows the user set (`classified_by = 'user'`) are never touched, and a
+/// rule never adds a row where the user already made the call.
 ///
 /// Only `direction = 'self'` messages are read. What other people wrote is not
 /// evidence of how the user says no.
 pub fn classify_corpus(db: &Db, on_progress: &mut dyn FnMut(usize)) -> Result<ClassifySummary, DbError> {
-    db.clear_rule_situations()?;
+    db.forget_rule_filing_of_others()?;
     let mut summary = ClassifySummary::default();
-    let mut counts = vec![0usize; BUILTINS.len()];
     let mut cursor: Option<(String, String)> = None;
     loop {
         let page = db.page_self_messages(None, None, cursor.as_ref().map(|(a, b)| (a.as_str(), b.as_str())), PAGE)?;
-        if page.is_empty() {
-            break;
-        }
-        let last = page.last().unwrap();
+        let Some(last) = page.last() else { break };
         cursor = Some((last.sent_at.clone().unwrap_or_default(), last.id.clone()));
-        let mut rows: Vec<(String, String, f64)> = Vec::new();
-        for m in &page {
-            let found = classify(&m.body);
-            if !found.is_empty() {
-                summary.messages_classified += 1;
-            }
-            for f in found {
-                if let Some(i) = BUILTINS.iter().position(|b| b.id == f.situation_id) {
-                    counts[i] += 1;
+        let filed: Vec<(String, Vec<(String, f64)>)> = page
+            .iter()
+            .map(|m| {
+                let found = classify(&m.body);
+                if !found.is_empty() {
+                    summary.messages_classified += 1;
                 }
-                rows.push((m.id.clone(), f.situation_id, f.confidence));
-            }
-        }
+                (m.id.clone(), found.into_iter().map(|f| (f.situation_id, f.confidence)).collect())
+            })
+            .collect();
         summary.messages_considered += page.len();
-        db.insert_rule_situations(&rows)?;
+        summary.changed.extend(db.refile_by_rule(&filed)?);
         on_progress(summary.messages_considered);
     }
-    summary.per_situation = BUILTINS.iter().zip(counts).map(|(b, n)| (b.id.to_string(), n)).collect();
+    let counts = db.self_situation_counts()?;
+    summary.per_situation = BUILTINS
+        .iter()
+        .map(|b| {
+            let n = counts.iter().find(|(id, _)| id == b.id).map_or(0, |(_, n)| *n as usize);
+            (b.id.to_string(), n)
+        })
+        .collect();
     Ok(summary)
+}
+
+/// The user says what one of their own messages is doing: these situations,
+/// or none of them. Their decision stands over the rules and a model.
+pub fn decide(db: &Db, message_id: &str, situation_ids: &[String]) -> Result<Filing, DbError> {
+    let mut ids: Vec<String> = Vec::new();
+    for id in situation_ids {
+        if builtin(id).is_none() {
+            return Err(DbError::Invalid(format!("{id:?} is not something a message can be doing")));
+        }
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    db.decide_situations(message_id, &ids)?;
+    db.filing_of(message_id)?.ok_or_else(|| DbError::NotFound(format!("message {message_id}")))
+}
+
+/// Forget what the user (or a model) decided about one of their messages,
+/// and file it as the rules read it now.
+pub fn let_rules_decide(db: &Db, message_id: &str) -> Result<Filing, DbError> {
+    let body: String =
+        db.get_message(message_id)?.ok_or_else(|| DbError::NotFound(format!("message {message_id}")))?.body;
+    let found: Vec<(String, f64)> = classify(&body).into_iter().map(|c| (c.situation_id, c.confidence)).collect();
+    db.hand_back_to_rules(message_id, &found)?;
+    db.filing_of(message_id)?.ok_or_else(|| DbError::NotFound(format!("message {message_id}")))
+}
+
+// ------------------------------------------------------------ a model reads
+
+pub const READ_JOB_KIND: &str = "read_situations";
+
+/// Messages a model is shown at once.
+const MODEL_BATCH: usize = 8;
+
+/// The most messages one reading goes through, the most recent first. The
+/// rest wait for the next, which starts from the next unread message.
+pub const MODEL_READS_PER_RUN: usize = 400;
+
+/// Stored as a model reading's confidence. A model says which situations,
+/// not how sure it is; this sits above what the rules usually reach and
+/// below a person's 1.0, and nothing reads it as a probability.
+pub const MODEL_CONFIDENCE: f64 = 0.9;
+
+/// How a model is asked, recorded with each reading beside the model's name,
+/// so a reading can be told from one asked another way.
+const MODEL_PROMPT_VERSION: &str = "situations_v1";
+
+/// Characters of each message a model is shown.
+const MODEL_CHARS: usize = 800;
+
+/// Said when the provider chosen is not on this computer.
+pub const NOT_LOCAL: &str =
+    "Reading what your messages are doing sends all of them to the model, so it only runs on a model on this computer.";
+
+#[derive(Debug, thiserror::Error)]
+pub enum ModelReadError {
+    #[error("{}", NOT_LOCAL)]
+    NotLocal,
+    #[error("the model on this computer could not read them: {0}")]
+    Provider(#[from] ProviderError),
+    #[error(transparent)]
+    Db(#[from] DbError),
+}
+
+/// What a model reading did.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelReadSummary {
+    /// Messages the model read, and filed as it said.
+    pub read: usize,
+    /// Messages whose answer could not be read, left as the rules filed them.
+    pub not_understood: usize,
+    /// Situations a message joined or left.
+    pub changed: BTreeSet<String>,
+    pub model: String,
+    /// Whether the reading was stopped before its limit or the last unread
+    /// message.
+    #[serde(default)]
+    pub stopped: bool,
+}
+
+fn model_instructions() -> String {
+    let mut s = String::from(
+        "You sort short messages by what each one is doing. A message can be doing any of these, several of them, \
+         or none:\n",
+    );
+    for b in &BUILTINS {
+        s.push_str(&format!("- {}: {}\n", b.id, b.doing));
+    }
+    s.push_str(
+        "A thanks or a name at the very end of a message is a sign-off, not thanking. Explaining means setting \
+         out reasons at some length, not a short answer.\n\
+         Answer with one JSON object and nothing else. Its keys are the message numbers; each value is the list of \
+         ids above that the message is doing, or [] for none. For example: {\"1\": [\"thanking\"], \"2\": []}",
+    );
+    s
+}
+
+fn shown(body: &str) -> String {
+    let text = strip_closing_line(body);
+    let text = text.trim();
+    match text.char_indices().nth(MODEL_CHARS) {
+        Some((cut, _)) => format!("{}…", &text[..cut]),
+        None => text.to_string(),
+    }
+}
+
+/// What a model answered, message by message: the situations it named, or
+/// nothing where the answer for that message cannot be read — missing, not
+/// a list, or naming something that is not in the vocabulary. `None` when
+/// no answer can be found at all.
+pub fn parse_answers(text: &str, n: usize) -> Option<Vec<Option<Vec<String>>>> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    if end < start {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(&text[start..=end]).ok()?;
+    let object = value.as_object()?;
+    Some(
+        (1..=n)
+            .map(|i| {
+                let list = object.get(&i.to_string())?.as_array()?;
+                let mut ids: Vec<String> = Vec::new();
+                for v in list {
+                    let id = builtin(v.as_str()?)?.id.to_string();
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+                Some(ids)
+            })
+            .collect(),
+    )
+}
+
+/// Ask the model about `batch`, together; where the answer cannot be read at
+/// all, one message at a time.
+fn ask(provider: &dyn ModelProvider, batch: &[Message]) -> Result<Vec<Option<Vec<String>>>, ProviderError> {
+    let mut numbered = String::new();
+    for (i, m) in batch.iter().enumerate() {
+        numbered.push_str(&format!("Message {}:\n{}\n\n", i + 1, shown(&m.body)));
+    }
+    let request = GenerationRequest {
+        system: model_instructions(),
+        messages: vec![PromptMessage::user(numbered.trim_end())],
+        max_output_tokens: 48 * batch.len() as u32 + 32,
+        temperature: 0.0,
+    };
+    let text = provider.generate(&request)?.text;
+    match parse_answers(&text, batch.len()) {
+        Some(answers) => Ok(answers),
+        None if batch.len() > 1 => {
+            let mut answers = Vec::with_capacity(batch.len());
+            for m in batch {
+                answers.extend(ask(provider, std::slice::from_ref(m))?);
+            }
+            Ok(answers)
+        }
+        None => Ok(vec![None]),
+    }
+}
+
+/// Have a model on this computer read up to `limit` of the user's messages
+/// that nobody has decided about, the most recent first, and file each as it
+/// says. What it read is kept as it goes, so a stop keeps it, and the next
+/// reading starts from the next unread message. A hosted provider is refused.
+pub fn read_with_model(
+    db: &Db,
+    provider: &dyn ModelProvider,
+    limit: usize,
+    on_progress: &mut dyn FnMut(usize, usize),
+    should_stop: &dyn Fn() -> bool,
+) -> Result<ModelReadSummary, ModelReadError> {
+    let info = provider.info();
+    if !info.local {
+        return Err(ModelReadError::NotLocal);
+    }
+    let version = format!("{}/{MODEL_PROMPT_VERSION}", info.model);
+    let mut summary = ModelReadSummary { model: info.model.clone(), ..Default::default() };
+    let total = (db.filing_counts()?.by_rules.max(0) as usize).min(limit);
+    let mut attempted = 0;
+    let mut cursor: Option<(String, String)> = None;
+    while attempted < limit {
+        if should_stop() {
+            summary.stopped = true;
+            break;
+        }
+        let page = db.page_unread_self_messages(
+            cursor.as_ref().map(|(a, b)| (a.as_str(), b.as_str())),
+            MODEL_BATCH.min(limit - attempted),
+        )?;
+        let Some(last) = page.last() else { break };
+        cursor = Some((last.sent_at.clone().unwrap_or_default(), last.id.clone()));
+        attempted += page.len();
+        let answers = ask(provider, &page)?;
+        let mut readings: Vec<(String, Vec<String>)> = Vec::new();
+        for (m, answer) in page.iter().zip(answers) {
+            match answer {
+                Some(situations) => readings.push((m.id.clone(), situations)),
+                None => summary.not_understood += 1,
+            }
+        }
+        summary.read += readings.len();
+        summary.changed.extend(db.read_by_model(&readings, MODEL_CONFIDENCE, &version)?);
+        on_progress(attempted, total);
+    }
+    Ok(summary)
+}
+
+/// Runs `read_with_model` as a background job, with the model on this
+/// computer the shell hands it.
+pub struct ReadExecutor {
+    provider: Arc<dyn Fn() -> Option<Arc<dyn ModelProvider>> + Send + Sync>,
+}
+
+impl ReadExecutor {
+    /// `provider` is the model on this computer to read with, resolved when
+    /// the run starts, or none when there is none.
+    pub fn shared(provider: Arc<dyn Fn() -> Option<Arc<dyn ModelProvider>> + Send + Sync>) -> Arc<dyn JobExecutor> {
+        Arc::new(ReadExecutor { provider })
+    }
+}
+
+impl JobExecutor for ReadExecutor {
+    fn kinds(&self) -> &'static [&'static str] {
+        &[READ_JOB_KIND]
+    }
+
+    fn resumable(&self, _kind: &str) -> bool {
+        // It costs nothing but time on this computer, and every message read
+        // is kept, so a reading cut short goes on from the next one.
+        true
+    }
+
+    fn execute(&self, ctx: JobContext) -> JobFuture {
+        let resolve = self.provider.clone();
+        Box::pin(async move {
+            let provider = resolve().ok_or_else(|| JobError::Failed(NOT_LOCAL.to_string()))?;
+            let db = ctx.db.clone();
+            let progress_ctx = ctx.clone();
+            let cancel_ctx = ctx.clone();
+            let summary = tokio::task::block_in_place(move || {
+                let mut on_progress = |done: usize, total: usize| {
+                    progress_ctx.progress(done as i64, total as i64, "reading what your messages are doing")
+                };
+                let should_stop = || cancel_ctx.check_cancel().is_err();
+                read_with_model(&db, provider.as_ref(), MODEL_READS_PER_RUN, &mut on_progress, &should_stop)
+            })
+            .map_err(|e| JobError::Failed(e.to_string()))?;
+            // What was read before the stop is kept either way; the run
+            // does not say it finished.
+            if summary.stopped {
+                return Err(JobError::Canceled);
+            }
+            Ok(serde_json::to_value(summary).unwrap_or(serde_json::Value::Null))
+        })
+    }
 }
 
 /// One situation as the app shows it: what it is called, and how many of the
@@ -701,5 +981,238 @@ mod tests {
         assert_ne!(classify_note("don't say sorry").map(|c| c.situation_id).as_deref(), Some("apologising"));
         assert_eq!(classify_note("no way, too busy").map(|c| c.situation_id), Some("declining".into()));
         assert_eq!(classify_note("say no, we're away").map(|c| c.situation_id), Some("declining".into()));
+    }
+
+    // ----------------------------------------------------- who decides
+
+    mod deciding {
+        use super::super::*;
+        use crate::db::{FiledBy, FilingCounts, IdentifierKind, NewMessage, NewSource, VoiceLayer};
+        use crate::providers::{GenerationResponse, ProviderInfo, ProviderResult};
+        use std::sync::Mutex;
+
+        fn with_messages(bodies: &[&str]) -> (Db, Vec<String>) {
+            let db = Db::open_in_memory().unwrap();
+            db.set_user_identity("C").unwrap();
+            db.add_user_identifier(IdentifierKind::Handle, "@c").unwrap();
+            let source = db
+                .create_source(&NewSource {
+                    connector: "t".into(),
+                    name: "T".into(),
+                    channel: "chat".into(),
+                    location: None,
+                    config: serde_json::Value::Null,
+                })
+                .unwrap();
+            let convo = db.upsert_conversation(&source.id, "t", "chat", None).unwrap();
+            let batch: Vec<NewMessage> = bodies
+                .iter()
+                .enumerate()
+                .map(|(i, body)| NewMessage {
+                    conversation_id: convo.clone(),
+                    source_id: source.id.clone(),
+                    participant_id: None,
+                    external_id: format!("m{i}"),
+                    direction: "self".into(),
+                    channel: "chat".into(),
+                    sent_at: Some(format!("2026-02-01T09:{i:02}:00Z")),
+                    sequence_index: i as i64,
+                    body: (*body).into(),
+                    reply_to_external_id: None,
+                    metadata: serde_json::Value::Null,
+                })
+                .collect();
+            db.insert_messages(&batch).unwrap();
+            let ids = (0..bodies.len())
+                .map(|i| {
+                    db.conn()
+                        .query_row("SELECT id FROM messages WHERE external_id = ?1", [format!("m{i}")], |r| r.get(0))
+                        .unwrap()
+                })
+                .collect();
+            (db, ids)
+        }
+
+        #[test]
+        fn a_person_decides_over_the_rules_until_they_hand_it_back() {
+            let (db, ids) = with_messages(&["can't make it on friday, we're away", "sounds good"]);
+            classify_corpus(&db, &mut |_| {}).unwrap();
+            assert_eq!(db.filing_of(&ids[0]).unwrap().unwrap().situations, vec!["declining"]);
+            db.put_voice_profile(
+                VoiceLayer::Situational,
+                "declining",
+                None,
+                &serde_json::json!({}),
+                &serde_json::json!({}),
+                1,
+                "v",
+            )
+            .unwrap();
+
+            // It was an apology, not a no.
+            let filed = decide(&db, &ids[0], &["apologising".to_string()]).unwrap();
+            assert_eq!(filed, Filing { by: FiledBy::You, situations: vec!["apologising".into()] });
+            assert!(db.get_voice_profile(VoiceLayer::Situational, "declining", "v").unwrap().unwrap().stale);
+            // The rules no longer touch it, however often they run.
+            let again = classify_corpus(&db, &mut |_| {}).unwrap();
+            assert!(again.changed.is_empty(), "{:?}", again.changed);
+            assert_eq!(db.filing_of(&ids[0]).unwrap().unwrap().situations, vec!["apologising"]);
+
+            // "Doing none of these" is a decision too.
+            let none = decide(&db, &ids[1], &[]).unwrap();
+            assert_eq!(none, Filing { by: FiledBy::You, situations: vec![] });
+            assert_eq!(db.filing_counts().unwrap(), FilingCounts { by_rules: 0, by_model: 0, by_you: 2 });
+
+            // Handed back, the rules read it again.
+            let back = let_rules_decide(&db, &ids[0]).unwrap();
+            assert_eq!(back, Filing { by: FiledBy::Rules, situations: vec!["declining".into()] });
+            assert!(decide(&db, &ids[0], &["gloating".to_string()]).is_err(), "only the six");
+        }
+
+        #[test]
+        fn only_the_users_own_messages_are_decided_about() {
+            let (db, ids) = with_messages(&["thanks so much"]);
+            db.conn().execute("UPDATE messages SET direction = 'other' WHERE id = ?1", [&ids[0]]).unwrap();
+            assert!(matches!(decide(&db, &ids[0], &[]), Err(DbError::Invalid(_))));
+            assert_eq!(db.filing_of(&ids[0]).unwrap(), None);
+            assert!(matches!(decide(&db, "nope", &[]), Err(DbError::NotFound(_))));
+        }
+
+        /// A model on this computer that answers from what it is shown: an
+        /// apology where it sees "sorry", thanks where it sees "thank", and
+        /// for "garbled" something that is not an answer.
+        struct Reader {
+            local: bool,
+            calls: Mutex<Vec<usize>>,
+        }
+
+        impl ModelProvider for Reader {
+            fn info(&self) -> ProviderInfo {
+                ProviderInfo {
+                    id: "reader".into(),
+                    display_name: "Reader".into(),
+                    local: self.local,
+                    model: "reader-1".into(),
+                    description: String::new(),
+                    requires_credential: false,
+                }
+            }
+            fn generate(&self, request: &GenerationRequest) -> ProviderResult<GenerationResponse> {
+                let text = &request.messages[0].content;
+                let shown: Vec<&str> = text.split("Message ").skip(1).collect();
+                self.calls.lock().unwrap().push(shown.len());
+                if shown.iter().any(|m| m.contains("garbled")) {
+                    return Ok(GenerationResponse {
+                        text: "I think it is a greeting".into(),
+                        provider: "reader".into(),
+                        model: "reader-1".into(),
+                        input_tokens: None,
+                        output_tokens: None,
+                    });
+                }
+                let answers: Vec<String> = shown
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| {
+                        let ids: Vec<&str> = [("sorry", "apologising"), ("thank", "thanking")]
+                            .iter()
+                            .filter(|(cue, _)| m.to_lowercase().contains(cue))
+                            .map(|(_, id)| *id)
+                            .collect();
+                        format!("\"{}\": {:?}", i + 1, ids)
+                    })
+                    .collect();
+                Ok(GenerationResponse {
+                    text: format!("Sure! ```json\n{{{}}}\n```", answers.join(", ")),
+                    provider: "reader".into(),
+                    model: "reader-1".into(),
+                    input_tokens: None,
+                    output_tokens: None,
+                })
+            }
+            fn health(&self) -> ProviderResult<()> {
+                Ok(())
+            }
+        }
+
+        #[test]
+        fn a_model_on_this_computer_reads_what_nobody_decided_and_keeps_to_its_lane() {
+            let mut bodies: Vec<String> = (0..10).map(|i| format!("sorry about the delay {i}")).collect();
+            bodies.push("thank you for the flowers".into());
+            bodies.push("garbled text here".into());
+            bodies.push("can't make it tuesday".into());
+            bodies.push("count me out this time".into());
+            let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
+            let (db, ids) = with_messages(&refs);
+            classify_corpus(&db, &mut |_| {}).unwrap();
+            // The user decided about the last one already.
+            decide(&db, &ids[12], &["declining".to_string()]).unwrap();
+
+            let reader = Reader { local: true, calls: Mutex::new(vec![]) };
+            let summary = read_with_model(&db, &reader, 100, &mut |_, _| {}, &|| false).unwrap();
+            assert_eq!(summary.read, 12);
+            assert_eq!(summary.not_understood, 1, "no answer, no reading");
+            assert_eq!(summary.model, "reader-1");
+            assert_eq!(summary.changed.iter().collect::<Vec<_>>(), vec!["declining"], "it read no refusal");
+            let calls = reader.calls.lock().unwrap().clone();
+            assert!(calls.iter().all(|n| *n <= MODEL_BATCH), "{calls:?}");
+            assert!(calls.contains(&1), "a batch it could not read is asked again one at a time: {calls:?}");
+
+            let flowers = db.filing_of(&ids[10]).unwrap().unwrap();
+            assert_eq!(flowers, Filing { by: FiledBy::Model, situations: vec!["thanking".into()] });
+            let garbled = db.filing_of(&ids[11]).unwrap().unwrap();
+            assert_eq!(garbled.by, FiledBy::Rules, "not understood, left to the rules");
+            let theirs = db.filing_of(&ids[12]).unwrap().unwrap();
+            assert_eq!(theirs, Filing { by: FiledBy::You, situations: vec!["declining".into()] });
+            assert_eq!(db.filing_counts().unwrap(), FilingCounts { by_rules: 1, by_model: 12, by_you: 1 });
+            let out = db.filing_of(&ids[13]).unwrap().unwrap();
+            assert_eq!(out, Filing { by: FiledBy::Model, situations: vec![] }, "the model's word over the rules'");
+
+            // The rules leave what the model read; the next reading starts
+            // from what is still unread.
+            classify_corpus(&db, &mut |_| {}).unwrap();
+            assert_eq!(db.filing_of(&ids[10]).unwrap().unwrap().by, FiledBy::Model);
+            let next = read_with_model(&db, &reader, 100, &mut |_, _| {}, &|| false).unwrap();
+            assert_eq!((next.read, next.not_understood), (0, 1));
+        }
+
+        #[test]
+        fn a_reading_stops_when_asked_and_at_its_limit_keeping_what_it_read() {
+            let bodies: Vec<String> = (0..20).map(|i| format!("thank you, number {i}")).collect();
+            let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
+            let (db, _) = with_messages(&refs);
+            let reader = Reader { local: true, calls: Mutex::new(vec![]) };
+            let first = read_with_model(&db, &reader, 5, &mut |_, _| {}, &|| false).unwrap();
+            assert_eq!(first.read, 5);
+            assert!(!first.stopped, "reaching the limit is finishing, not being stopped");
+            assert_eq!(db.filing_counts().unwrap().by_model, 5);
+            let stopped = read_with_model(&db, &reader, 100, &mut |_, _| {}, &|| true).unwrap();
+            assert_eq!(stopped.read, 0);
+            assert!(stopped.stopped);
+            assert_eq!(db.filing_counts().unwrap().by_model, 5);
+            let rest = read_with_model(&db, &reader, 100, &mut |_, _| {}, &|| false).unwrap();
+            assert_eq!(rest.read, 15);
+            assert!(!rest.stopped, "reading the last unread message is finishing");
+        }
+
+        #[test]
+        fn a_hosted_model_is_never_sent_the_users_messages() {
+            let (db, _) = with_messages(&["thank you"]);
+            let hosted = Reader { local: false, calls: Mutex::new(vec![]) };
+            let err = read_with_model(&db, &hosted, 100, &mut |_, _| {}, &|| false).unwrap_err();
+            assert!(matches!(err, ModelReadError::NotLocal));
+            assert!(hosted.calls.lock().unwrap().is_empty(), "nothing was sent");
+            assert_eq!(db.filing_counts().unwrap().by_model, 0);
+        }
+
+        #[test]
+        fn answers_are_read_only_where_they_name_the_vocabulary() {
+            let parsed =
+                parse_answers("```json\n{\"1\": [\"thanking\", \"thanking\"], \"2\": [], \"3\": \"no\"}\n```", 4);
+            assert_eq!(parsed, Some(vec![Some(vec!["thanking".into()]), Some(vec![]), None, None]));
+            assert_eq!(parse_answers("{\"1\": [\"thanking\", \"greeting\"]}", 1), Some(vec![None]));
+            assert_eq!(parse_answers("no idea", 2), None);
+            assert_eq!(parse_answers("} {", 1), None);
+        }
     }
 }

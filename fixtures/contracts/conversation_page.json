@@ -1,36 +1,46 @@
 {
   "messages": [
     {
-      "id": "2517e92f-da34-4d21-b50e-5bbff429cdb5",
+      "id": "1a723cbe-084c-46d7-8422-7a202c4f7af0",
       "direction": "other",
       "author": "Bob",
       "sentAt": "2026-01-25T18:00:00Z",
       "body": "pub friday?",
-      "automated": null
+      "automated": null,
+      "filing": null
     },
     {
-      "id": "91a20177-e169-4316-844c-91e05f52a747",
+      "id": "84147178-5bcd-4065-87f4-23ca5771f3dc",
       "direction": "self",
       "author": null,
       "sentAt": "2026-01-25T18:02:00Z",
       "body": "yeah im in",
-      "automated": null
+      "automated": null,
+      "filing": {
+        "by": "rules",
+        "situations": []
+      }
     },
     {
-      "id": "cf66a0a4-c54f-4dab-85d9-30e3be861a28",
+      "id": "b78f5143-1f7b-48c8-a35e-596f43bb4f41",
       "direction": "other",
       "author": "Bob",
       "sentAt": "2026-01-25T18:10:00Z",
       "body": "7?",
-      "automated": null
+      "automated": null,
+      "filing": null
     },
     {
-      "id": "f211e257-c405-414b-89a0-4a0223321015",
+      "id": "dd3252bb-15d6-4009-a920-6b0e50a5fb29",
       "direction": "self",
       "author": null,
       "sentAt": "2026-01-25T18:11:00Z",
       "body": "works",
-      "automated": null
+      "automated": null,
+      "filing": {
+        "by": "rules",
+        "situations": []
+      }
     }
   ],
   "more": 0

@@ -35,6 +35,8 @@ export const qk = {
   // Under "voice" so that anything refreshing the voice overview after an
   // analysis refreshes the situation counts with it.
   situations: ["voice", "situations"] as const,
+  situationFiling: ["voice", "situationFiling"] as const,
+  encoder: ["encoder"] as const,
   learning: ["voice", "learning"] as const,
   // Under "voice", so a finished job — the measurement itself, or anything
   // that deleted mail it was measured on — refreshes it.

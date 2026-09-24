@@ -1,10 +1,12 @@
 import { describeAutomated, writerOf, type ThreadMessage } from "@mimic/contracts";
 import { formatRelative } from "@/lib/format";
+import { MessageFiling } from "./MessageFiling";
 
 /**
  * Messages of a conversation, oldest first, each labelled with who wrote it
  * — the user's own as theirs, and nobody guessed — and, where its headers say
- * so, that it looks automated.
+ * so, that it looks automated. Under each of the user's own, what it is filed
+ * under as doing, which they can change.
  */
 export function ThreadMessages({
   messages,
@@ -32,8 +34,17 @@ export function ThreadMessages({
               It looks automated to me: {describeAutomated(m.automated)}
             </p>
           ) : null}
+          {m.filing !== null ? (
+            <MessageFiling messageId={m.id} filing={m.filing} excerpt={excerptOf(m.body)} />
+          ) : null}
         </li>
       ))}
     </ol>
   );
+}
+
+/** The first few words of a message, to name it by. */
+function excerptOf(body: string): string {
+  const words = body.trim().split(/\s+/);
+  return words.length > 8 ? `${words.slice(0, 8).join(" ")}…` : words.join(" ");
 }

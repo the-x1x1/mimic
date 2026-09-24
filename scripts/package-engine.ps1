@@ -3,13 +3,15 @@
 $ErrorActionPreference = "Stop"
 $repo = Join-Path $PSScriptRoot ".."
 Set-Location (Join-Path $repo "engine")
-uv sync --all-extras --dev
+# The DirectML build of ONNX Runtime on Windows, the plain one elsewhere:
+# both provide the same module, so only one is installed.
+if ($IsWindows -or $env:OS -eq "Windows_NT") { uv sync --extra directml --dev } else { uv sync --extra onnx --dev }
 $out = Join-Path $repo "apps\desktop\src-tauri\resources\engine"
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 uv run pyinstaller --noconfirm --clean --name mimic-engine --onedir --console `
   --collect-all mimic_engine --collect-submodules sklearn --collect-submodules scipy `
-  --collect-binaries onnxruntime `
+  --collect-binaries onnxruntime --collect-submodules tokenizers `
   --distpath (Join-Path $repo "engine\dist") --workpath (Join-Path $repo "engine\build") `
   --specpath (Join-Path $repo "engine\build") `
   (Join-Path $repo "engine\src\mimic_engine\__main__.py")

@@ -6,32 +6,36 @@ Phases, not dates. A phase is complete when its rows in `docs/PROJECT_STATUS.md`
 
 Retire the photography product; keep the infrastructure that was worth five releases of hardening. Audit first (`docs/MIGRATION_AUDIT.md`), archive selectively, delete the rest, then build.
 
-## Phase 1 — Mimic Core · PARTIAL (0.6.0-alpha.1, first run repaired in 0.7.0-alpha.1)
+## Phase 1 — Mimic Core · COMPLETE (0.6.0-alpha.1 to 0.10.0-alpha.17)
 
 The end-to-end path: import messages, learn how the user writes, draft a reply.
 
-Done: schema v6; the source-connector contract with two real connectors; the streaming import with identity resolution, dedupe, cancellation and resume; the layered voice engine with deterministic metrics and representative examples; metadata-filtered retrieval; the generation context builder and prompt assembler; the model-provider abstraction with local and hosted providers; real cascading deletion; the five-screen UI; the draft/feedback record.
+- **Import:** the source-connector contract, with mbox, `mimic_json` and (from 0.10.0-alpha.3) a read-only IMAP mailbox; the streaming import with identity resolution, dedupe across copies and sources, cancellation and resume; re-importing adds only what is new (0.10.0-alpha.13).
+- **The layered voice engine:** deterministic metrics per layer (everything, channel, person, situation) with representative examples; manual overrides above them. From 0.10.0-alpha.17 a scope is read a page at a time and counted as it goes (`voice::metrics::Accumulator`), twice — once for its numbers, once for its examples — so no scope is held in memory whole, and after new mail only the layers it touched are measured again, by themselves (`voice::Mode::Changed`).
+- **Retrieval** filtered by metadata first and ranked second, by wording and (0.10.0-alpha.17) by meaning.
+- **Generation:** the context builder, the prompt assembler and the model-provider abstraction with local and hosted providers.
+- **Around it:** real cascading deletion; the draft and feedback record; one screen with a drawer for everything else (0.9.0), with every section reachable from the bar (0.10.0-alpha.16); schema 12.
 
-Not done, and the reason each is not just an oversight:
-
-- **Analysis streams rather than materializing.** A scope's messages are currently loaded into memory before metrics are computed. Fine at a hundred thousand; not at a million.
-- **Embeddings are lexical.** `lexical_v1` is honest about what it is and reports `semantic: false`. It is a real improvement over exact match and it is not semantic similarity.
-
-## Phase 2 — Voice intelligence
+## Phase 2 — Voice intelligence · COMPLETE (0.10.0-alpha.1 to 0.10.0-alpha.17)
 
 Make the model of the person better, not the prompt longer.
 
-- A pinned sentence encoder behind the existing manifest mechanism; `message_embeddings` populated in a background job; retrieval's scorer swapped behind the same signature.
-- Situation classification by a local model, replacing the rules behind `situations::classify` (the vocabulary, the rule classifier and the situational layer landed in 0.10.0-alpha.1).
-- Correcting a message's situation by hand (`classified_by = 'user'` is already respected by the rules).
-- Qualitative interpretation: the one genuinely semantic thing a model should do here, turning measured statistics into a description of register that a prompt can use.
-- Streaming analysis; incremental recomputation of only the scopes a new import touched.
-- Credentials in the Keychain / Secret Service, with macOS. (DPAPI on Windows landed in 0.10.0-alpha.6.)
+- **Situations** (0.10.0-alpha.1): the six-situation vocabulary, the rule classifier and the situational layer. From 0.10.0-alpha.17 the rules refile only what changed, a page at a time.
+- **Situations by a local model** (0.10.0-alpha.17): `situations::read_with_model` files the user's messages as a model on this computer reads them, replacing the rules' reading message by message. A hosted provider is refused: it would mean sending everything the user wrote.
+- **Correcting a message's situation by hand** (0.10.0-alpha.17): what the user says stands over the rules and any model until they hand it back (`situation_readings`, migration 0012).
+- **A pinned sentence encoder** (0.10.0-alpha.17): all-MiniLM-L6-v2 behind the manifest mechanism (`models/manifests/`), downloaded on request and verified by SHA-256; `message_embeddings` filled in a background job; retrieval blends closeness in meaning with wording behind the same filter.
+- **Qualitative interpretation** (0.10.0-alpha.17): a model reads a layer's numbers — only the numbers, and the greetings and sign-offs from Mimic's own lists — and says in words how the user writes, kept beside them as a reading and given to drafts only while the numbers are the ones it read.
+- **Credentials sealed on the platform Mimic builds for:** DPAPI on Windows (0.10.0-alpha.6). The macOS store (the login Keychain, 0.10.0-alpha.17) goes with the macOS build, under _Carried over_: compiled, never run.
+
+Not done, and why:
+
+- **A note to a draft is read by the rules alone.** A model call there would slow every draft down for a short text the note cues already read well.
+- **The situation vocabulary stays six.** A longer tail would leave every situation below the twenty messages a layer needs.
 
 ## Phase 3 — The learning loop closes
 
 - Done in 0.10.0-alpha.2: sent drafts change the next draft at the threshold the previous product earned, and notes the user types are listed and can be taken back. Still open: letting a pattern adjust a measured metric rather than adding an instruction beside it, and editing a structured preference (as opposed to a note) from the screen.
-- Done in 0.10.0-alpha.11: the held-out evaluation runs over the user's own mail and writes `evaluations` rows, next to both baselines — a generic reply from the same model, and the reply the user sends most often — with each measure shown on its own and no headline number. Still open: running it with a note (as the user would draft), holding the held-out replies out of the voice measurements as well as the examples, and a semantic encoder behind "overall wording".
+- Done in 0.10.0-alpha.11: the held-out evaluation runs over the user's own mail and writes `evaluations` rows, next to both baselines — a generic reply from the same model, and the reply the user sends most often — with each measure shown on its own and no headline number; the held-out replies are kept out of the voice measurements as well as the examples. Done in 0.10.0-alpha.17: with the sentence encoder downloaded, "overall wording" compares meaning, and the drafts being measured find their examples by meaning too. Still open: running it with a note (as the user would draft).
 
 ## Phase 4 — Connectors
 
@@ -74,6 +78,6 @@ Designed, deliberately not scheduled. See `docs/PRODUCT.md`. The blocker is not 
 
 Small things the migration left behind, listed so they are not lost:
 
-- macOS is still unbuilt; nothing in the new code is Windows-specific, but nothing has been tested there either.
+- macOS is still unbuilt. Nothing in the new code is Windows-specific except the credential sealing, which has a macOS store from 0.10.0-alpha.17 — sealed with a key kept in the login Keychain (`crates/keychain`). It is compiled for `aarch64-apple-darwin` and its sealing is tested elsewhere; the Keychain calls themselves have never been made. Nothing has been tested on a Mac.
 - The updater ships with the development public key, which `verify-release.ps1` warns about and allows for alpha builds. A real key is a prerequisite for a beta.
 - The icon set is a plain wordmark rather than a designed one. It is product-neutral, so it is a want and not a blocker.

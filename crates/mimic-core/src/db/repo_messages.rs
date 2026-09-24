@@ -39,6 +39,9 @@ pub struct ThreadMessage {
     pub body: String,
     /// Why it looks automated, from its headers, when it does. A reading.
     pub automated: Option<String>,
+    /// For the user's own messages, what it is filed under as doing and who
+    /// filed it; for anyone else's, nothing.
+    pub filing: Option<super::Filing>,
 }
 
 /// Part of a conversation, oldest first, read from one of its messages
@@ -111,7 +114,7 @@ pub fn word_count(body: &str) -> i64 {
     body.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count() as i64
 }
 
-const COLS: &str = "id, conversation_id, source_id, participant_id, external_id, direction, channel, sent_at, sequence_index, body, word_count, char_count, reply_to_message_id, response_latency_seconds, metadata_json";
+pub(crate) const COLS: &str = "id, conversation_id, source_id, participant_id, external_id, direction, channel, sent_at, sequence_index, body, word_count, char_count, reply_to_message_id, response_latency_seconds, metadata_json";
 
 /// Which of the user's own messages a page is drawn from. `None` does not
 /// narrow.
@@ -122,7 +125,7 @@ pub struct SelfScope<'a> {
     pub situation_id: Option<&'a str>,
 }
 
-fn map(r: &Row<'_>) -> rusqlite::Result<Message> {
+pub(crate) fn map(r: &Row<'_>) -> rusqlite::Result<Message> {
     Ok(Message {
         id: r.get(0)?,
         conversation_id: r.get(1)?,
@@ -756,7 +759,14 @@ fn thread_cols() -> String {
     let automated = super::repo_waiting::automated_of("m");
     format!(
         "m.id, m.direction, CASE WHEN m.direction = 'self' THEN NULL ELSE p.display_name END,
-         m.sent_at, m.body, {automated}, m.sequence_index"
+         m.sent_at, m.body, {automated}, m.sequence_index,
+         CASE WHEN m.direction = 'self' THEN json_object(
+           'by', COALESCE((SELECT CASE sr.read_by WHEN 'user' THEN 'you' ELSE sr.read_by END
+                           FROM situation_readings sr WHERE sr.message_id = m.id), 'rules'),
+           'situations', json((SELECT json_group_array(situation_id) FROM (
+                            SELECT ms.situation_id FROM message_situations ms WHERE ms.message_id = m.id
+                            ORDER BY ms.confidence DESC, ms.situation_id))))
+         END"
     )
 }
 
@@ -770,6 +780,7 @@ fn map_thread(r: &Row<'_>) -> rusqlite::Result<(ThreadMessage, i64)> {
             sent_at: r.get(3)?,
             body: r.get(4)?,
             automated: r.get(5)?,
+            filing: r.get::<_, Option<String>>(7)?.and_then(|j| serde_json::from_str(&j).ok()),
         },
         r.get::<_, i64>(6)?,
     ))

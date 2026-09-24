@@ -102,6 +102,12 @@ pub trait Harness: Send + Sync {
     fn split(&self, group_keys: Vec<String>) -> BoxFuture<'_, Result<Split, JobError>>;
     /// Compare each `(generated, actual)`: one comparison per pair, in order.
     fn compare(&self, pairs: Vec<(String, String)>) -> BoxFuture<'_, Result<Vec<Value>, JobError>>;
+    /// What is being answered, as a vector, when there is a sentence encoder
+    /// — so drafts written to be measured find examples as the user's own
+    /// drafts do. None without one.
+    fn meaning(&self, _text: String) -> BoxFuture<'_, Option<crate::retrieval::QueryVector>> {
+        Box::pin(async { None })
+    }
 }
 
 /// `eval.split` and `eval.compare` in the Python engine.
@@ -133,6 +139,16 @@ impl Harness for EngineHarness {
             }
             Ok(cases)
         })
+    }
+
+    fn meaning(&self, text: String) -> BoxFuture<'_, Option<crate::retrieval::QueryVector>> {
+        Box::pin(async move { crate::encoder::query_vector(&self.embedder(), &text).await })
+    }
+}
+
+impl EngineHarness {
+    fn embedder(&self) -> crate::encoder::EngineEmbedder {
+        crate::encoder::EngineEmbedder(self.0.clone())
     }
 }
 
@@ -331,11 +347,13 @@ fn generic_prompt(mimic: &GenerationRequest) -> GenerationRequest {
 /// conversation. Checks `should_stop` between exchanges. An exchange the
 /// model could not answer both ways is counted and skipped: one refused
 /// request should not waste the rest of the run.
+#[allow(clippy::too_many_arguments)]
 pub fn write_answers(
     db: &Db,
     provider: &dyn ModelProvider,
     exchanges: &[Exchange],
     chosen: &[usize],
+    meanings: &HashMap<usize, crate::retrieval::QueryVector>,
     held: &[String],
     on_progress: &mut dyn FnMut(usize, usize),
     should_stop: &dyn Fn() -> bool,
@@ -356,6 +374,7 @@ pub fn write_answers(
             channel: ex.channel.clone(),
             incoming_message: Some(ex.incoming.clone()),
             incoming_message_id: Some(ex.incoming_id.clone()),
+            meaning: meanings.get(&i).cloned(),
             ..Default::default()
         };
         let hide =
@@ -453,9 +472,16 @@ pub async fn measure(
         return Err(JobError::Canceled);
     }
 
+    // What each is answering, as a vector, where there is a sentence encoder.
+    let mut meanings = HashMap::new();
+    for &i in &chosen {
+        if let Some(q) = harness.meaning(exchanges[i].incoming.clone()).await {
+            meanings.insert(i, q);
+        }
+    }
     let writing = tokio::task::block_in_place(|| {
         let mut on_progress = |done: usize, total: usize| progress(done, total, "writing replies");
-        write_answers(db, provider, &exchanges, &chosen, &held, &mut on_progress, &|| should_stop())
+        write_answers(db, provider, &exchanges, &chosen, &meanings, &held, &mut on_progress, &|| should_stop())
     })?;
     if should_stop() {
         return Err(JobError::Canceled);
