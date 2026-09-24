@@ -2,21 +2,35 @@ import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Field, InlineError } from "@mimic/ui";
-import { guessMailHost, type ImapAccount, type ImapProbe } from "@mimic/contracts";
+import {
+  MICROSOFT_UNAVAILABLE,
+  guessMailHost,
+  type ImapAccount,
+  type ImapProbe,
+} from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
 import { useProviderState } from "@/hooks/useCompose";
+import { useMailSignIn } from "@/hooks/useSources";
+
+/** The command was stopped by the user: nothing to say about it. */
+function wasStopped(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === "canceled";
+}
 
 /**
- * Connecting a mailbox is: say which one, log in once to look around, see
+ * Connecting a mailbox is: say which one, sign in once to look around, see
  * what will be read, then decide. The look-around step exists so a missing
  * sent folder — which would leave Mimic nothing of yours to learn from — is
  * known before anything is imported, not discovered a week later.
  *
- * The password is an app password, and the copy says so first, because the
- * usual one fails on every major provider and the error from the server does
- * not say why.
+ * Most providers want an app password, and the copy says so first, because
+ * the usual one fails on every one of them and the error from the server
+ * does not say why. Outlook.com, Hotmail and Microsoft 365 take no password
+ * at all: those sign in with Microsoft in the browser, when this copy of
+ * Mimic was built able to — and when it wasn't, the dialog says so and offers
+ * nothing that would fail.
  */
 export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
@@ -24,23 +38,37 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const [host, setHost] = useState("");
   const [port, setPort] = useState(993);
   const [password, setPassword] = useState("");
+  const [workMicrosoft, setWorkMicrosoft] = useState(false);
   const [probe, setProbe] = useState<ImapProbe | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"checking" | "connecting" | null>(null);
+  const [busy, setBusy] = useState<"checking" | "connecting" | "signing-in" | null>(null);
   const [isMine, setIsMine] = useState(true);
   // Said only when the store reports it: until then, and on a build that
   // does not seal, the note claims nothing it cannot back.
   const sealed = useProviderState().data?.credentials.protection === "account";
+  const signInAvailable = useMailSignIn().data;
+  const canSignIn = signInAvailable === true;
 
   const known = guessMailHost(username);
+  const microsoft = known?.signIn === "microsoft" || workMicrosoft;
   const account: ImapAccount = {
     host: host.trim() || known?.host || "",
     port: host.trim() ? port : (known?.port ?? port),
     username: username.trim(),
     security: "tls",
   };
-  const unsupported = known?.supported === false;
-  const ready = !unsupported && account.host !== "" && account.username !== "" && password !== "";
+  const ready = account.host !== "" && account.username !== "" && password !== "";
+  const kept = `It stays on this computer${sealed ? ", locked to your Windows account" : ""}.`;
+
+  /** A sign-in brought back for another address, or abandoned, is forgotten. */
+  function forgetSignIn() {
+    if (microsoft && (busy === "signing-in" || probe)) void ipc.cancelMailSignIn();
+  }
+
+  function close() {
+    forgetSignIn();
+    onClose();
+  }
 
   async function look() {
     setError(null);
@@ -55,11 +83,28 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function signIn() {
+    setError(null);
+    setProbe(null);
+    setBusy("signing-in");
+    try {
+      setProbe(await ipc.signInToMailbox(account.username));
+    } catch (e) {
+      if (!wasStopped(e)) setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function connect() {
     setError(null);
     setBusy("connecting");
     try {
-      await ipc.connectMailbox(account, password, isMine);
+      if (microsoft) {
+        await ipc.connectSignedInMailbox(account.username, isMine);
+      } else {
+        await ipc.connectMailbox(account, password, isMine);
+      }
       for (const key of [
         qk.sources,
         qk.jobs,
@@ -80,7 +125,7 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
+    <Dialog.Root open onOpenChange={(o) => !o && close()}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog__overlay" />
         <Dialog.Content className="dialog dialog--wide">
@@ -96,64 +141,114 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
               type="email"
               autoComplete="username"
               value={username}
+              disabled={busy === "signing-in"}
               onChange={(e) => {
+                forgetSignIn();
                 setUsername(e.target.value);
                 setProbe(null);
               }}
             />
           </Field>
 
-          <Field label="App password" htmlFor="mb-pass">
-            <input
-              id="mb-pass"
-              type="password"
-              autoComplete="off"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setProbe(null);
-              }}
-            />
-          </Field>
-          {unsupported ? (
-            <p className="danger small">{known?.help}</p>
+          {microsoft ? (
+            canSignIn ? (
+              <p className="muted small">
+                {known?.signIn === "microsoft"
+                  ? known.help
+                  : "Microsoft accounts — Outlook, Hotmail and Microsoft 365 — sign in with Microsoft."}{" "}
+                I never see your password; what lets me stay signed in is kept instead. {kept} If
+                your organisation hasn&rsquo;t allowed apps like this, Microsoft will say so when
+                you sign in.
+              </p>
+            ) : signInAvailable === false ? (
+              <p className="danger small">{MICROSOFT_UNAVAILABLE}</p>
+            ) : null
           ) : (
-            <p className="muted small">
-              Not your usual password: your provider makes a separate one for apps like this.{" "}
-              {known ? known.help : "Look for “app passwords” in your account's security settings."}{" "}
-              It stays on this computer{sealed ? ", locked to your Windows account" : ""}. Accounts
-              that only allow single sign-on (some work and school accounts) can&rsquo;t be
-              connected this way &mdash; export your mail instead.
-            </p>
+            <>
+              <Field label="App password" htmlFor="mb-pass">
+                <input
+                  id="mb-pass"
+                  type="password"
+                  autoComplete="off"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setProbe(null);
+                  }}
+                />
+              </Field>
+              <p className="muted small">
+                Not your usual password: your provider makes a separate one for apps like this.{" "}
+                {known
+                  ? known.help
+                  : "Look for “app passwords” in your account's security settings."}{" "}
+                {kept}{" "}
+                {canSignIn
+                  ? "A Microsoft 365 work or school account, or any other Microsoft address, takes no password at all: say so under Server settings, and sign in with Microsoft."
+                  : "Microsoft 365 accounts, and work accounts that allow only single sign-on, can't be connected with a password — export your mail instead."}
+              </p>
+            </>
           )}
 
           <details>
             <summary className="muted small">
               {known ? `Server: ${known.host}` : "Server settings"}
             </summary>
-            <div className="row gap-2">
-              <Field label="IMAP server" htmlFor="mb-host">
-                <input
-                  id="mb-host"
-                  placeholder={known?.host ?? "imap.example.com"}
-                  value={host}
-                  onChange={(e) => {
-                    setHost(e.target.value);
-                    setProbe(null);
-                  }}
-                />
-              </Field>
-              <Field label="Port" htmlFor="mb-port">
-                <input
-                  id="mb-port"
-                  type="number"
-                  value={port}
-                  onChange={(e) => setPort(Number(e.target.value) || 993)}
-                />
-              </Field>
-            </div>
-            <p className="muted small">Always over TLS.</p>
+            {known?.signIn === "microsoft" ? null : (
+              <>
+                {canSignIn ? (
+                  <label className="row gap-2">
+                    <input
+                      type="checkbox"
+                      checked={workMicrosoft}
+                      disabled={busy !== null}
+                      onChange={(e) => {
+                        forgetSignIn();
+                        setWorkMicrosoft(e.target.checked);
+                        setProbe(null);
+                      }}
+                    />
+                    <span>
+                      This is a Microsoft account (Outlook, Hotmail or Microsoft 365): sign in with
+                      Microsoft
+                    </span>
+                  </label>
+                ) : null}
+                {workMicrosoft ? null : (
+                  <>
+                    <div className="row gap-2">
+                      <Field label="IMAP server" htmlFor="mb-host">
+                        <input
+                          id="mb-host"
+                          placeholder={known?.host ?? "imap.example.com"}
+                          value={host}
+                          onChange={(e) => {
+                            setHost(e.target.value);
+                            setProbe(null);
+                          }}
+                        />
+                      </Field>
+                      <Field label="Port" htmlFor="mb-port">
+                        <input
+                          id="mb-port"
+                          type="number"
+                          value={port}
+                          onChange={(e) => setPort(Number(e.target.value) || 993)}
+                        />
+                      </Field>
+                    </div>
+                    <p className="muted small">Always over TLS.</p>
+                  </>
+                )}
+              </>
+            )}
           </details>
+
+          {busy === "signing-in" ? (
+            <p className="neutral">
+              Finish signing in in your browser. I&rsquo;ll carry on when you&rsquo;re done.
+            </p>
+          ) : null}
 
           {error ? <InlineError>{error}</InlineError> : null}
 
@@ -202,12 +297,26 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
               <Button variant="primary" onClick={connect} disabled={busy !== null}>
                 {busy === "connecting" ? "Connecting…" : "Connect and start reading"}
               </Button>
+            ) : microsoft ? (
+              busy === "signing-in" ? (
+                <Button variant="ghost" onClick={() => void ipc.cancelMailSignIn()}>
+                  Stop signing in
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={signIn}
+                  disabled={!canSignIn || !account.username.includes("@") || busy !== null}
+                >
+                  Sign in with Microsoft
+                </Button>
+              )
             ) : (
               <Button variant="primary" onClick={look} disabled={!ready || busy !== null}>
                 {busy === "checking" ? "Logging in…" : "Log in and look"}
               </Button>
             )}
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
           </div>

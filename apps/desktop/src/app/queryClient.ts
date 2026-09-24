@@ -20,6 +20,7 @@ export const qk = {
   settings: ["settings"] as const,
   connectors: ["connectors"] as const,
   sources: ["sources"] as const,
+  mailSignIn: ["mailSignIn"] as const,
   identity: ["identity"] as const,
   // Under "identity" so that anything refreshing the identity refreshes it.
   heldAddresses: ["identity", "held"] as const,

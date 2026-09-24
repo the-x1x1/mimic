@@ -44,6 +44,13 @@ jobs:
             DEV=$(tr -d '\n' < docs/DEV_UPDATER_PUBKEY.txt)
             [ "$PUB" != "$DEV" ] || { echo "development updater pubkey in tauri.conf.json"; exit 1; }
           fi
+      - name: Microsoft sign-in is configured
+        env:
+          CLIENT: ${{ vars.MIMIC_MICROSOFT_CLIENT_ID }}
+        run: |
+          # Not required: a build without it says it can't sign in with
+          # Microsoft. Warned here so a release without it is no surprise.
+          [ -n "$CLIENT" ] || echo "::warning::MIMIC_MICROSOFT_CLIENT_ID is not set; this build can't sign in to Outlook.com or Microsoft 365 mailboxes (docs/RELEASE_PROCESS.md)."
       - name: No release for this tag yet
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,6 +107,10 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Mimic's client id with Microsoft, for signing in to Outlook.com and
+          # Microsoft 365 mailboxes (`sources::oauth`). Not a secret: a
+          # repository variable. Unset, the build says it can't sign in.
+          MIMIC_MICROSOFT_CLIENT_ID: ${{ vars.MIMIC_MICROSOFT_CLIENT_ID }}
         shell: pwsh
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "TAURI_SIGNING_PRIVATE_KEY secret is not set; refusing to publish an unsignable release" }

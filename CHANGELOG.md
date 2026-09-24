@@ -2,6 +2,22 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.14] — 2026-09-23
+
+Outlook.com and Microsoft 365, signed in with Microsoft.
+
+### Added
+
+- **Outlook.com, Hotmail and Microsoft 365 mailboxes can be connected.** Microsoft stopped taking passwords from apps like me in September 2024, so until now these couldn't be connected at all. Now you give your address and press **Sign in with Microsoft**, and you sign in in your browser, on Microsoft's own page — I never see your password, and a second step or a question from your organisation happens there. When you come back I show what I'd read, as for any other mailbox, and nothing is imported until you say so. Microsoft's addresses in other countries — hotmail.co.uk, outlook.fr, live.com.au — are recognised too. For a Microsoft 365 work or school address, or any other address on Microsoft, tick "This is a Microsoft account" under Server settings. If your organisation hasn't allowed apps like this, Microsoft says so when you sign in.
+- **What keeps me signed in is kept like a password.** Microsoft hands back a sign-in that lasts. I lock it to your Windows account, as I do an app password, and when I check your mail I trade it with Microsoft for a pass that lasts an hour, which I only ever hold in memory. Removing the mailbox removes it.
+- **Sign in again**, under Your mail, for when Microsoft asks — after you change your password, say — without removing the mailbox or anything read from it. The new sign-in is kept only if it opens that mailbox.
+
+### Not in this release
+
+- Gmail, Yahoo and iCloud still take an app password. Signing in with Google isn't built.
+- No real Microsoft mailbox has been signed in to from the build machine or from CI: the browser's return, the exchange with Microsoft and the mailbox's sign-in are tested against stand-ins on the same computer.
+- A copy of Mimic built without Mimic's registration with Microsoft says it can't sign in with Microsoft, and offers nothing that would fail.
+
 ## [0.10.0-alpha.13] — 2026-09-23
 
 Importing again only adds what's new.

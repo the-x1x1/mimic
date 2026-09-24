@@ -87,6 +87,24 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         let id = chosen.or_else(|| registry.default_id())?;
         registry.get(&id).ok()
     });
+    // A mailbox's password, or its Microsoft sign-in, is read from the secret
+    // store per run, so one changed or removed since the check was queued is
+    // honoured; a refresh token Microsoft replaces is saved back.
+    let mail_credentials = std::sync::Arc::new(mimic_core::sources::imap::Credentials::new(
+        {
+            let secrets = secrets.clone();
+            std::sync::Arc::new(move |key: &str| {
+                use mimic_core::providers::SecretStore;
+                secrets.get(key)
+            })
+        },
+        {
+            let secrets = secrets.clone();
+            std::sync::Arc::new(move |key: &str, value: &str| secrets.set(key, value).map_err(|e| e.to_string()))
+        },
+        mimic_core::sources::oauth::Provider::microsoft(),
+        mimic_core::sources::oauth::microsoft_client_id().map(str::to_string),
+    ));
     let executor = std::sync::Arc::new(mimic_core::jobs::CompositeExecutor::new(vec![
         mimic_core::import::ImportExecutor::shared(),
         mimic_core::voice::AnalyzeExecutor::shared(),
@@ -94,15 +112,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         // Measuring the drafts writes with the same provider, and splits and
         // compares in the engine.
         mimic_core::evaluation::EvaluateExecutor::shared(engine.clone(), resolve_provider),
-        // A mailbox's password is read from the secret store per run, so a
-        // password changed or removed since the check was queued is honoured.
-        mimic_core::sources::imap::CheckMailboxExecutor::shared({
-            let secrets = secrets.clone();
-            std::sync::Arc::new(move |key: &str| {
-                use mimic_core::providers::SecretStore;
-                secrets.get(key)
-            })
-        }),
+        mimic_core::sources::imap::CheckMailboxExecutor::shared(mail_credentials.clone()),
         // The endpoint and model are read per run for the same reason: a
         // download queued before the user changed either should use what is
         // configured when it starts, not when it was asked for.
@@ -140,6 +150,8 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         schema_report,
         log_dir,
         instance,
+        mail_credentials,
+        sign_in: Default::default(),
     })
 }
 

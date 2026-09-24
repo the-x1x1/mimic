@@ -21,6 +21,7 @@ pub mod mbox;
 pub mod mime;
 pub mod mimic_json;
 pub mod normalize;
+pub mod oauth;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
