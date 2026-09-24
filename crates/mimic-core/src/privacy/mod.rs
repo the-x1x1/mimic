@@ -435,6 +435,13 @@ mod tests {
         World { db, ada, bob, source: source.id, group }
     }
 
+    /// Rows in the search index, and messages: one each, always.
+    fn indexed(db: &Db) -> (i64, i64) {
+        let conn = db.conn();
+        let count = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        (count("SELECT COUNT(*) FROM message_search"), count("SELECT COUNT(*) FROM messages"))
+    }
+
     #[test]
     fn a_preview_changes_nothing_and_matches_what_deletion_does() {
         let w = world();
@@ -472,6 +479,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM participant_identifiers WHERE participant_id = ?1", [&w.ada], |r| r.get(0))
             .unwrap();
         assert_eq!(ids, 0);
+        // Nor in the search index: what was deleted cannot be found.
+        let (index, messages) = indexed(&w.db);
+        assert_eq!(index, messages, "the index holds exactly the messages that are left");
+        let orphans: i64 =
+            w.db.conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM message_search WHERE message_id NOT IN (SELECT id FROM messages)",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert_eq!(orphans, 0);
     }
 
     #[test]
@@ -547,6 +566,7 @@ mod tests {
         assert_eq!(w.db.count_self_messages(None, None).unwrap(), 0);
         assert!(w.db.list_participants(10).unwrap().is_empty());
         assert!(w.db.list_sources().unwrap().is_empty());
+        assert_eq!(indexed(&w.db), (0, 0), "nothing of its mail is left to be found");
     }
 
     #[test]
@@ -560,6 +580,7 @@ mod tests {
 
         assert_eq!(w.db.count_self_messages(None, None).unwrap(), 0);
         assert!(w.db.list_sources().unwrap().is_empty());
+        assert_eq!(indexed(&w.db), (0, 0), "the search index is emptied with the messages");
         assert!(w.db.list_voice_profiles(crate::version::ANALYSIS_VERSION).unwrap().is_empty());
         assert_eq!(w.db.get_setting::<String>("general.theme").unwrap().as_deref(), Some("dark"));
         assert_eq!(w.db.user_identity().unwrap().unwrap().display_name, "C", "who you are is not imported data");

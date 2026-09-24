@@ -61,6 +61,27 @@ pub async fn list_person_conversations(
     Ok(state.db.conversations_with(&participant_id, before, limit.unwrap_or(20).clamp(1, 100))?)
 }
 
+/// Every message that says what was typed, the user's and everyone else's
+/// (`who`: `anyone`, `you` or `others`), newest first, a page at a time, read
+/// on from the last one shown (`before_at`, `before_id`). What was typed is
+/// never logged.
+#[tauri::command]
+pub async fn search_messages(
+    state: State<'_, SharedState>,
+    query: String,
+    who: Option<mimic_core::db::SearchWho>,
+    before_at: Option<String>,
+    before_id: Option<String>,
+    limit: Option<usize>,
+) -> CommandResult<mimic_core::db::SearchPage> {
+    let before = match (&before_at, &before_id) {
+        (Some(at), Some(id)) => Some((at.as_str(), id.as_str())),
+        (None, None) => None,
+        _ => return Err(CommandError::new("invalid", "Where to read on from needs both a time and an id.")),
+    };
+    Ok(state.db.search_messages(&query, who.unwrap_or_default(), before, limit.unwrap_or(20).clamp(1, 100))?)
+}
+
 /// Say whether a thread needs a reply: `no_reply_needed` takes it off the
 /// list, `needs_reply` keeps one Mimic read as automated on it, and no mark
 /// takes back whatever was said. The mark is about `message_id`, the message

@@ -755,7 +755,7 @@ pub(crate) fn refresh_conversation_stats(conn: &rusqlite::Connection, conversati
 
 /// The columns `map_thread` reads, from `messages m` joined to its writer as
 /// `participants p`: never a name for the user's own message.
-fn thread_cols() -> String {
+pub(super) fn thread_cols() -> String {
     let automated = super::repo_waiting::automated_of("m");
     format!(
         "m.id, m.direction, CASE WHEN m.direction = 'self' THEN NULL ELSE p.display_name END,
@@ -771,7 +771,7 @@ fn thread_cols() -> String {
 }
 
 /// A message as the screen shows it, and its position.
-fn map_thread(r: &Row<'_>) -> rusqlite::Result<(ThreadMessage, i64)> {
+pub(super) fn map_thread(r: &Row<'_>) -> rusqlite::Result<(ThreadMessage, i64)> {
     Ok((
         ThreadMessage {
             id: r.get(0)?,
@@ -799,7 +799,13 @@ fn position(conn: &Connection, conversation_id: &str, message_id: &str) -> DbRes
 }
 
 /// Messages of the conversation on one side of the message at `at`.
-fn count_side(conn: &Connection, conversation_id: &str, at: i64, message_id: &str, toward: Toward) -> DbResult<i64> {
+pub(super) fn count_side(
+    conn: &Connection,
+    conversation_id: &str,
+    at: i64,
+    message_id: &str,
+    toward: Toward,
+) -> DbResult<i64> {
     let side = toward.side();
     Ok(conn.query_row(
         &format!("SELECT COUNT(*) FROM messages m WHERE m.conversation_id = ?1 AND {side}"),

@@ -5,6 +5,7 @@ import { Button, EmptyState } from "@mimic/ui";
 import { queryClient } from "./queryClient";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { AppShell } from "@/components/AppShell";
+import { FindPage } from "@/features/find/FindPage";
 import { PeoplePage } from "@/features/people/PeoplePage";
 import { VoicePage } from "@/features/voice/VoicePage";
 import { SourcesPage } from "@/features/sources/SourcesPage";
@@ -77,6 +78,7 @@ function Gate() {
       <Route element={<AppShell />}>
         <Route path="/" element={null} />
         <Route path="/write" element={<ComposePanel />} />
+        <Route path="/find" element={<FindPage />} />
         <Route path="/people" element={<PeoplePage />} />
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/sources" element={<SourcesPage />} />

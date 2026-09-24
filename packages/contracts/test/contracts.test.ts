@@ -5,6 +5,9 @@ import {
   ADJUSTMENT_LABELS,
   Adjustment,
   PersonConversations,
+  SearchPage,
+  describeFound,
+  hasWordsToFind,
   canPutOnList,
   describeStanding,
   CHANNEL_LABELS,
@@ -1141,5 +1144,47 @@ describe("every conversation with someone", () => {
     expect(canPutOnList({ ...base, standing: "answered" })).toBe(false);
     expect(canPutOnList({ ...base, standing: "waiting" })).toBe(false);
     expect(canPutOnList({ ...base, standing: "quiet", decidingMessageId: null })).toBe(false);
+  });
+});
+
+describe("finding what was said", () => {
+  it("parses what a search found: the message, where it is, and the words around the match", () => {
+    const page = SearchPage.parse(read(contractFixture("search_page.json")));
+    expect(page.found.length).toBeGreaterThan(0);
+    const first = page.found[0]!;
+    expect(first.snippet.some((p) => p.hit)).toBe(true);
+    expect(first.message.direction).not.toBe("self");
+    expect(first.earlier).toBeGreaterThanOrEqual(0);
+    expect(page.total).toBeGreaterThanOrEqual(page.found.length);
+  });
+
+  it("says how much was found, whose, and when there is more than it counted", () => {
+    expect(describeFound({ total: 0, capped: false }, "anyone")).toBe(
+      "Nothing I've read says that.",
+    );
+    expect(describeFound({ total: 0, capped: false }, "you")).toBe("Nothing you wrote says that.");
+    expect(describeFound({ total: 1, capped: false }, "others")).toBe(
+      "One message someone else wrote says that.",
+    );
+    expect(describeFound({ total: 1, capped: false }, "you")).toBe(
+      "One of your messages says that.",
+    );
+    expect(describeFound({ total: 12, capped: false }, "anyone")).toBe(
+      "12 messages say that, the newest first.",
+    );
+    expect(describeFound({ total: 40, capped: false }, "others")).toBe(
+      "40 messages someone else wrote say that, the newest first.",
+    );
+    expect(describeFound({ total: 1000, capped: true }, "you")).toBe(
+      "More than 1,000 of your messages say that. The newest come first; another word finds fewer.",
+    );
+  });
+
+  it("looks only when there is a letter or a digit to look for", () => {
+    expect(hasWordsToFind("friday")).toBe(true);
+    expect(hasWordsToFind("  ?! ")).toBe(false);
+    expect(hasWordsToFind("résumé")).toBe(true);
+    expect(hasWordsToFind("42")).toBe(true);
+    expect(hasWordsToFind('""')).toBe(false);
   });
 });

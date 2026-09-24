@@ -396,6 +396,18 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert_eq!(end.messages.len() as i64, bob.message_count, "the whole of it, from its end");
     assert!(end.messages.iter().any(|m| m.id == bob.last_message_id));
 
+    // Found again by what was said: the waiting message, by a word of its
+    // own, with where it sits in its conversation.
+    let said = end.messages.iter().find(|m| m.id == bob.last_message_id).unwrap();
+    let word = said.body.split(|c: char| !c.is_alphanumeric()).find(|w| w.chars().count() >= 4).expect("a word");
+    let found = db.search_messages(word, mimic_core::db::SearchWho::Others, None, 100).unwrap();
+    let hit = found.found.iter().find(|f| f.message.id == bob.last_message_id).expect("found by its own words");
+    assert_eq!(hit.conversation_id, bob.conversation_id);
+    assert_eq!((hit.earlier, hit.later), (bob.earlier, bob.later));
+    assert!(hit.snippet.iter().any(|p| p.hit), "the word is marked where it was found");
+    assert!(found.found.iter().all(|f| f.message.direction != "self"), "only other people's, as asked");
+    check_fixture("search_page.json", &serde_json::to_value(&found).unwrap());
+
     // Turning it on is what allows a model to see an incoming message the user
     // did not hand over itself.
     db.set_setting(mimic_core::assist::SETTING, &true).unwrap();

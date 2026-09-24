@@ -2,6 +2,16 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.18] — 2026-09-23
+
+Find what was said.
+
+### Added
+
+- **Find anything said in the mail I've read.** Find, first in the bar, looks through every message I've read — yours and other people's — for the words you type, and lists the messages that say them, the newest first, twenty at a time, with the words around each match marked. Every word has to be there, in any order; words in quotes have to be together, in that order; capitals and accents don't matter, and a last word of three letters or more can be the start of a longer one, so "fri" finds "Friday". **Written by** narrows it to what you wrote, or to everything you didn't. **Show it in its conversation** shows the message whole with what came before and after it, a page at a time. What you type is never read as a search language — "OR" and "-" are just words — and it isn't logged.
+- Chinese, Japanese and Thai are written without spaces, so the index keeps a whole run as one word: a word there is found by the start of its run — as the last word you type, one character is enough, as it is in Korean — but not from inside it.
+- The search happens here, in the database on this computer. To do it, the database keeps a copy of each message's text in a search index, and the copy goes whenever the message does — with a person, a source or everything — straight away. Mail I read before this version is added to the index the first time this version opens, before its window appears — with a large mailbox that can take a few seconds.
+
 ## [0.10.0-alpha.17] — 2026-09-23
 
 Finding your past replies by meaning, and the rest of how you write.

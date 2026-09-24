@@ -4,6 +4,7 @@
  * file exports components only.
  */
 export const SECTIONS = [
+  { to: "/find", label: "Find" },
   { to: "/sources", label: "Your mail" },
   { to: "/people", label: "People" },
   { to: "/voice", label: "How you write" },

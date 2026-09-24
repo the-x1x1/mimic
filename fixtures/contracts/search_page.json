@@ -1,0 +1,65 @@
+{
+  "found": [
+    {
+      "message": {
+        "id": "cb77fc5d-e278-4733-aae3-c0646889e468",
+        "direction": "other",
+        "author": "Bob",
+        "sentAt": "2026-01-25T18:40:00Z",
+        "body": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
+        "automated": null,
+        "filing": null
+      },
+      "conversationId": "31559af1-7505-4b1d-8cb5-5fdad5b671ae",
+      "subject": "Pub",
+      "snippet": [
+        {
+          "text": "got it — one ",
+          "hit": false
+        },
+        {
+          "text": "more",
+          "hit": true
+        },
+        {
+          "text": " thing, can you confirm the Friday numbers before I send them on?",
+          "hit": false
+        }
+      ],
+      "earlier": 4,
+      "later": 0
+    },
+    {
+      "message": {
+        "id": "62ae9b27-14ee-4e07-a819-e5672684e7d3",
+        "direction": "other",
+        "author": "Ada Lovelace",
+        "sentAt": "2026-01-14T09:00:00Z",
+        "body": "one more thing on the forecast",
+        "automated": null,
+        "filing": null
+      },
+      "conversationId": "b1263ae7-573b-48d4-982a-bd2b9cab77f2",
+      "subject": "Quarterly deck",
+      "snippet": [
+        {
+          "text": "one ",
+          "hit": false
+        },
+        {
+          "text": "more",
+          "hit": true
+        },
+        {
+          "text": " thing on the forecast",
+          "hit": false
+        }
+      ],
+      "earlier": 18,
+      "later": 21
+    }
+  ],
+  "more": false,
+  "total": 2,
+  "capped": false
+}

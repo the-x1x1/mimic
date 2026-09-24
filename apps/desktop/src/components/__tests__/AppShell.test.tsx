@@ -33,6 +33,7 @@ function renderAt(path: string, people: ReactNode = <p>the people screen</p>) {
         <Route element={<AppShell />}>
           <Route path="/" element={null} />
           <Route path="/write" element={<textarea aria-label="What you want to say" autoFocus />} />
+          <Route path="/find" element={<p>the find screen</p>} />
           <Route path="/people" element={people} />
           <Route path="/voice" element={<p>the voice screen</p>} />
           <Route path="/sources" element={<p>the mail screen</p>} />
@@ -51,10 +52,11 @@ describe("everything in the drawer can be reached", () => {
       within(bar)
         .getAllByRole("link")
         .map((l) => l.textContent),
-    ).toEqual(["Your mail", "People", "How you write", "Settings"]);
+    ).toEqual(["Find", "Your mail", "People", "How you write", "Settings"]);
     expect(screen.queryByRole("dialog")).toBeNull();
 
     const screens: Record<string, string> = {
+      Find: "the find screen",
       "Your mail": "the mail screen",
       People: "the people screen",
       "How you write": "the voice screen",
@@ -91,7 +93,14 @@ describe("everything in the drawer can be reached", () => {
     expect(sectionOf("/people")).toBe("People");
     expect(sectionOf("/settings")).toBe("Settings");
     expect(sectionOf("/write")).toBeNull();
-    expect(SECTIONS.map((s) => s.to)).toEqual(["/sources", "/people", "/voice", "/settings"]);
+    expect(SECTIONS.map((s) => s.to)).toEqual([
+      "/find",
+      "/sources",
+      "/people",
+      "/voice",
+      "/settings",
+    ]);
+    expect(sectionOf("/find")).toBe("Find");
     renderAt("/write");
     expect(screen.getByRole("dialog", { name: "Write something new" })).toBeInTheDocument();
   });

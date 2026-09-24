@@ -75,6 +75,7 @@ pub fn run() {
             commands::dashboard::get_conversation_page,
             commands::dashboard::get_conversation_end,
             commands::dashboard::list_person_conversations,
+            commands::dashboard::search_messages,
             commands::dashboard::start_assist_drafts,
             commands::localmodel::local_model_status,
             commands::localmodel::start_model_pull,

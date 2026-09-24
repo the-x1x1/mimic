@@ -29,6 +29,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 10, name: "kept_apart", sql: include_str!("migrations/0010_kept_apart.sql") },
     Migration { version: 11, name: "evaluations", sql: include_str!("migrations/0011_evaluations.sql") },
     Migration { version: 12, name: "situation_readings", sql: include_str!("migrations/0012_situation_readings.sql") },
+    Migration { version: 13, name: "message_search", sql: include_str!("migrations/0013_message_search.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -83,7 +84,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 12);
+        assert_eq!(latest_version(), 13);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -177,7 +178,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11, 12, 13]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
         assert!(column_names(&conn, "participants").contains(&"kept_apart".to_string()));
         let cases = column_names(&conn, "evaluation_cases");
@@ -226,6 +227,7 @@ mod tests {
             "situations",
             "message_situations",
             "situation_readings",
+            "message_search",
             "voice_profiles",
             "voice_preferences",
             "representative_examples",
@@ -382,7 +384,7 @@ mod tests {
                       ('m2', 'thanking', 0.7, 'rule', '2026-09-01');",
         )
         .unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![12]);
+        assert_eq!(migrate_to(&mut conn, 12).unwrap(), vec![12]);
         let readings: Vec<(String, String)> = conn
             .prepare("SELECT message_id, read_by FROM situation_readings")
             .unwrap()
@@ -408,6 +410,73 @@ mod tests {
         );
     }
 
+    /// Mail read before the index existed can be found once it does, and a
+    /// message's words leave the index with the message, however it goes.
+    #[test]
+    fn mail_read_before_the_upgrade_can_be_found_and_leaves_the_index_with_its_message() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&mut conn, 12).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sources(id, connector, name, channel, created_at) VALUES ('s', 't', 'T', 'email', 't');
+             INSERT INTO participants(id, display_name, created_at, updated_at) VALUES ('p', 'Ada', 't', 't');
+             INSERT INTO conversations(id, source_id, external_id, channel, created_at)
+               VALUES ('c', 's', 'c', 'email', 't');
+             INSERT INTO messages(id, conversation_id, source_id, external_id, participant_id, direction, channel,
+                                  body, body_hash, imported_at)
+               VALUES ('m1', 'c', 's', 'm1', 'p', 'other', 'email', 'The Zanzibar résumé is attached', 'h1', 't'),
+                      ('m2', 'c', 's', 'm2', NULL, 'self', 'email', 'thanks, reading it now', 'h2', 't');",
+        )
+        .unwrap();
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![13]);
+        let found = |conn: &Connection, q: &str| -> Vec<String> {
+            conn.prepare("SELECT message_id FROM message_search WHERE message_search MATCH ?1 ORDER BY message_id")
+                .unwrap()
+                .query_map([q], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert_eq!(found(&conn, "zanzibar"), vec!["m1"], "read before the upgrade, found after it");
+        assert_eq!(found(&conn, "resume"), vec!["m1"], "accents are folded");
+        let secure: i64 =
+            conn.query_row("SELECT v FROM message_search_config WHERE k = 'secure-delete'", [], |r| r.get(0)).unwrap();
+        assert_eq!(secure, 1);
+
+        // Read after the upgrade: indexed as it is inserted, and again when
+        // its text changes.
+        conn.execute(
+            "INSERT INTO messages(id, conversation_id, source_id, external_id, direction, channel, body, body_hash,
+                                  imported_at)
+             VALUES ('m3', 'c', 's', 'm3', 'self', 'email', 'pemba on friday', 'h3', 't')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(found(&conn, "pemba"), vec!["m3"]);
+        conn.execute("UPDATE messages SET body = 'mafia on saturday' WHERE id = 'm3'", []).unwrap();
+        assert!(found(&conn, "pemba").is_empty(), "the old words go when the text changes");
+        assert_eq!(found(&conn, "mafia"), vec!["m3"]);
+
+        // Deleted with the person who wrote it: gone from the index too.
+        conn.execute("DELETE FROM participants WHERE id = 'p'", []).unwrap();
+        assert!(found(&conn, "zanzibar").is_empty(), "a message's words leave the index with it");
+        let blocks: Vec<Vec<u8>> = conn
+            .prepare("SELECT block FROM message_search_data WHERE block IS NOT NULL")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            !blocks.iter().any(|b| b.windows(8).any(|w| w == b"zanzibar")),
+            "and from the index's own pages, not only from what a search returns"
+        );
+        // And with its conversation.
+        conn.execute("DELETE FROM conversations WHERE id = 'c'", []).unwrap();
+        let left: i64 = conn.query_row("SELECT COUNT(*) FROM message_search", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+    }
+
     #[test]
     fn people_read_before_the_upgrade_are_not_kept_apart_by_it() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -419,7 +488,7 @@ mod tests {
             [],
         )
         .unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11, 12]);
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11, 12, 13]);
         let apart: i64 =
             conn.query_row("SELECT kept_apart FROM participants WHERE id = 'p'", [], |r| r.get(0)).unwrap();
         assert_eq!(apart, 0, "only the user's own no sets it");
