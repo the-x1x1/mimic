@@ -2,6 +2,21 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.16] — 2026-09-23
+
+Every conversation, not only what's waiting.
+
+### Added
+
+- **People → Conversations shows every conversation I've read with someone**, the most recent first, not only the one waiting on the home screen. Each one says where it stands, by the same reading the home screen makes: you wrote last, it's on your list, or it's not on your list and why — the message it waits on looks automated, or is older than your waiting window, or you said it needs no reply.
+- **Read it** opens a conversation from its last message, and further back a page at a time. What you wrote is marked as yours, and a message whose headers say a machine sent it says so.
+- **Put it on my list** puts a conversation that was left off back on the home screen, where I can draft a reply to it — the same as saying it needs a reply there.
+
+### Fixed
+
+- **People and How you write can be opened.** Since 0.9.0-alpha.2 the bar at the top had only Settings, and nothing anywhere led to People or How you write — so telling me how you know someone, deleting someone, and measuring how close my drafts come could not be reached. The bar now has Your mail, People, How you write and Settings, and the same row sits at the top of the drawer, with the one you're in marked, so you can go from one to the next. Opening one takes the keyboard into it, closing it gives the keyboard back, and Escape in a dialog inside it closes only that dialog. On a narrow window the bar wraps rather than cutting any of them off.
+- **Links that look like buttons are one control.** The home screen's way to Your mail was a button inside a link, which a screen reader announces as two things, and How you write's was a link that didn't look like a button at all.
+
 ## [0.10.0-alpha.15] — 2026-09-23
 
 Your Sent folder, from any mail program.

@@ -38,7 +38,8 @@ pub use repo_messages::{
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
 pub use repo_sources::channel_is_known;
 pub use repo_waiting::{
-    AwaitingReply, LeftOut, ThreadMark, WaitingWindow, DEFAULT_WITHIN_DAYS, MAX_WITHIN_DAYS, WITHIN_DAYS_SETTING,
+    AwaitingReply, LeftOut, PersonConversation, PersonConversations, Standing, ThreadMark, WaitingWindow,
+    DEFAULT_WITHIN_DAYS, MAX_WITHIN_DAYS, WITHIN_DAYS_SETTING,
 };
 
 #[derive(Debug, thiserror::Error)]

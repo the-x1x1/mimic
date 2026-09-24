@@ -14,6 +14,10 @@ export const qk = {
   // someone folded into the user — refreshes the conversation read from it.
   conversation: (conversationId: string, fromMessageId: string, toward: string) =>
     ["dashboard", "conversation", conversationId, fromMessageId, toward] as const,
+  // Also under "dashboard", for the same reason: someone's conversations and
+  // where each stands, and any conversation read from its end.
+  personConversations: (participantId: string) => ["dashboard", "person", participantId] as const,
+  conversationEnd: (conversationId: string) => ["dashboard", "end", conversationId] as const,
   localModel: ["localModel"] as const,
   system: ["system"] as const,
   onboarding: ["onboarding"] as const,

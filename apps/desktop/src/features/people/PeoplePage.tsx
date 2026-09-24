@@ -11,6 +11,7 @@ import {
 import { PageHeader } from "@/components/PageHeader";
 import { usePeople, useSetRelationship } from "@/hooks/usePeople";
 import { DeletePersonDialog } from "./DeletePersonDialog";
+import { PersonConversations } from "./PersonConversations";
 import { countOf, formatRelative } from "@/lib/format";
 
 /**
@@ -32,6 +33,7 @@ export function PeoplePage() {
   const leftOut = usePeople(true, showAutomated);
   const setRelationship = useSetRelationship();
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [reading, setReading] = useState<{ id: string; name: string } | null>(null);
   const view = people.data;
   const senders = leftOut.data?.showingAutomated ? leftOut.data : undefined;
 
@@ -110,7 +112,10 @@ export function PeoplePage() {
                     )}
                   </td>
                   <td>
-                    <DeleteButton p={p} onDelete={setDeleting} />
+                    <div className="row gap-1">
+                      <ConversationsButton p={p} onOpen={setReading} />
+                      <DeleteButton p={p} onDelete={setDeleting} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -160,7 +165,10 @@ export function PeoplePage() {
                         <td className="num">{p.messageCount.toLocaleString()}</td>
                         <td className="muted small">{formatRelative(p.lastMessageAt)}</td>
                         <td>
-                          <DeleteButton p={p} onDelete={setDeleting} />
+                          <div className="row gap-1">
+                            <ConversationsButton p={p} onOpen={setReading} />
+                            <DeleteButton p={p} onDelete={setDeleting} />
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -176,6 +184,13 @@ export function PeoplePage() {
           <option key={r} value={r} />
         ))}
       </datalist>
+      {reading ? (
+        <PersonConversations
+          participantId={reading.id}
+          name={reading.name}
+          onClose={() => setReading(null)}
+        />
+      ) : null}
       {deleting ? (
         <DeletePersonDialog
           participantId={deleting.id}
@@ -218,6 +233,25 @@ function Who({ p }: { p: ParticipantSummary }) {
         {p.participant.identifiers.map((i) => i.value).join(", ")}
       </div>
     </>
+  );
+}
+
+function ConversationsButton({
+  p,
+  onOpen,
+}: {
+  p: ParticipantSummary;
+  onOpen: (d: { id: string; name: string }) => void;
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      aria-label={`Conversations with ${p.participant.displayName}`}
+      onClick={() => onOpen({ id: p.participant.id, name: p.participant.displayName })}
+    >
+      Conversations
+    </Button>
   );
 }
 

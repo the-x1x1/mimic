@@ -13,6 +13,7 @@ import {
   AppInfo,
   ConnectorInfo,
   ConversationPage,
+  PersonConversations,
   Dashboard,
   DeletionReport,
   DiagnosticsBundle,
@@ -111,6 +112,24 @@ export const ipc = {
       conversationId,
       fromMessageId,
       toward,
+      limit,
+    }),
+  /** The last messages of any conversation, oldest first: where reading it starts. */
+  conversationEnd: (conversationId: string, limit = 20) =>
+    call("get_conversation_end", ConversationPage, { conversationId, limit }),
+  /**
+   * Every conversation someone is in, most recently active first, with where
+   * each stands; read on from the last one shown.
+   */
+  personConversations: (
+    participantId: string,
+    before: { at: string; id: string } | null = null,
+    limit = 20,
+  ) =>
+    call("list_person_conversations", PersonConversations, {
+      participantId,
+      beforeAt: before?.at ?? null,
+      beforeId: before?.id ?? null,
       limit,
     }),
   /**

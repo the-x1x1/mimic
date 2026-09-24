@@ -42,7 +42,7 @@ Make the model of the person better, not the prompt longer.
 
 ## Phase 5 — Reply assistant
 
-- Done in 0.10.0-alpha.10: the rest of each waiting thread's conversation, before and after the message on its card, read a page at a time when asked. (A reply was already written on the card for its own thread.) Still open: a conversation not on the list — one already answered, or left out — can't be opened yet.
+- Done in 0.10.0-alpha.10: the rest of each waiting thread's conversation, before and after the message on its card, read a page at a time when asked. (A reply was already written on the card for its own thread.) Done in 0.10.0-alpha.16: every conversation someone is in can be opened from People, with where it stands, and one left off the list put back on it. Still open: finding a conversation by what was said in it.
 - Multiple drafts side by side.
 - Per-situation templates derived from the user's own patterns.
 

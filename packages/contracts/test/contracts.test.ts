@@ -4,6 +4,9 @@ import { contractFixture, importFixture } from "@mimic/test-fixtures";
 import {
   ADJUSTMENT_LABELS,
   Adjustment,
+  PersonConversations,
+  canPutOnList,
+  describeStanding,
   CHANNEL_LABELS,
   Channel,
   DeletionReport,
@@ -1054,5 +1057,42 @@ describe("the drafts measured against what the user wrote", () => {
       /^1 reply it was measured on doesn't count/,
     );
     expect(describeGone({ ...view, measured: 5, remaining: 0 })).toMatch(/^None of the replies/);
+  });
+});
+
+describe("every conversation with someone", () => {
+  it("parses a person's conversations, each standing where the home screen puts it", () => {
+    const theirs = PersonConversations.parse(read(contractFixture("person_conversations.json")));
+    expect(theirs.conversations.length).toBeGreaterThan(0);
+    expect(theirs.conversations.some((c) => c.standing === "waiting")).toBe(true);
+    const times = theirs.conversations.map((c) => c.lastMessageAt ?? "");
+    expect([...times].sort().reverse()).toEqual(times);
+  });
+
+  it("says where one stands, and offers the list only where that would change something", () => {
+    const base = {
+      conversationId: "c",
+      subject: null,
+      channel: "email",
+      isGroup: false,
+      messageCount: 3,
+      lastMessageAt: null,
+      decidingMessageId: "m",
+      standing: "waiting" as const,
+      mark: null,
+    };
+    expect(describeStanding({ ...base, standing: "quiet" }, 30)).toBe(
+      "Not on your list: the message it waits on is more than 30 days old.",
+    );
+    expect(describeStanding({ ...base, standing: "quiet" }, 1)).toContain("more than a day old");
+    expect(describeStanding({ ...base, mark: "needs_reply" }, 30)).toBe(
+      "On your list, because you said it needs a reply.",
+    );
+    expect(describeStanding({ ...base, standing: "answered" }, 30)).toBe("You wrote last.");
+    expect(canPutOnList({ ...base, standing: "automated" })).toBe(true);
+    expect(canPutOnList({ ...base, standing: "not_needed" })).toBe(true);
+    expect(canPutOnList({ ...base, standing: "answered" })).toBe(false);
+    expect(canPutOnList({ ...base, standing: "waiting" })).toBe(false);
+    expect(canPutOnList({ ...base, standing: "quiet", decidingMessageId: null })).toBe(false);
   });
 });

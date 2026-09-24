@@ -44,7 +44,7 @@ export function VoicePage() {
         title="I haven't read anything you wrote yet"
         body="It learns only from messages you sent, not ones you received. Import a source, and make sure every address you write from is listed under Settings — a missing one makes your own messages look like someone else's."
         primary={
-          <Link to="/sources" className="ui-button ui-button--primary">
+          <Link to="/sources" className="ui-btn ui-btn--primary ui-btn--md">
             Add a source
           </Link>
         }
