@@ -298,6 +298,7 @@ impl Db {
                 "voice_preferences",
                 "drafts",
                 "message_situations",
+                "situation_readings",
                 "message_embeddings",
                 "messages",
                 "conversation_participants",

@@ -124,10 +124,11 @@ const READS_MAIL: [&str; 2] = [crate::import::JOB_KIND, crate::sources::imap::JO
 
 /// Jobs that hold people's ids while they run. Folding someone they hold
 /// makes their next write fail, or bring the person back.
-const HOLDS_PEOPLE: [&str; 5] = [
+const HOLDS_PEOPLE: [&str; 6] = [
     crate::import::JOB_KIND,
     crate::sources::imap::JOB_KIND,
     crate::voice::JOB_KIND,
+    crate::voice::CHANGED_JOB_KIND,
     crate::assist::JOB_KIND,
     crate::evaluation::JOB_KIND,
 ];
@@ -580,7 +581,7 @@ fn refuse_while(conn: &Connection, kinds: &[&str]) -> DbResult<()> {
     let doing = match kind.as_str() {
         crate::import::JOB_KIND => "reading your mail",
         crate::sources::imap::JOB_KIND => "checking your mail",
-        crate::voice::JOB_KIND => "working out how you write",
+        crate::voice::JOB_KIND | crate::voice::CHANGED_JOB_KIND => "working out how you write",
         crate::evaluation::JOB_KIND => "measuring how close my drafts come",
         _ => "writing replies",
     };

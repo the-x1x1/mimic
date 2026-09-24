@@ -2,6 +2,7 @@ pub mod app;
 pub mod compose;
 pub mod dashboard;
 pub mod diagnostics;
+pub mod encoder;
 pub mod jobs;
 pub mod localmodel;
 pub mod people;

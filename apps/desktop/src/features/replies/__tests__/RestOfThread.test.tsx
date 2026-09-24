@@ -15,6 +15,7 @@ const message = (
   author: "Ada Lovelace",
   sentAt: "2026-09-19T08:00:00Z",
   automated: null,
+  filing: null,
   ...over,
 });
 

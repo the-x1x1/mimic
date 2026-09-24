@@ -178,6 +178,27 @@ export const AutomatedReason = z.string();
  * One message of a conversation as the screen shows it. Whether the user
  * wrote it is decided at import, by their addresses; nothing here guesses.
  */
+/**
+ * Who filed one of the user's messages under what it is doing: the rules, a
+ * model on this computer, or the user — each later one over the earlier.
+ */
+export const FiledBy = z.enum(["rules", "model", "you"]);
+export type FiledBy = z.infer<typeof FiledBy>;
+
+/** What one of the user's messages is filed under as doing (situation ids, strongest first), and by whom. */
+export const Filing = z.object({
+  by: FiledBy,
+  situations: z.array(z.string()),
+});
+export type Filing = z.infer<typeof Filing>;
+
+/** How a filing came about, as the line under the message says it. */
+export function filedByPhrase(by: FiledBy): string {
+  if (by === "you") return "as you said";
+  if (by === "model") return "as the model on this computer read it";
+  return "by the rules";
+}
+
 export const ThreadMessage = z.object({
   id: z.string(),
   direction: z.enum(["self", "other", "unknown"]),
@@ -187,6 +208,8 @@ export const ThreadMessage = z.object({
   body: z.string(),
   /** Why it looks automated, from its headers, when it does. A reading. */
   automated: AutomatedReason.nullable(),
+  /** For the user's own messages, what it is filed under as doing; null for anyone else's. */
+  filing: Filing.nullable(),
 });
 export type ThreadMessage = z.infer<typeof ThreadMessage>;
 
@@ -205,7 +228,7 @@ export const Toward = z.enum(["earlier", "later"]);
 export type Toward = z.infer<typeof Toward>;
 
 /** Who wrote a message of a conversation, as its label says it. */
-export function writerOf(m: ThreadMessage): string {
+export function writerOf(m: Pick<ThreadMessage, "direction" | "author">): string {
   if (m.direction === "self") return "You wrote";
   if (m.direction === "unknown") return "I couldn't tell who wrote this";
   return `${m.author ? m.author.split(" ")[0] : "Someone I couldn't name"} wrote`;

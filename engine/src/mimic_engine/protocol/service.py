@@ -1,9 +1,9 @@
 """Method registry: binds protocol methods to engine modules and holds runtime config.
 
-The engine is deliberately small in this release. Everything that can be done
+The engine is deliberately small. Everything that can be done
 deterministically in Rust is done there; what lives here is the numeric work
-that benefits from numpy and the encoder plumbing that a semantic model will
-need in Phase 2.
+that benefits from numpy, and running the sentence encoder the app
+downloaded. The engine never touches the network.
 """
 
 from __future__ import annotations
@@ -78,6 +78,12 @@ class EngineService:
             self._encoder = EncoderManager(self.encoders_dir, self.manifests_dir)
         return self._encoder
 
+    def encoder_reload(self, _params: dict[str, Any], _p: Progress) -> dict[str, Any]:
+        """Look again for a downloaded encoder — after the app downloaded one,
+        or removed it — and say which is in use now."""
+        self._encoder = None
+        return {"encoder": self.encoder().status()}
+
     def health(self, _params: dict[str, Any], _p: Progress) -> dict[str, Any]:
         return {
             "ok": True,
@@ -95,10 +101,12 @@ class EngineService:
             raise InvalidParamsError("texts must be a list of strings")
         enc = self.encoder()
         vectors = []
-        for i, t in enumerate(texts):
-            vectors.append([round(float(x), 6) for x in enc.embed(t)])
-            if len(texts) > 50 and i % 50 == 0:
-                progress("embedding", i, len(texts))
+        step = 64
+        for start in range(0, len(texts), step):
+            for row in enc.embed_batch(texts[start : start + step]):
+                vectors.append([round(float(x), 6) for x in row])
+            if len(texts) > step:
+                progress("embedding", min(start + step, len(texts)), len(texts))
         status = enc.status()
         return {
             "provider": status["provider"],
@@ -176,6 +184,7 @@ class EngineService:
         server.register("engine.configure", self.configure)
         server.register("engine.health", self.health)
         server.register("engine.shutdown", lambda p, pr: (server.stop(), self.shutdown(p, pr))[1])
+        server.register("encoder.reload", self.encoder_reload)
         server.register("text.embed", self.text_embed)
         server.register("text.similarity", self.text_similarity)
         server.register("eval.compare", self.eval_compare)

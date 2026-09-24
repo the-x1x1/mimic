@@ -28,6 +28,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 9, name: "thread_marks", sql: include_str!("migrations/0009_thread_marks.sql") },
     Migration { version: 10, name: "kept_apart", sql: include_str!("migrations/0010_kept_apart.sql") },
     Migration { version: 11, name: "evaluations", sql: include_str!("migrations/0011_evaluations.sql") },
+    Migration { version: 12, name: "situation_readings", sql: include_str!("migrations/0012_situation_readings.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -82,7 +83,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 11);
+        assert_eq!(latest_version(), 12);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -176,7 +177,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11]);
+        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11, 12]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
         assert!(column_names(&conn, "participants").contains(&"kept_apart".to_string()));
         let cases = column_names(&conn, "evaluation_cases");
@@ -224,6 +225,7 @@ mod tests {
             "message_embeddings",
             "situations",
             "message_situations",
+            "situation_readings",
             "voice_profiles",
             "voice_preferences",
             "representative_examples",
@@ -362,6 +364,51 @@ mod tests {
     }
 
     #[test]
+    fn a_message_someone_filed_by_hand_before_the_upgrade_stays_theirs() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&mut conn, 11).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sources(id, connector, name, channel, created_at) VALUES ('s', 't', 'T', 'chat', 't');
+             INSERT INTO conversations(id, source_id, external_id, channel, created_at)
+               VALUES ('c', 's', 'c', 'chat', 't');
+             INSERT INTO messages(id, conversation_id, source_id, external_id, direction, channel, body, body_hash,
+                                  imported_at)
+               VALUES ('m1', 'c', 's', 'm1', 'self', 'chat', 'no thanks', 'h1', 't'),
+                      ('m2', 'c', 's', 'm2', 'self', 'chat', 'thank you', 'h2', 't');
+             INSERT INTO message_situations(message_id, situation_id, confidence, classified_by, classified_at)
+               VALUES ('m1', 'declining', 1.0, 'user', '2026-09-01'),
+                      ('m1', 'thanking', 0.7, 'rule', '2026-09-01'),
+                      ('m2', 'thanking', 0.7, 'rule', '2026-09-01');",
+        )
+        .unwrap();
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![12]);
+        let readings: Vec<(String, String)> = conn
+            .prepare("SELECT message_id, read_by FROM situation_readings")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(readings, vec![("m1".to_string(), "user".to_string())]);
+        let rows: Vec<(String, String, String)> = conn
+            .prepare("SELECT message_id, situation_id, classified_by FROM message_situations ORDER BY 1, 2")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("m1".to_string(), "declining".to_string(), "user".to_string()),
+                ("m2".to_string(), "thanking".to_string(), "rule".to_string()),
+            ],
+            "the rules' row beside the person's decision goes; the rest stay"
+        );
+    }
+
+    #[test]
     fn people_read_before_the_upgrade_are_not_kept_apart_by_it() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
@@ -372,7 +419,7 @@ mod tests {
             [],
         )
         .unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11]);
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11, 12]);
         let apart: i64 =
             conn.query_row("SELECT kept_apart FROM participants WHERE id = 'p'", [], |r| r.get(0)).unwrap();
         assert_eq!(apart, 0, "only the user's own no sets it");

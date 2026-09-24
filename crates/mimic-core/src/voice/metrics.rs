@@ -76,95 +76,140 @@ impl<'a> Sample<'a> {
     }
 }
 
+/// Every metric over a set of messages held in memory. The same arithmetic as
+/// feeding them one at a time to an [`Accumulator`], which is what analysis
+/// does so that no scope is ever held whole.
 pub fn compute(samples: &[Sample<'_>]) -> VoiceMetrics {
-    let n = samples.len();
-    let mut m = VoiceMetrics { sample_size: n, measurable: n >= MIN_SAMPLE, ..Default::default() };
-    if !m.measurable {
-        return m;
-    }
-    let fnn = n as f64;
-
-    let mut words: Vec<f64> = Vec::with_capacity(n);
-    let mut sentences = 0f64;
-    let (mut paragraphs, mut periods, mut questions, mut bangs, mut ellipses) = (0f64, 0f64, 0f64, 0f64, 0f64);
-    let (mut emoji, mut lower_start, mut all_lower, mut contractions, mut total_words) = (0f64, 0f64, 0f64, 0f64, 0f64);
-    let (mut greetings, mut sign_offs) = (0f64, 0f64);
-    let mut greeting_counts: HashMap<String, usize> = HashMap::new();
-    let mut sign_off_counts: HashMap<String, usize> = HashMap::new();
-    let mut phrase_counts: HashMap<String, usize> = HashMap::new();
-    let mut latencies: Vec<i64> = Vec::new();
-
+    let mut acc = Accumulator::default();
     for s in samples {
+        acc.push(s);
+    }
+    acc.finish()
+}
+
+/// Past this many distinct phrases a scope's phrase counts are thinned: the
+/// phrases seen least so far are forgotten until half the room is free. Below
+/// it (a few thousand messages) every phrase is counted exactly; above it a
+/// habit, which recurs, survives, and a phrase said once does not.
+const PHRASE_ROOM: usize = 200_000;
+
+/// The metrics of a scope worked out one message at a time, in memory that
+/// does not grow with the scope's text: word counts are kept as a histogram
+/// (a message is some whole number of words), phrases in a table thinned at
+/// [`PHRASE_ROOM`], and one number per timed reply.
+#[derive(Debug, Default)]
+pub struct Accumulator {
+    n: usize,
+    words: std::collections::BTreeMap<i64, usize>,
+    total_words: f64,
+    sentences: f64,
+    paragraphs: f64,
+    periods: f64,
+    questions: f64,
+    bangs: f64,
+    ellipses: f64,
+    emoji: f64,
+    lower_start: f64,
+    all_lower: f64,
+    contractions: f64,
+    greetings: f64,
+    sign_offs: f64,
+    greeting_counts: HashMap<String, usize>,
+    sign_off_counts: HashMap<String, usize>,
+    phrase_counts: HashMap<String, usize>,
+    latencies: Vec<i64>,
+}
+
+impl Accumulator {
+    /// How many messages have been pushed.
+    pub fn len(&self) -> usize {
+        self.n
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.n == 0
+    }
+
+    pub fn push(&mut self, s: &Sample<'_>) {
+        self.n += 1;
         let body = s.body.trim();
-        let tokens = crate::db::word_count(body) as f64;
-        words.push(tokens);
-        total_words += tokens;
-        sentences += count_sentences(body) as f64;
+        let tokens = crate::db::word_count(body);
+        *self.words.entry(tokens).or_default() += 1;
+        self.total_words += tokens as f64;
+        self.sentences += count_sentences(body) as f64;
         if body.contains("\n\n") {
-            paragraphs += 1.0;
+            self.paragraphs += 1.0;
         }
-        let last = last_meaningful_char(body);
-        match last {
-            Some('.') => periods += 1.0,
-            Some('?') => questions += 1.0,
-            Some('!') => bangs += 1.0,
+        match last_meaningful_char(body) {
+            Some('.') => self.periods += 1.0,
+            Some('?') => self.questions += 1.0,
+            Some('!') => self.bangs += 1.0,
             _ => {}
         }
         if body.contains("...") || body.contains('…') {
-            ellipses += 1.0;
+            self.ellipses += 1.0;
         }
         if body.chars().any(is_emoji) {
-            emoji += 1.0;
+            self.emoji += 1.0;
         }
         if body.chars().find(|c| c.is_alphabetic()).is_some_and(char::is_lowercase) {
-            lower_start += 1.0;
+            self.lower_start += 1.0;
         }
         if body.chars().any(char::is_alphabetic) && !body.chars().any(char::is_uppercase) {
-            all_lower += 1.0;
+            self.all_lower += 1.0;
         }
-        contractions += count_contractions(body) as f64;
+        self.contractions += count_contractions(body) as f64;
         if let Some(g) = opening_greeting(body) {
-            greetings += 1.0;
-            *greeting_counts.entry(g).or_default() += 1;
+            self.greetings += 1.0;
+            *self.greeting_counts.entry(g).or_default() += 1;
         }
         if let Some(sg) = closing_sign_off(body) {
-            sign_offs += 1.0;
-            *sign_off_counts.entry(sg).or_default() += 1;
+            self.sign_offs += 1.0;
+            *self.sign_off_counts.entry(sg).or_default() += 1;
         }
         for phrase in phrases(body) {
-            *phrase_counts.entry(phrase).or_default() += 1;
+            *self.phrase_counts.entry(phrase).or_default() += 1;
         }
+        thin(&mut self.phrase_counts, PHRASE_ROOM);
         if let Some(l) = s.response_latency_seconds.filter(|l| *l >= 0) {
-            latencies.push(l);
+            self.latencies.push(l);
         }
     }
 
-    words.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    m.avg_words_per_message = Some(round2(total_words / fnn));
-    m.median_words_per_message = Some(round2(percentile(&words, 0.5)));
-    m.p90_words_per_message = Some(round2(percentile(&words, 0.9)));
-    m.avg_sentences_per_message = Some(round2(sentences / fnn));
-    m.multi_paragraph_rate = Some(round3(paragraphs / fnn));
-    m.terminal_period_rate = Some(round3(periods / fnn));
-    m.question_rate = Some(round3(questions / fnn));
-    m.exclamation_rate = Some(round3(bangs / fnn));
-    m.ellipsis_rate = Some(round3(ellipses / fnn));
-    m.emoji_rate = Some(round3(emoji / fnn));
-    m.lowercase_start_rate = Some(round3(lower_start / fnn));
-    m.all_lowercase_rate = Some(round3(all_lower / fnn));
-    m.contractions_per_100_words =
-        Some(if total_words > 0.0 { round2(contractions * 100.0 / total_words) } else { 0.0 });
-    m.greeting_rate = Some(round3(greetings / fnn));
-    m.sign_off_rate = Some(round3(sign_offs / fnn));
-    m.top_greetings = top(greeting_counts, TOP_N, 1);
-    m.top_sign_offs = top(sign_off_counts, TOP_N, 1);
-    // A phrase seen once is a sentence, not a habit.
-    m.top_phrases = top(phrase_counts, TOP_N, 3);
-    if !latencies.is_empty() {
-        latencies.sort_unstable();
-        m.median_response_seconds = Some(latencies[latencies.len() / 2]);
+    pub fn finish(self) -> VoiceMetrics {
+        let n = self.n;
+        let mut m = VoiceMetrics { sample_size: n, measurable: n >= MIN_SAMPLE, ..Default::default() };
+        if !m.measurable {
+            return m;
+        }
+        let fnn = n as f64;
+        m.avg_words_per_message = Some(round2(self.total_words / fnn));
+        m.median_words_per_message = Some(round2(percentile(&self.words, n, 0.5)));
+        m.p90_words_per_message = Some(round2(percentile(&self.words, n, 0.9)));
+        m.avg_sentences_per_message = Some(round2(self.sentences / fnn));
+        m.multi_paragraph_rate = Some(round3(self.paragraphs / fnn));
+        m.terminal_period_rate = Some(round3(self.periods / fnn));
+        m.question_rate = Some(round3(self.questions / fnn));
+        m.exclamation_rate = Some(round3(self.bangs / fnn));
+        m.ellipsis_rate = Some(round3(self.ellipses / fnn));
+        m.emoji_rate = Some(round3(self.emoji / fnn));
+        m.lowercase_start_rate = Some(round3(self.lower_start / fnn));
+        m.all_lowercase_rate = Some(round3(self.all_lower / fnn));
+        m.contractions_per_100_words =
+            Some(if self.total_words > 0.0 { round2(self.contractions * 100.0 / self.total_words) } else { 0.0 });
+        m.greeting_rate = Some(round3(self.greetings / fnn));
+        m.sign_off_rate = Some(round3(self.sign_offs / fnn));
+        m.top_greetings = top(self.greeting_counts, TOP_N, 1);
+        m.top_sign_offs = top(self.sign_off_counts, TOP_N, 1);
+        // A phrase seen once is a sentence, not a habit.
+        m.top_phrases = top(self.phrase_counts, TOP_N, 3);
+        let mut latencies = self.latencies;
+        if !latencies.is_empty() {
+            latencies.sort_unstable();
+            m.median_response_seconds = Some(latencies[latencies.len() / 2]);
+        }
+        m
     }
-    m
 }
 
 fn round2(v: f64) -> f64 {
@@ -174,12 +219,34 @@ fn round3(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
 }
 
-fn percentile(sorted: &[f64], q: f64) -> f64 {
-    if sorted.is_empty() {
+/// Past `room` entries, forget the phrases seen least — once, then twice, and
+/// so on — until at most half the room is taken.
+fn thin(counts: &mut HashMap<String, usize>, room: usize) {
+    if counts.len() <= room {
+        return;
+    }
+    let mut floor = 2;
+    while counts.len() > room / 2 {
+        counts.retain(|_, c| *c >= floor);
+        floor += 1;
+    }
+}
+
+/// The value at quantile `q` of `n` word counts held as a histogram: the
+/// `round((n - 1) * q)`th smallest, as it would be in the sorted list.
+fn percentile(histogram: &std::collections::BTreeMap<i64, usize>, n: usize, q: f64) -> f64 {
+    if n == 0 {
         return 0.0;
     }
-    let idx = ((sorted.len() - 1) as f64 * q).round() as usize;
-    sorted[idx]
+    let idx = ((n - 1) as f64 * q).round() as usize;
+    let mut seen = 0usize;
+    for (value, count) in histogram {
+        seen += count;
+        if seen > idx {
+            return *value as f64;
+        }
+    }
+    0.0
 }
 
 /// Most frequent first, then alphabetical, so the output is stable across runs.
@@ -422,6 +489,40 @@ mod tests {
         let m = compute(&s);
         assert_eq!(m.median_response_seconds, Some(100));
         assert_eq!(compute(&repeat("ok", 20)).median_response_seconds, None, "untimed means unknown");
+    }
+
+    #[test]
+    fn quantiles_of_lengths_are_read_from_counts_as_from_the_sorted_list() {
+        // 1..=20 words: the median is the 11th smallest (index round(9.5)),
+        // the 90th percentile the 18th (index round(17.1)).
+        let bodies: Vec<String> = (1..=20).map(|n| vec!["w"; n].join(" ")).collect();
+        let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
+        let m = compute(&samples(&refs));
+        assert_eq!(m.median_words_per_message, Some(11.0));
+        assert_eq!(m.p90_words_per_message, Some(18.0));
+        let mut acc = Accumulator::default();
+        for b in refs.iter().rev() {
+            acc.push(&Sample::new(b));
+        }
+        assert_eq!(acc.len(), 20);
+        assert_eq!(acc.finish(), m, "the order messages arrive in changes nothing");
+    }
+
+    #[test]
+    fn phrases_past_the_room_forget_the_rarest_first() {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        counts.insert("let me know".into(), 5);
+        counts.insert("sounds good to".into(), 2);
+        for i in 0..10 {
+            counts.insert(format!("once only {i}"), 1);
+        }
+        thin(&mut counts, 20);
+        assert_eq!(counts.len(), 12, "within the room nothing is forgotten");
+        thin(&mut counts, 8);
+        assert_eq!(counts.len(), 2, "said once goes first: {counts:?}");
+        counts.insert("once more".into(), 1);
+        thin(&mut counts, 2);
+        assert_eq!(counts.keys().collect::<Vec<_>>(), vec!["let me know"], "then twice; a habit outlasts the rest");
     }
 
     #[test]

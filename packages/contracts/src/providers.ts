@@ -15,11 +15,12 @@ export type ProviderInfo = z.infer<typeof ProviderInfo>;
  * How this build protects saved credentials — an API key, mailbox app
  * passwords. `account`: sealed to the user's Windows account (DPAPI), so a
  * copy of the file cannot be opened without their Windows password, though a
- * program running as them, or an administrator, can still unseal it. `file`:
- * in a file only this user can open, not sealed. The store reports it;
- * nothing assumes it.
+ * program running as them, or an administrator, can still unseal it.
+ * `keychain`: sealed with a key kept in the user's login Keychain (macOS; not
+ * yet run on a Mac). `file`: in a file only this user can open, not sealed.
+ * The store reports it; nothing assumes it.
  */
-export const CredentialProtection = z.enum(["account", "file"]);
+export const CredentialProtection = z.enum(["account", "keychain", "file"]);
 export type CredentialProtection = z.infer<typeof CredentialProtection>;
 
 export const CredentialState = z.object({
@@ -68,6 +69,17 @@ export function describeCredentials(c: CredentialState): string {
         "The file they were kept in before this version isn't locked and is still on this computer; I'll move what's in it and delete it as soon as I can.",
       );
     }
+  } else if (c.protection === "keychain") {
+    parts.push(
+      "Any API key or mailbox password you give me is locked with a key kept in your login Keychain, so a copy of the file it's kept in can't be opened without it. A program you run yourself could still ask for that key — the same as your browser's saved passwords — though macOS may ask you first.",
+    );
+    if (c.unsealedLeft) {
+      // Saved by a build that did not seal: those values are not sealed
+      // after the fact, so the promise is only what entering them does.
+      parts.push(
+        "Something saved before this version is still on this computer unlocked; entering those keys and passwords again locks them.",
+      );
+    }
   } else {
     parts.push(
       "Any API key or mailbox password you give me is kept in a file only your account can open. It isn't locked to your account, so anything that can read that file can read it.",
@@ -86,7 +98,9 @@ export function describeCredentials(c: CredentialState): string {
   if (n > 0) {
     const one = n === 1;
     parts.push(
-      `I can't unlock ${one ? "one saved key or password" : `${n} saved keys or passwords`} any more: ${one ? "it was" : "they were"} locked to another Windows account or computer, or before your Windows password was reset, so ${one ? "it needs" : "they need"} entering again.`,
+      c.protection === "keychain"
+        ? `I can't unlock ${one ? "one saved key or password" : `${n} saved keys or passwords`} any more: ${one ? "it was" : "they were"} locked with a key I can't get from your Keychain — it isn't there, or I wasn't allowed it — so ${one ? "it needs" : "they need"} entering again.`
+        : `I can't unlock ${one ? "one saved key or password" : `${n} saved keys or passwords`} any more: ${one ? "it was" : "they were"} locked to another Windows account or computer, or before your Windows password was reset, so ${one ? "it needs" : "they need"} entering again.`,
     );
   }
   return parts.join(" ");

@@ -434,6 +434,13 @@ a.ui-btn {
   flex-direction: column;
   gap: var(--space-1);
 }
+/* What one of the user's own messages is filed under as doing, and changing it. */
+fieldset.message-filing {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
 .thread__part {
   display: flex;
   flex-direction: column;

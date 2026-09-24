@@ -45,7 +45,7 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const [isMine, setIsMine] = useState(true);
   // Said only when the store reports it: until then, and on a build that
   // does not seal, the note claims nothing it cannot back.
-  const sealed = useProviderState().data?.credentials.protection === "account";
+  const protection = useProviderState().data?.credentials.protection;
   const signInAvailable = useMailSignIn().data;
   const canSignIn = signInAvailable === true;
 
@@ -58,7 +58,13 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
     security: "tls",
   };
   const ready = account.host !== "" && account.username !== "" && password !== "";
-  const kept = `It stays on this computer${sealed ? ", locked to your Windows account" : ""}.`;
+  const locked =
+    protection === "account"
+      ? ", locked to your Windows account"
+      : protection === "keychain"
+        ? ", locked with a key in your Keychain"
+        : "";
+  const kept = `It stays on this computer${locked}.`;
 
   /** A sign-in brought back for another address, or abandoned, is forgotten. */
   function forgetSignIn() {

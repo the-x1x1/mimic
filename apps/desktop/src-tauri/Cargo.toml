@@ -39,5 +39,12 @@ sha2.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
 
+# The login Keychain, to seal saved credentials on macOS (secrets.rs). Never
+# yet run on a Mac.
+[target.'cfg(target_os = "macos")'.dependencies]
+mimic-keychain.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
+# The Keychain sealer's own sealing, tested here with a key of the test's.
+mimic-keychain.workspace = true

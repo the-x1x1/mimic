@@ -89,6 +89,7 @@ pub fn import_source(
         summary: ImportSummary::default(),
         messages_done: 0,
         read_again: HashSet::new(),
+        changed: HashSet::new(),
     };
 
     let result = connector.import(path, &mut |convo| {
@@ -100,6 +101,9 @@ pub fn import_source(
         Ok(())
     });
 
+    // What was measured over the conversations that changed is out of date —
+    // however the import ended, since what it wrote stays.
+    db.mark_conversations_changed(&state.changed.drain().collect::<Vec<_>>())?;
     match result {
         Ok(()) => {}
         Err(SourceError::Aborted(msg)) if msg == "canceled" => {
@@ -117,8 +121,6 @@ pub fn import_source(
 
     db.refresh_source_counts(source_id)?;
     db.set_source_status(source_id, "imported", None)?;
-    // Anything derived from messages is now out of date.
-    db.mark_profiles_stale(None)?;
     Ok(state.summary)
 }
 
@@ -151,6 +153,7 @@ impl<'a> Importer<'a> {
                 summary: ImportSummary::default(),
                 messages_done: 0,
                 read_again: HashSet::new(),
+                changed: HashSet::new(),
             },
         })
     }
@@ -165,16 +168,34 @@ impl<'a> Importer<'a> {
         &self.state.summary
     }
 
-    /// Recount the source and mark anything derived from messages stale, as
-    /// a finished file import does. Only when something was inserted: a check
-    /// that found nothing new invalidates nothing.
+    /// Stop after an error part way. What was written stays, so the source is
+    /// recounted and what it changed is marked stale, as `finish` would: the
+    /// next check reads those messages as duplicates, and would never mark
+    /// them.
+    pub fn abandon(self) {
+        let db = self.state.db;
+        if self.state.changed.is_empty() {
+            return;
+        }
+        if let Err(e) = db.refresh_source_counts(&self.state.source_id) {
+            tracing::warn!(target: "import", error = %e, "could not recount a source after a failed import");
+        }
+        if let Err(e) = db.mark_conversations_changed(&self.state.changed.into_iter().collect::<Vec<_>>()) {
+            tracing::warn!(target: "import", error = %e, "could not mark what a failed import changed");
+        }
+    }
+
+    /// Recount the source and mark stale what was measured over the
+    /// conversations that changed, as a finished file import does. Only when
+    /// something was inserted: a check that found nothing new invalidates
+    /// nothing.
     pub fn finish(self) -> Result<ImportSummary, ImportError> {
         let db = self.state.db;
         if self.state.summary.inserted > 0 {
             // "Last import" is when mail last came in, so a check that found
             // nothing new does not move it.
             db.refresh_source_counts(&self.state.source_id)?;
-            db.mark_profiles_stale(None)?;
+            db.mark_conversations_changed(&self.state.changed.into_iter().collect::<Vec<_>>())?;
         }
         Ok(self.state.summary)
     }
@@ -202,6 +223,8 @@ struct ImportState<'a> {
     messages_done: usize,
     /// Messages already stored that this import has offered a reading to.
     read_again: HashSet<String>,
+    /// Conversations this import put a message in.
+    changed: HashSet<String>,
 }
 
 impl ImportState<'_> {
@@ -331,6 +354,9 @@ impl ImportState<'_> {
             self.db.refresh_conversation_stats(&conversation_id)?;
         }
 
+        if counts.inserted > 0 {
+            self.changed.insert(conversation_id);
+        }
         self.summary.conversations += 1;
         self.summary.inserted += counts.inserted;
         self.summary.duplicates += counts.duplicates;
@@ -468,7 +494,7 @@ impl JobExecutor for ImportExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{IdentifierKind, NewSource};
+    use crate::db::{IdentifierInput, IdentifierKind, NewSource};
 
     const EXPORT: &str = r#"{
       "channel": "chat",
@@ -824,6 +850,43 @@ mod tests {
         let s = db.get_source(&source.id).unwrap().unwrap();
         assert_eq!(s.status, "failed");
         assert!(s.last_error.unwrap()["message"].as_str().unwrap().contains("io:"));
+    }
+
+    #[test]
+    fn an_import_given_up_part_way_marks_what_it_wrote() {
+        let (_d, db, source_id) = setup();
+        db.put_voice_profile(
+            crate::db::VoiceLayer::Global,
+            "",
+            None,
+            &json!({}),
+            &json!({}),
+            1,
+            crate::version::ANALYSIS_VERSION,
+        )
+        .unwrap();
+        let me = crate::sources::AuthorRef {
+            display_name: "C".into(),
+            identifiers: vec![IdentifierInput::new(IdentifierKind::Handle, "@c")],
+        };
+        let mut importer = Importer::begin(&db, &source_id).unwrap();
+        importer
+            .take(crate::sources::DiscoveredConversation {
+                external_id: "half".into(),
+                subject: None,
+                channel: "chat".into(),
+                messages: vec![crate::sources::RawMessage {
+                    external_id: "h1".into(),
+                    author: me,
+                    sent_at: Some("2026-09-01T10:00:00Z".into()),
+                    body: "on my way".into(),
+                    metadata: serde_json::Value::Null,
+                }],
+            })
+            .unwrap();
+        importer.abandon();
+        let profiles = db.list_voice_profiles(crate::version::ANALYSIS_VERSION).unwrap();
+        assert!(profiles[0].stale, "what was written before the failure is measured again");
     }
 
     #[test]

@@ -32,6 +32,21 @@ export const VoiceMetrics = z.object({
 });
 export type VoiceMetrics = z.infer<typeof VoiceMetrics>;
 
+/**
+ * A model's reading of a layer's numbers, in words — written from the
+ * numbers alone, and shown beside them as a reading, never as something the
+ * user said. `current` is whether it was written from the numbers the layer
+ * has now; a reading of older numbers is shown as that and given to no draft.
+ */
+export const VoiceReading = z.object({
+  text: z.string(),
+  model: z.string(),
+  provider: z.string(),
+  writtenAt: z.string(),
+  current: z.boolean(),
+});
+export type VoiceReading = z.infer<typeof VoiceReading>;
+
 export const ResolvedLayer = z.object({
   layer: z.string(),
   scopeKey: z.string(),
@@ -40,6 +55,7 @@ export const ResolvedLayer = z.object({
   measurable: z.boolean(),
   metrics: VoiceMetrics,
   stale: z.boolean(),
+  reading: VoiceReading.nullable(),
 });
 export type ResolvedLayer = z.infer<typeof ResolvedLayer>;
 
@@ -92,6 +108,22 @@ export const SituationSummary = z.object({
   measurable: z.boolean(),
 });
 export type SituationSummary = z.infer<typeof SituationSummary>;
+
+/**
+ * How the user's own messages came to be filed by what they are doing — by
+ * the rules, by a model on this computer, by the user — and the model on
+ * this computer that could read them, if there is one. Only a local model
+ * is ever sent them.
+ */
+export const SituationFiling = z.object({
+  byRules: z.number(),
+  byModel: z.number(),
+  byYou: z.number(),
+  /** The provider on this computer that would read them, to check it answers first. */
+  localProvider: z.string().nullable(),
+  localModel: z.string().nullable(),
+});
+export type SituationFiling = z.infer<typeof SituationFiling>;
 
 export const Habit = z.enum(["greeting", "signOff", "emoji", "terminalPeriod", "length"]);
 export type Habit = z.infer<typeof Habit>;
@@ -180,3 +212,30 @@ export function formatDuration(seconds: number | null): string {
   if (seconds < 172800) return `${Math.round(seconds / 3600)} hours`;
   return `${Math.round(seconds / 86400)} days`;
 }
+
+/** The sentence encoder this build offers, as its manifest names it. */
+export const OfferedEncoder = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  bytes: z.number(),
+  license: z.string(),
+  homepage: z.string(),
+});
+export type OfferedEncoder = z.infer<typeof OfferedEncoder>;
+
+/**
+ * Reading messages for meaning: the encoder offered (none in a build without
+ * one), whether it is downloaded and in use — the engine runs it only while
+ * every file matches its pinned SHA-256 — the engine's own word on why, and
+ * how many of the messages drafts compare by meaning it has read.
+ */
+export const EncoderView = z.object({
+  offered: OfferedEncoder.nullable(),
+  downloaded: z.boolean(),
+  inUse: z.boolean(),
+  reason: z.string().nullable(),
+  wanted: z.number(),
+  done: z.number(),
+});
+export type EncoderView = z.infer<typeof EncoderView>;

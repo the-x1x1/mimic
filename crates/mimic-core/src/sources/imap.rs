@@ -892,7 +892,11 @@ fn sync_inner(
 
     let mut importer = Importer::begin(db, source_id)?;
     for convo in thread(mails) {
-        importer.take(convo)?;
+        if let Err(e) = importer.take(convo) {
+            // What was written stays; what it changed is measured again.
+            importer.abandon();
+            return Err(e.into());
+        }
     }
     let imported = importer.finish()?;
     summary.inserted = imported.inserted;

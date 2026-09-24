@@ -8,12 +8,12 @@ A person does not have one writing style. They have a default and a set of adjus
 
 Modelling that as one averaged profile produces a voice nobody has — the mean of "Dear Dr Okafor" and "lol ok". So Mimic computes four layers independently and resolves them outermost to innermost at generation time:
 
-| Layer            | Scope                        | Status                                 |
-| ---------------- | ---------------------------- | -------------------------------------- |
-| **GLOBAL**       | everything the user wrote    | implemented                            |
-| **CHANNEL**      | per channel (email, sms, …)  | implemented                            |
-| **RELATIONSHIP** | per person                   | implemented                            |
-| **SITUATIONAL**  | per situation (declining, …) | implemented — filed by rule, see below |
+| Layer            | Scope                        | Status                                                                             |
+| ---------------- | ---------------------------- | ---------------------------------------------------------------------------------- |
+| **GLOBAL**       | everything the user wrote    | implemented                                                                        |
+| **CHANNEL**      | per channel (email, sms, …)  | implemented                                                                        |
+| **RELATIONSHIP** | per person                   | implemented                                                                        |
+| **SITUATIONAL**  | per situation (declining, …) | implemented — filed by rule, by a model on this computer or by the user, see below |
 
 Resolution: global, then channel, then relationship, then situation, then the user's manual preferences, which beat everything. `voice::effective_metrics` folds them so the innermost layer that measured a given metric wins it, and an inner layer that measured nothing does not erase what an outer one knows.
 
@@ -45,15 +45,37 @@ Every metric below is arithmetic over text. No model is involved and none is nee
 
 **`null` is not zero.** `emojiRate: 0.0` means this person does not use emoji — a fact, and an instruction to the prompt. `null` means we have not seen enough to say. The distinction survives from the Rust struct through the zod schema to the rendered sentence, and there is a test at each layer that it does.
 
+### Counting a page at a time
+
+A scope is never held in memory whole. `voice::metrics::Accumulator` takes one message at a time (`push`) and gives the metrics at the end (`finish`); `metrics::compute` over a list is the same arithmetic. Word counts are kept as a histogram — a message is some whole number of words — so the median and the 90th percentile are exact without keeping every length. Phrase counts are the one table that grows with the text: past 200,000 distinct phrases the rarest are forgotten until half the room is free (seen once first, then twice). Below that, a few thousand messages in a scope, every phrase is counted exactly; above it, a habit, which recurs, survives.
+
+Analysis reads each scope twice, a page of 1,000 messages at a time: once for its numbers, once to score each message against them for the representative examples (below).
+
+### Measuring only what changed
+
+Every message is in the layer over everything, so that layer is read whole whenever anything of the user's changed; the rest are measured again only when something in them did.
+
+- **An import, or a mailbox check, marks stale** what the conversations it put a message in could move — when such a conversation holds a message of the user's: the layer over everything, the channels of the user's messages there, the people in it, and the situations those messages are filed under (`Db::mark_conversations_changed`). A new message changes the replies around it too (how long the user took to answer), so a conversation counts when anything in it changed. However an import ends — finished, stopped or failed — what it wrote stays, so it marks stale either way.
+- **Filing by situation marks stale** the layers a message joined or left, in the same transaction, so a stop between filing and measuring still leaves them to be measured.
+- **`voice::analyze_in(Mode::Changed)`** measures only layers that are stale or were never measured at this analysis version, and leaves the rest. `Mode::Everything` (what the user starts from How you write) measures every layer.
+- **A layer whose scope is gone is removed** either way: a channel the user no longer has a message in, someone they now have fewer than twenty messages to, a situation nothing is filed under.
+- **It runs by itself.** When an import or a mailbox check that brought something in finishes, the app queues a `measure_voice_changes` job, once, if one is not already waiting — but only when how the user writes has been measured before (`voice::wants_measuring`): the first measurement is the user's to start. It says nothing when it finishes; How you write shows the result.
+
 ## Situations
 
 A situation is what a message is _doing_: saying no, setting a time, apologising, thanking, explaining, disagreeing. Six, fixed, seeded by migration 0007 with stable ids that are the situational layer's scope keys. The list is short on purpose: a layer needs twenty of the user's messages behind it, and a long tail of situations would leave every one of them under the floor.
 
 **How messages are filed.** `situations::classify` reads each of the user's own messages — `direction = 'self'` only; what other people wrote is not evidence of how the user says no — against a table of cue phrases per situation, each with a weight. Weights are summed, clamped to 1, and a message is filed under a situation at `RULE_THRESHOLD = 0.6` or above. Some cues take evidence away ("sorry to hear" is sympathy, not an apology; "no thanks" is a refusal, not a thank-you). A short closing block is ignored before reading, so "Thanks," above a name does not make every message a thank-you. Explaining needs twenty words. A message can be filed under more than one situation ("sorry, can't make it" is both).
 
-The rules are tuned for precision rather than recall: an unfiled message costs the layer one sample, a misfiled one teaches it the wrong habit. Every row they write says `classified_by = 'rule'`; a row the user sets (`'user'`) is never overwritten and never duplicated by a rule. Filing happens at the start of every analysis, and a situation that ends up with nothing filed loses its layer rather than keeping a description of messages it no longer counts.
+The rules are tuned for precision rather than recall: an unfiled message costs the layer one sample, a misfiled one teaches it the wrong habit. Filing happens at the start of every analysis, a page at a time, each page in one transaction, and a row changes only where the rules now say something else (`Db::refile_by_rule`), so filing a corpus that has not changed writes nothing. A situation that ends up with nothing filed loses its layer rather than keeping a description of messages it no longer counts.
 
-A language model would classify better. It would also need every message the user has ever written sent to it, which is not a thing to do from a background job against a hosted provider. `classify` is the seam a local model can replace.
+**Three hands, each over the one before.**
+
+- **The rules** (`classified_by = 'rule'`) file every one of the user's messages nobody else has decided about.
+- **A model on this computer** (`'model'`) can be asked to read them instead (How you write → What each message is doing; `situations::read_with_model`). It is shown up to eight messages at a time — the user's own words, the closing block dropped, up to 800 characters each — with the six situations and what each is, and answers with JSON: for each message, the situations it is doing, or none. An answer naming anything outside the six, or not an answer at all, is not taken: a batch it cannot read is asked again a message at a time, and a message still not understood is left to the rules. What it says replaces the rules' reading of that message; it is stored with a fixed confidence of 0.9 (a model says which situations, not how sure it is) and, in `situation_readings`, with the model's name and the way it was asked. Up to 400 messages a run, the most recent first; each is kept as it is read, so a stopped run keeps what it read and the next starts at the next unread message. **Only a local provider is ever used.** Reading them sends every one to the model, which is not a thing to do from a background job against a hosted provider, so one is refused (`ModelReadError::NotLocal`), not used.
+- **The user** (`'user'`) can say what any one of their messages is doing — one situation, several, or none of them — under it in any conversation. That stands over the rules and any model until they choose "Let the rules decide", which hands the message back and files it as the rules read it now.
+
+A decision by a model or the user is recorded in `situation_readings`, because "doing none of these" leaves no row in `message_situations`, and a message with a reading there is left alone by the rules. The layers a decision moves are marked stale, and measured again by themselves.
 
 **How a draft gets a situation.** Two ways, and the draft records which (`SituationChoice.source`). The user can choose one (`chosen`). Otherwise their note is read by the same rules plus a few instruction-shaped cues ("say no", "push back", "thank them") (`fromNote`). With no note, nothing is inferred: what the other person asked is not what the user has decided to answer. The screen words the second case as a reading — "your note read like saying no" — and never as something the user said.
 
@@ -63,13 +85,21 @@ A language model would classify better. It would also need every message the use
 
 Six per scope, chosen deterministically. A message scores well when its length is close to the scope's median and when it carries the features that scope is characterized by — a greeting if they greet, a sign-off if they sign off, a phrase they repeat. Ties break on message id, so two runs over the same corpus choose the same examples.
 
-Near-duplicates are suppressed by a normalized fingerprint: six copies of "sounds good" teach a model less than one.
+Near-duplicates are suppressed by a normalized fingerprint: six copies of "sounds good" teach a model less than one. Each wording counts once, by its best message.
+
+They are chosen a message at a time (`voice::ExamplePicker`), holding only six wordings: one is let go only when six others each have a better message, and then it could never have been among the best six — so the result is exactly what sorting every message would give (`examples_chosen_a_message_at_a_time_are_the_ones_sorting_them_all_would_choose`).
 
 ## Retrieval
 
 Filter first, rank second. A semantically similar message written to a different person on a different channel is the wrong example — it will teach the prompt the wrong register. So participant, channel, relationship, situation, conversation, source and date range are applied as a `WHERE` clause, and ranking only reorders what survived.
 
-Ranking in this release is lexical: how much of the incoming message's vocabulary appears in the message being answered, weighted by inverse document frequency so rare words count for more than common ones. This is a real signal and a shallow one, and it says so. `engine/src/mimic_engine/embeddings/encoder.py` exposes `lexical_v1` embeddings and reports `semantic: false`; a sentence encoder replaces the scorer behind the same `retrieve` signature in Phase 2, and nothing above that module changes.
+Ranking is by wording, and by meaning once the user has downloaded the sentence encoder.
+
+- **By wording:** how much of the incoming message's vocabulary appears in the message being answered, weighted by inverse document frequency so rare words count for more than common ones. A real signal, and a shallow one: "drinks on friday?" shares no word with "pub friday?".
+- **By meaning:** all-MiniLM-L6-v2, named by `models/manifests/all-minilm-l6-v2.json`, turns a message into 384 numbers, close together for messages that mean much the same thing. It is downloaded only when the user asks (Settings → Finding your past replies by meaning; `crate::encoder`), 91 MB from Hugging Face at a pinned revision, each file checked against the SHA-256 the manifest pins as it arrives; a file that does not match is deleted. The engine runs it (ONNX Runtime, the encoder's own tokenizer, the tokens averaged over those that are not padding, then scaled to length 1) only while every file still matches, and otherwise uses `lexical_v1` and says why. It is the full-precision export: the 8-bit exports work out their scale from everything in a batch, so a message's numbers would depend on what it was read with.
+  - **What is turned into numbers:** every message the user replied to, and every one of theirs (a reply is compared by the message it answered, or by itself when it answered nothing stored). They are read in the background (`embed_messages`), 128 at a time, into `message_embeddings` under the encoder's id; vectors from any other encoder are removed. They are read after the download, after each import or mailbox check, and when the app starts, and what is read is kept as it goes.
+  - **At draft time,** the message being answered is turned into numbers by the engine (`encoder::query_vector`) — for a draft the user asks for, one prepared in advance, and one written to be measured — and a candidate with a vector from the same encoder scores `0.75 × closeness in meaning + 0.25 × wording`; one without scores by wording as before. The reason says which: "close in meaning", "close in meaning, and in wording: deck, send", or "similar wording: …".
+- A reply in a conversation with several people is one candidate, shown against the person who wrote what it answered.
 
 ## From measurements to a prompt
 
@@ -81,9 +111,15 @@ Ranking in this release is lexical: how much of the incoming message's vocabular
 - `emojiRate <= 0.02` → "They do not use emoji. Do not add any."
 - `greetingRate <= 0.1` → "They open straight into the message, with no greeting."
 
-Then the user's manual preferences, labelled as overriding the measurements. Then up to five retrieved exchanges, marked as things to match in register and not to reuse in content. Then the recipient, their relationship and the channel. Then any adjustment the user asked for.
+Then, when there is one, a model's reading of those numbers in words (below), labelled as a reading. Then the user's manual preferences, labelled as overriding the measurements. Then up to five retrieved exchanges, marked as things to match in register and not to reuse in content. Then the recipient, their relationship and the channel. Then any adjustment the user asked for.
 
 The output token budget is derived from `p90WordsPerMessage`, so a model cannot answer a two-word texter with four paragraphs.
+
+### In words: a reading of the numbers
+
+A sentence such as "short and warm, lowercase, signs off with thanks" carries register better than twelve rates, and turning numbers into that sentence is the one thing here a model does better than arithmetic. So, when the user asks (How you write → In words; `voice::describe`), the model they chose is given each measurable layer's numbers — **only the numbers**, and the greetings and sign-offs from Mimic's own short lists; never a message, a phrase the user wrote, or who a layer is about (`describe::numbers`) — and asked for two or three plain sentences about register, saying nothing the numbers do not support. Up to 24 layers a run, the layer over everything first.
+
+The reading is kept with the profile (`qualitative_json.description`), with the provider and model that wrote it and a digest of the numbers it was written from. Measuring again keeps it. It is shown under the layer's numbers as the model's reading, never in place of them; one written from numbers that have since changed is shown as that. A draft is given the reading of the innermost measurable layer only while it is of that layer's numbers as they are now — never an outer layer's reading, which describes other numbers — and its evidence says so.
 
 `assemble` is a pure function of the context. The same context produces the same prompt, which is what makes `prompt_hash` meaningful and the prompt testable.
 

@@ -2,17 +2,22 @@
 
 Two providers, chosen at runtime:
 
-* `onnx:<id>` — a pinned sentence encoder from `models/manifests/*.json`,
-  downloaded on first need and SHA-256 verified. Not yet wired to a manifest;
-  the mechanism is kept because the download-and-verify discipline is the part
-  that is easy to get wrong later.
-* `lexical_v1` — the mandatory fallback: a hashed bag of word and character
-  n-grams, L2-normalized. It is not semantic and does not pretend to be. What
-  it is, is deterministic, dependency-free, fast over a million messages, and
-  a genuine improvement over exact-match retrieval.
+* A pinned sentence encoder named by a manifest in `models/manifests/*.json`
+  (all-MiniLM-L6-v2), run with ONNX Runtime. The app downloads its files when
+  the user asks, into the encoders folder, and they are used only while every
+  file matches the SHA-256 its manifest pins: checked again each time the
+  engine loads it, so a file changed or cut short on disk is never run. Text
+  is split into tokens by the encoder's own tokenizer, run through the model,
+  averaged over the tokens that are not padding, and L2-normalized.
+* `lexical_v1` — the fallback whenever there is no encoder to run: a hashed
+  bag of word and character n-grams, L2-normalized. It is not semantic and
+  does not pretend to be. What it is, is deterministic, dependency-free, fast
+  over a million messages, and a genuine improvement over exact-match
+  retrieval.
 
-`status()` states which is in use, so the app can say so rather than implying
-a semantic model where there is none.
+The engine never touches the network: it reads what the app downloaded.
+`status()` states which provider is in use and why, so the app can say so
+rather than implying a semantic model where there is none.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -28,6 +33,9 @@ from mimic_engine.text.tokens import char_ngrams, words
 
 LEXICAL_PROVIDER = "lexical_v1"
 LEXICAL_DIM = 256
+
+# How many texts go through the model at once.
+BATCH = 32
 
 
 class EncoderUnavailableError(Exception):
@@ -67,40 +75,193 @@ def cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(max(0.0, min(1.0, float(np.dot(a, b)) / (na * nb))))
 
 
+def mean_pool(hidden: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Average each text's token vectors over the tokens the mask keeps.
+
+    `hidden` is (texts, tokens, dims) and `mask` (texts, tokens), 1 for a real
+    token and 0 for padding, so a short text in a batch of long ones is not
+    diluted by the padding it was given.
+    """
+    weights = mask.astype(np.float32)[..., None]
+    summed = (hidden.astype(np.float32) * weights).sum(axis=1)
+    counts = np.clip(weights.sum(axis=1), 1e-9, None)
+    return summed / counts
+
+
+def l2_normalize(vectors: np.ndarray) -> np.ndarray:
+    """Each row scaled to length 1; a zero row stays zero."""
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    return np.where(norms > 0, vectors / np.where(norms > 0, norms, 1.0), vectors).astype(np.float32)
+
+
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def read_manifest(path: Path) -> dict[str, Any]:
+    """A manifest must pin every file by URL, size and digest; anything less is refused."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    for key in ("id", "name", "dims", "maxTokens", "files"):
+        if key not in data:
+            raise EncoderUnavailableError(f"manifest {Path(path).name} is missing {key!r}")
+    names = set()
+    for f in data["files"]:
+        for key in ("name", "url", "sha256", "bytes"):
+            if key not in f:
+                raise EncoderUnavailableError(f"manifest {Path(path).name} has a file without {key!r}")
+        if len(f["sha256"]) != 64:
+            raise EncoderUnavailableError(f"manifest {Path(path).name} pins {f['name']} with no SHA-256")
+        names.add(f["name"])
+    for role in ("model.onnx", "tokenizer.json"):
+        if role not in names:
+            raise EncoderUnavailableError(f"manifest {Path(path).name} has no {role}")
+    return data
+
+
+def installed_problem(manifest: dict[str, Any], folder: Path) -> str | None:
+    """Why the files in `folder` cannot be run as `manifest`'s encoder, or None
+    when every one is there, of the size and SHA-256 the manifest pins."""
+    for f in manifest["files"]:
+        path = folder / f["name"]
+        if not path.is_file():
+            return f"{f['name']} has not been downloaded"
+        if path.stat().st_size != int(f["bytes"]):
+            return f"{f['name']} is not the size its manifest pins"
+        if sha256_of(path) != f["sha256"].lower():
+            return f"{f['name']} does not match the SHA-256 its manifest pins"
+    return None
+
+
+class Session(Protocol):
+    def get_inputs(self) -> list[Any]: ...
+    def get_outputs(self) -> list[Any]: ...
+    def run(self, output_names: list[str] | None, feeds: dict[str, np.ndarray]) -> list[np.ndarray]: ...
+
+
+class OnnxEncoder:
+    """A sentence encoder run with ONNX Runtime.
+
+    `session` and `tokenizer` are passed in, so the pooling and normalizing
+    can be tested without the model; `load` builds the real ones.
+    """
+
+    def __init__(self, session: Session, tokenizer: Any, dims: int):
+        self.session = session
+        self.tokenizer = tokenizer
+        self.dims = dims
+        self._inputs = {i.name for i in session.get_inputs()}
+        outputs = [o.name for o in session.get_outputs()]
+        self._output = "last_hidden_state" if "last_hidden_state" in outputs else outputs[0]
+
+    @classmethod
+    def load(cls, folder: Path, dims: int, max_tokens: int) -> OnnxEncoder:
+        try:
+            import onnxruntime as ort
+            from tokenizers import Tokenizer
+        except Exception as e:  # pragma: no cover - depends on the build
+            raise EncoderUnavailableError(f"this build cannot run an encoder: {e}") from e
+        tokenizer = Tokenizer.from_file(str(folder / "tokenizer.json"))
+        tokenizer.enable_truncation(max_length=max_tokens)
+        pad = tokenizer.token_to_id("[PAD]")
+        tokenizer.enable_padding(pad_id=pad if pad is not None else 0, pad_token="[PAD]")
+        wanted = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        providers = [p for p in wanted if p in ort.get_available_providers()] or ["CPUExecutionProvider"]
+        session = ort.InferenceSession(str(folder / "model.onnx"), providers=providers)
+        return cls(session, tokenizer, dims)
+
+    def embed_batch(self, texts: list[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, self.dims), dtype=np.float32)
+        out = []
+        for start in range(0, len(texts), BATCH):
+            chunk = texts[start : start + BATCH]
+            encodings = self.tokenizer.encode_batch(chunk)
+            ids = np.array([e.ids for e in encodings], dtype=np.int64)
+            mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
+            feeds = {"input_ids": ids, "attention_mask": mask}
+            if "token_type_ids" in self._inputs:
+                feeds["token_type_ids"] = np.array([e.type_ids for e in encodings], dtype=np.int64)
+            hidden = self.session.run([self._output], feeds)[0]
+            vectors = l2_normalize(mean_pool(hidden, mask))
+            # Text with nothing in it says nothing: the zero vector, as the
+            # lexical fallback gives, not the model's reading of two markers.
+            for i, t in enumerate(chunk):
+                if not t.strip():
+                    vectors[i] = 0.0
+            out.append(vectors)
+        return np.vstack(out)
+
+
 class EncoderManager:
     """Resolves which encoder to use and produces embeddings with it."""
 
-    def __init__(self, encoders_dir: Path | None = None, manifests_dir: Path | None = None):
+    def __init__(self, encoders_dir: Path | None = None, manifests_dir: Path | None = None, *, load=None):
         self.encoders_dir = encoders_dir
         self.manifests_dir = manifests_dir
         self._provider = LEXICAL_PROVIDER
         self._dim = LEXICAL_DIM
+        self._encoder: OnnxEncoder | None = None
         self._reason = "no text encoder manifest is present; using the lexical fallback"
+        self._load = load or OnnxEncoder.load
+        self._resolve()
+
+    def manifests(self) -> list[tuple[Path, dict[str, Any] | None, str | None]]:
+        """Every manifest, read, or why it could not be."""
+        if not self.manifests_dir or not self.manifests_dir.is_dir():
+            return []
+        out = []
+        for path in sorted(self.manifests_dir.glob("*.json")):
+            try:
+                out.append((path, read_manifest(path), None))
+            except (EncoderUnavailableError, ValueError, OSError) as e:
+                out.append((path, None, str(e)))
+        return out
+
+    def _resolve(self) -> None:
+        found = [(p, m) for p, m, _ in self.manifests() if m is not None]
+        if not found:
+            return
+        reasons = []
+        for _path, manifest in found:
+            folder = (self.encoders_dir / manifest["id"]) if self.encoders_dir else None
+            problem = installed_problem(manifest, folder) if folder else "there is no encoders folder"
+            if problem:
+                reasons.append(f"{manifest['name']}: {problem}")
+                continue
+            try:
+                self._encoder = self._load(folder, int(manifest["dims"]), int(manifest["maxTokens"]))
+            except Exception as e:
+                reasons.append(f"{manifest['name']}: could not be loaded ({e})")
+                continue
+            self._provider = manifest["id"]
+            self._dim = int(manifest["dims"])
+            self._reason = f"{manifest['name']}, downloaded and verified, runs on this computer"
+            return
+        self._reason = "; ".join(reasons) + "; using the lexical fallback"
 
     def status(self) -> dict[str, Any]:
         return {
             "provider": self._provider,
             "dims": self._dim,
-            "semantic": self._provider != LEXICAL_PROVIDER,
+            "semantic": self._encoder is not None,
             "reason": self._reason,
-            "manifests": sorted(p.name for p in self.manifests_dir.glob("*.json"))
-            if self.manifests_dir and self.manifests_dir.is_dir()
-            else [],
+            "manifests": [p.name for p, _, _ in self.manifests()],
         }
 
     def embed(self, text: str) -> np.ndarray:
-        return lexical_embedding(text, self._dim)
+        return self.embed_batch([text])[0]
 
     def embed_batch(self, texts: list[str]) -> np.ndarray:
+        if self._encoder is not None:
+            return self._encoder.embed_batch(texts)
         if not texts:
             return np.zeros((0, self._dim), dtype=np.float32)
-        return np.vstack([self.embed(t) for t in texts])
+        return np.vstack([lexical_embedding(t, self._dim) for t in texts])
 
     @staticmethod
     def read_manifest(path: Path) -> dict[str, Any]:
-        """A manifest must pin a URL and a digest; anything less is refused."""
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-        for key in ("id", "url", "sha256", "dims"):
-            if key not in data:
-                raise EncoderUnavailableError(f"manifest {path.name} is missing {key!r}")
-        return data
+        return read_manifest(path)

@@ -43,14 +43,22 @@ export function useNativeEventBridge() {
             qk.system,
             qk.onboarding,
             qk.dashboard,
+            qk.encoder,
           ]) {
             qc.invalidateQueries({ queryKey: key });
           }
           const label = JOB_LABELS[ev.type] ?? ev.type;
-          // A mailbox is checked every few minutes; a toast each time would be
+          // A mailbox is checked every few minutes, and what came in is
+          // measured and read for meaning after; a toast each time would be
           // noise, and a failure is shown where it matters — on the home
-          // screen and against the mailbox under Your mail.
-          if (ev.type === JOB_KINDS.checkMailbox) return;
+          // screen and against the mailbox under Your mail, as out of date on
+          // How you write, and as unread under Settings.
+          const quiet: string[] = [
+            JOB_KINDS.checkMailbox,
+            JOB_KINDS.measureVoiceChanges,
+            JOB_KINDS.embedMessages,
+          ];
+          if (quiet.includes(ev.type)) return;
           if (ev.status === "completed") toast.success(`${label} finished`);
           else if (ev.status === "failed") toast.danger(`${label} failed`, ev.message ?? undefined);
           else toast.info(`${label} canceled`);

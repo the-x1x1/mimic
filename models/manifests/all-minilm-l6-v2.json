@@ -1,0 +1,24 @@
+{
+  "id": "all-minilm-l6-v2",
+  "name": "all-MiniLM-L6-v2",
+  "description": "A small English sentence encoder: 384 numbers for a message, close together for messages that mean much the same thing.",
+  "dims": 384,
+  "maxTokens": 256,
+  "license": "Apache-2.0",
+  "homepage": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2",
+  "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+  "files": [
+    {
+      "name": "model.onnx",
+      "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/onnx/model.onnx",
+      "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
+      "bytes": 90405214
+    },
+    {
+      "name": "tokenizer.json",
+      "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/tokenizer.json",
+      "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037",
+      "bytes": 466247
+    }
+  ]
+}

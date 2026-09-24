@@ -1,0 +1,20 @@
+[package]
+name = "mimic-keychain"
+description = "Mimic's sealing of saved credentials with a key kept outside the file: on macOS, in the user's login Keychain."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+rand.workspace = true
+
+# The key lives in the login Keychain: macOS only.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"

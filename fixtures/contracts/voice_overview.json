@@ -39,7 +39,8 @@
         ],
         "medianResponseSeconds": 239
       },
-      "stale": false
+      "stale": false,
+      "reading": null
     },
     {
       "layer": "channel",
@@ -70,7 +71,8 @@
         "topPhrases": [],
         "medianResponseSeconds": null
       },
-      "stale": false
+      "stale": false,
+      "reading": null
     },
     {
       "layer": "global",
@@ -105,11 +107,18 @@
         ],
         "medianResponseSeconds": 180
       },
-      "stale": false
+      "stale": false,
+      "reading": {
+        "text": "Short and lowercase, with no full stop at the end.",
+        "model": "llama3.2:3b",
+        "provider": "local",
+        "writtenAt": "2026-09-23T10:00:00.000Z",
+        "current": true
+      }
     },
     {
       "layer": "relationship",
-      "scopeKey": "16e5acaa-bcb6-4127-aaa6-ae00e7dbfe7e",
+      "scopeKey": "98b8f019-2afb-4a44-8ed0-a1fe6c9289e0",
       "label": "What you write to Ada Lovelace",
       "sampleSize": 20,
       "measurable": true,
@@ -140,7 +149,8 @@
         ],
         "medianResponseSeconds": 239
       },
-      "stale": false
+      "stale": false,
+      "reading": null
     },
     {
       "layer": "situational",
@@ -171,7 +181,8 @@
         "topPhrases": [],
         "medianResponseSeconds": null
       },
-      "stale": false
+      "stale": false,
+      "reading": null
     },
     {
       "layer": "situational",
@@ -202,11 +213,12 @@
         "topPhrases": [],
         "medianResponseSeconds": null
       },
-      "stale": false
+      "stale": false,
+      "reading": null
     }
   ],
   "peopleWithProfiles": 1,
   "stale": false,
-  "lastAnalyzedAt": "2026-09-23T21:01:56.675Z",
+  "lastAnalyzedAt": "2026-09-23T22:38:06.035Z",
   "messagesUntilMeasurable": 0
 }

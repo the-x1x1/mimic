@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/mimic-core", "apps/desktop/src-tauri"]
+members = ["crates/mimic-core", "crates/keychain", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.10.0-alpha.16"
+version = "0.10.0-alpha.17"
 edition = "2021"
 # 1.89: std::fs::File::try_lock, for the one-Mimic-at-a-time lock (instance.rs).
 rust-version = "1.89"
@@ -31,6 +31,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 tempfile = "3"
 mimic-core = { path = "crates/mimic-core" }
+mimic-keychain = { path = "crates/keychain" }
 
 [profile.release]
 codegen-units = 1

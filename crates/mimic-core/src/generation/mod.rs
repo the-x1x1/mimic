@@ -66,6 +66,12 @@ pub struct ComposeRequest {
     pub intent: Option<String>,
     pub situation_id: Option<String>,
     pub adjustment: Option<Adjustment>,
+    /// What is being answered, as a vector from the sentence encoder, when
+    /// there is one: past replies to messages close in meaning are then
+    /// found as well as ones sharing its words. Worked out by whoever asks
+    /// for the draft, from the engine; never sent by the screen.
+    #[serde(skip)]
+    pub meaning: Option<retrieval::QueryVector>,
 }
 
 /// Where the situation a draft is written for came from. The two are kept
@@ -178,6 +184,7 @@ pub fn build_context_holding_out(
     let effective = voice::effective_metrics(&voice);
 
     let incoming = req.incoming_message.as_deref().unwrap_or_default();
+    let meaning = req.meaning.as_ref();
     let anywhere = RetrievalFilter { exclude_conversations: held.conversations.clone(), ..Default::default() };
     let base = RetrievalFilter {
         participant_id: req.participant_id.clone(),
@@ -191,10 +198,10 @@ pub fn build_context_holding_out(
         // because how someone says no carries across more than what they say.
         let done = crate::situations::builtin(&sit.id).map(|b| b.done).unwrap_or("did this");
         let narrow = RetrievalFilter { situation_id: Some(sit.id.clone()), ..base.clone() };
-        let mut found = retrieval::retrieve(db, incoming, &narrow, EXAMPLES)?;
+        let mut found = retrieval::retrieve_by_meaning(db, incoming, meaning, &narrow, EXAMPLES)?;
         if found.len() < 2 {
             let wide = RetrievalFilter { situation_id: Some(sit.id.clone()), ..anywhere.clone() };
-            found.extend(retrieval::retrieve(db, incoming, &wide, 2)?);
+            found.extend(retrieval::retrieve_by_meaning(db, incoming, meaning, &wide, 2)?);
         }
         for mut e in found {
             if examples.len() < EXAMPLES && !examples.iter().any(|x| x.reply_message_id == e.reply_message_id) {
@@ -203,7 +210,7 @@ pub fn build_context_holding_out(
             }
         }
     }
-    for e in retrieval::retrieve(db, incoming, &base, EXAMPLES)? {
+    for e in retrieval::retrieve_by_meaning(db, incoming, meaning, &base, EXAMPLES)? {
         if examples.len() < EXAMPLES && !examples.iter().any(|x| x.reply_message_id == e.reply_message_id) {
             examples.push(e);
         }
@@ -211,7 +218,7 @@ pub fn build_context_holding_out(
     // With nothing written to this person on this channel, widen rather than
     // hand the model nothing: the global voice is still the user's voice.
     if examples.is_empty() {
-        examples = retrieval::retrieve(db, incoming, &anywhere, EXAMPLES)?;
+        examples = retrieval::retrieve_by_meaning(db, incoming, meaning, &anywhere, EXAMPLES)?;
     }
 
     let conversation_id = match (&req.conversation_id, &req.participant_id) {
@@ -266,7 +273,13 @@ pub fn build_context_holding_out(
         });
     }
     if !examples.is_empty() {
-        evidence.push(format!("{} past replies of yours, chosen by similarity", examples.len()));
+        // Said only of what was ranked that way: right after the encoder is
+        // downloaded, nothing has a vector yet.
+        let by = if examples.iter().any(|e| e.by_meaning) { "meaning and wording" } else { "similarity of wording" };
+        evidence.push(format!("{} past replies of yours, chosen by {by}", examples.len()));
+    }
+    if let Some(r) = reading(&voice) {
+        evidence.push(format!("Your numbers put in words by {} — a reading, not something you said", r.model));
     }
     let learned = match held.voice {
         Some(_) => Vec::new(),
@@ -315,6 +328,12 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         system.push_str(
             "There is not yet enough of this person's own writing to describe their style. Write plainly and briefly, and do not invent mannerisms.\n",
         );
+    }
+
+    if let Some(r) = reading(&ctx.voice).filter(|_| ctx.effective.measurable) {
+        system.push_str("In words (a reading of these measurements, not something they said): ");
+        system.push_str(&r.text);
+        system.push('\n');
     }
 
     if !ctx.learned.is_empty() {
@@ -494,6 +513,14 @@ fn describe(m: &VoiceMetrics) -> Vec<String> {
         ));
     }
     out
+}
+
+/// The reading in words of the innermost measurable layer, when it was
+/// written from the numbers that layer has now. An outer layer's reading is
+/// not borrowed: it describes other numbers than the ones the draft is
+/// measured by.
+fn reading(voice: &ResolvedVoice) -> Option<&voice::describe::Reading> {
+    voice.layers.iter().rev().find(|l| l.measurable).and_then(|l| l.reading.as_ref()).filter(|r| r.current)
 }
 
 /// A budget proportional to how long this person's messages actually are, so
@@ -798,6 +825,38 @@ mod tests {
         assert!(ctx.evidence.iter().any(|e| e.contains("No profile for this person yet")), "{:?}", ctx.evidence);
         assert!(!ctx.examples.is_empty(), "the global voice still has examples to offer");
         assert!(ctx.effective.measurable);
+    }
+
+    #[test]
+    fn a_reading_of_the_numbers_goes_in_only_while_it_is_of_the_numbers_used() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let req = request(&ada);
+        let ctx = build_context(&db, &req).unwrap();
+        assert!(!assemble(&ctx, &req).system.contains("In words"), "no reading was asked for");
+        let inner = ctx.voice.layers.iter().rev().find(|l| l.measurable).unwrap();
+        let d = voice::describe::Description {
+            text: "Short and warm.".into(),
+            provider: "p".into(),
+            model: "m".into(),
+            metrics_digest: voice::describe::metrics_digest(&inner.metrics),
+            written_at: "t".into(),
+        };
+        let layer = VoiceLayer::parse(&inner.layer).unwrap();
+        db.set_voice_description(layer, &inner.scope_key, crate::version::ANALYSIS_VERSION, &d).unwrap();
+        let ctx = build_context(&db, &req).unwrap();
+        let prompt = assemble(&ctx, &req).system;
+        assert!(
+            prompt.contains("In words (a reading of these measurements, not something they said): Short and warm."),
+            "{prompt}"
+        );
+        assert!(ctx.evidence.iter().any(|e| e.contains("put in words by m")), "{:?}", ctx.evidence);
+
+        // Written from other numbers, it is left out.
+        let older = voice::describe::Description { metrics_digest: "0000".into(), ..d };
+        db.set_voice_description(layer, &inner.scope_key, crate::version::ANALYSIS_VERSION, &older).unwrap();
+        let ctx = build_context(&db, &req).unwrap();
+        assert!(!assemble(&ctx, &req).system.contains("In words"));
+        assert!(!ctx.evidence.iter().any(|e| e.contains("put in words")));
     }
 
     /// A corpus where the user says no to Ada twenty-five times, in their own

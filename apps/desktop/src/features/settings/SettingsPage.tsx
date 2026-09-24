@@ -31,6 +31,7 @@ import { toast } from "@/state/toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/app/queryClient";
 import { DeleteEverythingDialog } from "./DeleteEverythingDialog";
+import { MeaningSection } from "./MeaningSection";
 import { ModelStep } from "@/features/onboarding/ModelStep";
 
 export function SettingsPage() {
@@ -43,6 +44,7 @@ export function SettingsPage() {
       <ProviderSection />
       <WaitingSection />
       <AssistSection />
+      <MeaningSection />
       <MailSection />
       <EngineSection />
       <PrivacySection />

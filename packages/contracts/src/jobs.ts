@@ -49,6 +49,11 @@ export const JOB_KINDS = {
   pullModel: "pull_model",
   checkMailbox: "check_mailbox",
   evaluateDrafts: "evaluate_drafts",
+  measureVoiceChanges: "measure_voice_changes",
+  readSituations: "read_situations",
+  downloadEncoder: "download_encoder",
+  embedMessages: "embed_messages",
+  describeVoice: "describe_voice",
 } as const;
 
 export const JOB_LABELS: Record<string, string> = {
@@ -58,4 +63,9 @@ export const JOB_LABELS: Record<string, string> = {
   pull_model: "Downloading the writing engine",
   check_mailbox: "Checking your mail",
   evaluate_drafts: "Measuring my drafts",
+  measure_voice_changes: "Measuring what changed in how you write",
+  read_situations: "Reading what your messages are doing",
+  download_encoder: "Downloading the encoder",
+  embed_messages: "Reading your messages for meaning",
+  describe_voice: "Putting how you write into words",
 };
