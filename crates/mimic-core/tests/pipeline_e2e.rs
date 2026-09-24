@@ -370,6 +370,18 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert!(page.messages.iter().any(|m| m.direction == "other" && m.author.is_some()));
     check_fixture("conversation_page.json", &serde_json::to_value(&page).unwrap());
 
+    // Every conversation with that person, not only the waiting one, each
+    // standing where the home screen puts it.
+    let person = bob.participant.as_ref().expect("the waiting message has a writer");
+    let theirs = db.conversations_with(&person.id, None, 20).unwrap();
+    let here = theirs.conversations.iter().find(|c| c.conversation_id == bob.conversation_id).unwrap();
+    assert_eq!(here.standing, mimic_core::db::Standing::Waiting);
+    assert_eq!(here.deciding_message_id.as_deref(), Some(bob.last_message_id.as_str()));
+    check_fixture("person_conversations.json", &serde_json::to_value(&theirs).unwrap());
+    let end = db.conversation_end(&bob.conversation_id, 20).unwrap();
+    assert_eq!(end.messages.len() as i64, bob.message_count, "the whole of it, from its end");
+    assert!(end.messages.iter().any(|m| m.id == bob.last_message_id));
+
     // Turning it on is what allows a model to see an incoming message the user
     // did not hand over itself.
     db.set_setting(mimic_core::assist::SETTING, &true).unwrap();

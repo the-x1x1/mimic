@@ -216,6 +216,77 @@ export const ThreadMark = z.enum(["no_reply_needed", "needs_reply"]);
 export type ThreadMark = z.infer<typeof ThreadMark>;
 
 /**
+ * Where a conversation stands, by the same reading as the home screen: the
+ * user wrote last, it is waiting, it was left off the list and why, or
+ * nothing in it could be told to be anyone's.
+ */
+export const Standing = z.enum([
+  "answered",
+  "waiting",
+  "automated",
+  "quiet",
+  "not_needed",
+  "undecided",
+]);
+export type Standing = z.infer<typeof Standing>;
+
+/** One conversation someone is in, and where it stands. */
+export const PersonConversation = z.object({
+  conversationId: z.string(),
+  subject: z.string().nullable(),
+  channel: z.string(),
+  isGroup: z.boolean(),
+  messageCount: z.number(),
+  lastMessageAt: z.string().nullable(),
+  /** The message that decides where it stands, which a mark is about. */
+  decidingMessageId: z.string().nullable(),
+  standing: Standing,
+  mark: ThreadMark.nullable(),
+});
+export type PersonConversation = z.infer<typeof PersonConversation>;
+
+/** A page of someone's conversations, most recently active first. */
+export const PersonConversations = z.object({
+  conversations: z.array(PersonConversation),
+  /** How many more there are after these. */
+  more: z.number(),
+  /** The waiting window they were judged against; null for any age. */
+  waitingWithinDays: z.number().nullable(),
+});
+export type PersonConversations = z.infer<typeof PersonConversations>;
+
+/** Where a conversation stands, as one line. */
+export function describeStanding(c: PersonConversation, withinDays: number | null): string {
+  switch (c.standing) {
+    case "answered":
+      return "You wrote last.";
+    case "waiting":
+      return c.mark === "needs_reply"
+        ? "On your list, because you said it needs a reply."
+        : "On your list: waiting on you.";
+    case "automated":
+      return "Not on your list: its last message looks automated.";
+    case "quiet":
+      return `Not on your list: the message it waits on is ${olderThan(withinDays)}.`;
+    case "not_needed":
+      return "Not on your list: you said it needs no reply.";
+    case "undecided":
+      return "I couldn't tell who wrote what in it, so it isn't on your list.";
+  }
+}
+
+/**
+ * Whether saying a conversation needs a reply would put it on the list: only
+ * one left off it, with a message to say it about.
+ */
+export function canPutOnList(c: PersonConversation): boolean {
+  return (
+    (c.standing === "automated" || c.standing === "quiet" || c.standing === "not_needed") &&
+    c.decidingMessageId !== null
+  );
+}
+
+/**
  * One row of the home screen: a conversation whose last message came from
  * someone else and was never answered, plus the draft Mimic has for it, if it
  * has one. `draft` is null until a draft actually exists — there is no

@@ -135,25 +135,66 @@ p {
 }
 .topbar__right {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) 0;
 }
-.topbar__settings {
-  min-height: 36px;
-  padding: 0 var(--space-4);
-  font: inherit;
+/* On a narrow window the bar gives up its tagline before anything that
+   leads somewhere, and wraps rather than cut the way into the drawer off. */
+@media (max-width: 1180px) {
+  .topbar__tag {
+    display: none;
+  }
+}
+.drawer:focus {
+  outline: none;
+}
+/* A link that leads somewhere is styled as a button, never wrapped round one:
+   a button inside a link is two controls where there is one. */
+a.ui-btn {
+  text-decoration: none;
+}
+/* The way into the drawer: a few words, not a sidebar. The same row sits at
+   the top of the drawer, where the one open is marked. */
+.topbar__nav,
+.drawer__nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.section-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--space-3);
   font-size: var(--text-body-sm);
   font-weight: 500;
-  color: var(--text-primary);
-  background: transparent;
-  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  text-decoration: none;
   border-radius: var(--radius-sm);
-  cursor: pointer;
 }
-.topbar__settings:hover {
+.section-link:hover {
   background: var(--surface-3);
+  color: var(--text-primary);
+}
+.section-link--on {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.drawer__head {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) 0;
 }
 .brand__mark {
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
   border-radius: 3px;
@@ -202,7 +243,6 @@ p {
 .drawer__close {
   flex-shrink: 0;
   align-self: flex-start;
-  margin: var(--space-4) var(--space-5) 0;
   min-height: 36px;
   padding: 0 var(--space-4);
   font: inherit;

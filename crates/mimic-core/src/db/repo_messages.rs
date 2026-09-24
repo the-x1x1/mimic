@@ -552,28 +552,14 @@ impl Db {
         let conn = self.conn();
         let at = position(&conn, conversation_id, from_message_id)?;
         let (side, order) = (toward.side(), toward.nearest_first());
-        let automated = super::repo_waiting::automated_of("m");
         let sql = format!(
-            "SELECT m.id, m.direction, CASE WHEN m.direction = 'self' THEN NULL ELSE p.display_name END,
-                    m.sent_at, m.body, {automated}, m.sequence_index
-             FROM messages m LEFT JOIN participants p ON p.id = m.participant_id
+            "SELECT {cols} FROM messages m LEFT JOIN participants p ON p.id = m.participant_id
              WHERE m.conversation_id = ?1 AND {side}
-             ORDER BY {order} LIMIT {limit}"
+             ORDER BY {order} LIMIT {limit}",
+            cols = thread_cols()
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![conversation_id, at, from_message_id], |r| {
-            Ok((
-                ThreadMessage {
-                    id: r.get(0)?,
-                    direction: r.get(1)?,
-                    author: r.get(2)?,
-                    sent_at: r.get(3)?,
-                    body: r.get(4)?,
-                    automated: r.get(5)?,
-                },
-                r.get::<_, i64>(6)?,
-            ))
-        })?;
+        let rows = stmt.query_map(params![conversation_id, at, from_message_id], map_thread)?;
         let mut page: Vec<(ThreadMessage, i64)> = rows.collect::<Result<_, _>>()?;
         if toward == Toward::Earlier {
             page.reverse();
@@ -585,6 +571,40 @@ impl Db {
         let more = match far {
             Some((m, at)) => count_side(&conn, conversation_id, *at, &m.id, toward)?,
             None => 0,
+        };
+        Ok(ConversationPage { messages: page.into_iter().map(|(m, _)| m).collect(), more })
+    }
+
+    /// The last `limit` messages of a conversation, oldest first, and how
+    /// many come before them: where reading a whole conversation starts.
+    /// Earlier pages are `conversation_page` from the first of these, toward
+    /// the start. A conversation that is not there is `NotFound`.
+    pub fn conversation_end(&self, conversation_id: &str, limit: usize) -> DbResult<ConversationPage> {
+        let conn = self.conn();
+        let exists: bool =
+            conn.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1)", [conversation_id], |r| {
+                r.get(0)
+            })?;
+        if !exists {
+            return Err(DbError::NotFound(format!("conversation {conversation_id}")));
+        }
+        let sql = format!(
+            "SELECT {cols} FROM messages m LEFT JOIN participants p ON p.id = m.participant_id
+             WHERE m.conversation_id = ?1
+             ORDER BY m.sequence_index DESC, m.id DESC LIMIT {limit}",
+            cols = thread_cols()
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut page: Vec<(ThreadMessage, i64)> =
+            stmt.query_map([conversation_id], map_thread)?.collect::<Result<_, _>>()?;
+        page.reverse();
+        let more = match page.first() {
+            Some((m, at)) => count_side(&conn, conversation_id, *at, &m.id, Toward::Earlier)?,
+            None => {
+                conn.query_row("SELECT COUNT(*) FROM messages WHERE conversation_id = ?1", [conversation_id], |r| {
+                    r.get(0)
+                })?
+            }
         };
         Ok(ConversationPage { messages: page.into_iter().map(|(m, _)| m).collect(), more })
     }
@@ -728,6 +748,31 @@ pub(crate) fn refresh_conversation_stats(conn: &rusqlite::Connection, conversati
         [conversation_id],
     )?;
     Ok(())
+}
+
+/// The columns `map_thread` reads, from `messages m` joined to its writer as
+/// `participants p`: never a name for the user's own message.
+fn thread_cols() -> String {
+    let automated = super::repo_waiting::automated_of("m");
+    format!(
+        "m.id, m.direction, CASE WHEN m.direction = 'self' THEN NULL ELSE p.display_name END,
+         m.sent_at, m.body, {automated}, m.sequence_index"
+    )
+}
+
+/// A message as the screen shows it, and its position.
+fn map_thread(r: &Row<'_>) -> rusqlite::Result<(ThreadMessage, i64)> {
+    Ok((
+        ThreadMessage {
+            id: r.get(0)?,
+            direction: r.get(1)?,
+            author: r.get(2)?,
+            sent_at: r.get(3)?,
+            body: r.get(4)?,
+            automated: r.get(5)?,
+        },
+        r.get::<_, i64>(6)?,
+    ))
 }
 
 /// Where a message sits in its conversation; not found when it is not one

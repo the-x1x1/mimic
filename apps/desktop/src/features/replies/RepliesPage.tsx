@@ -17,7 +17,6 @@ import {
   describeMailChecking,
   describeSituation,
   describeWaiting,
-  writerOf,
 } from "@mimic/contracts";
 import { useDashboard, useMarkThread, useStartAssistDrafts } from "@/hooks/useDashboard";
 import { useGenerateDraft, useResolveDraft } from "@/hooks/useCompose";
@@ -27,6 +26,7 @@ import { toast } from "@/state/toast";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { SentFolderNotice } from "@/features/identity/AddAddressForm";
+import { ThreadMessages } from "./ThreadMessages";
 
 /**
  * The one screen: who is waiting, what they said, and what Mimic would say
@@ -285,8 +285,8 @@ function NothingYet({ data }: { data: Dashboard }) {
         <h2 className="note__title">I couldn&rsquo;t read your mail.</h2>
         <p className="note__body">{describeMailChecking(data)}</p>
         <div className="note__actions">
-          <Link to="/sources">
-            <Button variant="primary">See your mail</Button>
+          <Link to="/sources" className="ui-btn ui-btn--primary ui-btn--md">
+            See your mail
           </Link>
         </div>
       </section>
@@ -312,8 +312,8 @@ function NothingYet({ data }: { data: Dashboard }) {
         leaves this computer, and nothing arrives on its own &mdash; I only read what you hand me.
       </p>
       <div className="note__actions">
-        <Link to="/sources">
-          <Button variant="primary">Add your mail</Button>
+        <Link to="/sources" className="ui-btn ui-btn--primary ui-btn--md">
+          Add your mail
         </Link>
         <Link to="/settings" className="muted">
           Finish setting up
@@ -339,8 +339,8 @@ function CaughtUp({ data }: { data: Dashboard }) {
             : "Bring in newer mail and I'll have replies ready for anything new."}
       </p>
       <div className="note__actions">
-        <Link to="/sources">
-          <Button>Bring in new mail</Button>
+        <Link to="/sources" className="ui-btn ui-btn--secondary ui-btn--md">
+          Bring in new mail
         </Link>
         <Link to="/write" className="muted">
           Write something new
@@ -633,32 +633,7 @@ export function RestOfThread({
       {pages.isError ? <InlineError>{pages.error.message}</InlineError> : null}
       {pages.isPending ? <p className="muted small">Reading it back…</p> : null}
       {earlier ? further : null}
-      {messages.length > 0 ? (
-        <ol className={earlier ? "thread__history" : "thread__history thread__history--later"}>
-          {messages.map((m) => (
-            <li key={m.id} className="thread__history-item">
-              <div
-                className={
-                  m.direction === "self" ? "letter-label letter-label--mine" : "letter-label"
-                }
-              >
-                {writerOf(m)}
-                {m.sentAt ? <span className="muted"> · {formatRelative(m.sentAt)}</span> : null}
-              </div>
-              <p
-                className={m.direction === "self" ? "letter letter--mine" : "letter letter--theirs"}
-              >
-                {m.body}
-              </p>
-              {m.automated !== null ? (
-                <p className="muted small">
-                  It looks automated to me: {describeAutomated(m.automated)}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      ) : null}
+      {messages.length > 0 ? <ThreadMessages messages={messages} later={!earlier} /> : null}
       {earlier ? null : further}
     </div>
   );

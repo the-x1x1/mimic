@@ -30,6 +30,37 @@ pub async fn get_conversation_page(
     Ok(state.db.conversation_page(&conversation_id, &from_message_id, toward, limit)?)
 }
 
+/// The last messages of a conversation, oldest first: where reading any
+/// conversation, not only a waiting one, starts. Earlier pages are
+/// `get_conversation_page` from the first of these.
+#[tauri::command]
+pub async fn get_conversation_end(
+    state: State<'_, SharedState>,
+    conversation_id: String,
+    limit: Option<usize>,
+) -> CommandResult<mimic_core::db::ConversationPage> {
+    Ok(state.db.conversation_end(&conversation_id, limit.unwrap_or(20).clamp(1, 200))?)
+}
+
+/// Every conversation someone is in, with where each stands by the same
+/// reading as the home screen: a page at a time, most recently active first,
+/// read on from the last one shown (`before_at`, `before_id`).
+#[tauri::command]
+pub async fn list_person_conversations(
+    state: State<'_, SharedState>,
+    participant_id: String,
+    before_at: Option<String>,
+    before_id: Option<String>,
+    limit: Option<usize>,
+) -> CommandResult<mimic_core::db::PersonConversations> {
+    let before = match (&before_at, &before_id) {
+        (Some(at), Some(id)) => Some((at.as_str(), id.as_str())),
+        (None, None) => None,
+        _ => return Err(CommandError::new("invalid", "Where to read on from needs both a time and an id.")),
+    };
+    Ok(state.db.conversations_with(&participant_id, before, limit.unwrap_or(20).clamp(1, 100))?)
+}
+
 /// Say whether a thread needs a reply: `no_reply_needed` takes it off the
 /// list, `needs_reply` keeps one Mimic read as automated on it, and no mark
 /// takes back whatever was said. The mark is about `message_id`, the message
