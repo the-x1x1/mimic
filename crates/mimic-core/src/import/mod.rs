@@ -223,6 +223,17 @@ impl ImportState<'_> {
         // copies would count the user's own writing twice.
         let elsewhere =
             if is_email { self.db.email_ids_in_other_sources(&self.source_id, &ids)? } else { HashSet::new() };
+        // What this source has stored already — an earlier import of the same
+        // file, an earlier check of the same mailbox — is known before anyone
+        // is attributed for it: a copy whose author reads differently this
+        // time (a new name, another address) makes up nobody.
+        let already = self.db.ids_in_source(&self.source_id, &ids)?;
+        // A conversation already here that is not joined by Message-ID — a
+        // later export of the same chat — gets its new messages after the
+        // ones it has: numbered from zero, they would sit among the old ones,
+        // and the wrong message would decide the thread.
+        let after = if joined.is_none() { self.db.last_position(&conversation_id)? } else { None };
+        let first = after.map_or(0, |last| last + 1);
 
         let mut batch: Vec<NewMessage> = Vec::with_capacity(convo.messages.len().min(BATCH));
         let mut counts = ImportCounts::default();
@@ -231,7 +242,10 @@ impl ImportState<'_> {
             // Kept once: a copy another source has, or a second copy here —
             // the same message read from two folders, where the connector
             // puts the copy to keep first. Nobody is made up for the other.
-            if elsewhere.contains(&raw.external_id) || !seen.insert(raw.external_id.as_str()) {
+            if elsewhere.contains(&raw.external_id)
+                || already.contains(&raw.external_id)
+                || !seen.insert(raw.external_id.as_str())
+            {
                 counts.duplicates += 1;
                 continue;
             }
@@ -252,7 +266,7 @@ impl ImportState<'_> {
                 direction: direction.as_str().to_string(),
                 channel: channel.clone(),
                 sent_at: raw.sent_at.clone(),
-                sequence_index: i as i64,
+                sequence_index: first + i as i64,
                 body: raw.body.clone(),
                 reply_to_external_id: None,
                 metadata: raw.metadata.clone(),
@@ -270,6 +284,12 @@ impl ImportState<'_> {
             // already had some; put it back in time order, because "who spoke
             // last" is read from that order. A re-import that added nothing
             // leaves the order alone.
+            self.db.resequence_by_time(&conversation_id)?;
+        } else if after.is_some() && counts.inserted > 0 && self.db.every_message_timed(&conversation_id)? {
+            // New messages went after the old; when every message says when
+            // it was sent in a form that reads as a time, time decides
+            // instead. Otherwise the order given stands: a message with no
+            // time would go first, and a time read as text can be wrong.
             self.db.resequence_by_time(&conversation_id)?;
         } else if joined.is_none() {
             self.db.link_replies(&conversation_id)?;
@@ -466,6 +486,109 @@ mod tests {
         assert_eq!(second.participants_created, 0);
         assert_eq!(db.get_source(&source_id).unwrap().unwrap().message_count, 6);
         assert_eq!(db.list_participants(10).unwrap().len(), 2);
+    }
+
+    /// The order a conversation's messages are in, by position.
+    fn order(db: &Db, conversation: &str) -> Vec<String> {
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.external_id FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                 WHERE c.external_id = ?1 ORDER BY m.sequence_index, m.id",
+            )
+            .unwrap();
+        let mut ids = Vec::new();
+        for id in stmt.query_map([conversation], |r| r.get::<_, String>(0)).unwrap() {
+            ids.push(id.unwrap());
+        }
+        ids
+    }
+
+    #[test]
+    fn a_later_export_goes_after_what_was_there_and_the_newest_message_decides() {
+        let (dir, db, source_id) = setup();
+        // Fixed dates: open the waiting window to any age.
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
+        run(&db, &source_id).unwrap();
+        assert!(db.threads_awaiting_reply(10).unwrap().iter().all(|t| t.last_message != "numbers?"), "answered");
+
+        // A later export of the same chats, holding only what is new: Bob
+        // writes again, and someone adds to the lunch thread with no date.
+        std::fs::write(
+            dir.path().join("export.json"),
+            r#"{ "channel": "chat", "conversations": [
+              { "id": "t2", "messages": [
+                { "id": "m7", "sentAt": "2026-02-05T10:00:00Z", "from": {"handle":"@bob"}, "body": "and the totals?" } ]},
+              { "id": "t1", "messages": [
+                { "id": "m8", "from": {"name":"Ada","handle":"@ada"}, "body": "one more thing" } ]}
+            ]}"#,
+        )
+        .unwrap();
+        let s = run(&db, &source_id).unwrap();
+        assert_eq!((s.inserted, s.duplicates), (2, 0));
+        assert_eq!(order(&db, "t2"), ["m5", "m6", "m7"], "after what was there, and in time order");
+        assert_eq!(order(&db, "t1"), ["m1", "m2", "m3", "m4", "m8"], "undated: after what was there, as given");
+        let waiting: Vec<String> = db.threads_awaiting_reply(10).unwrap().into_iter().map(|t| t.last_message).collect();
+        assert!(waiting.contains(&"and the totals?".to_string()), "Bob's new question decides his thread: {waiting:?}");
+        assert!(waiting.contains(&"one more thing".to_string()), "{waiting:?}");
+    }
+
+    #[test]
+    fn times_are_read_as_times_and_times_that_cannot_be_read_leave_the_order_given() {
+        let (dir, db, source_id) = setup();
+        let path = dir.path().join("export.json");
+        // t3's times are a person's dates, not ones a clock can read; t4's
+        // are real times with different offsets, where text order is wrong:
+        // 10:00+01:00 is 09:00Z, before 09:30Z.
+        std::fs::write(
+            &path,
+            r#"{ "channel": "chat", "conversations": [
+              { "id": "t3", "messages": [
+                { "id": "a1", "sentAt": "03/02/2026 09:14", "from": {"handle":"@ada"}, "body": "lunch?" },
+                { "id": "a2", "sentAt": "03/02/2026 10:02", "from": {"handle":"@c"}, "body": "yes" } ]},
+              { "id": "t4", "messages": [
+                { "id": "b1", "sentAt": "2026-02-03T10:00:00+01:00", "from": {"handle":"@bob"}, "body": "call?" },
+                { "id": "b2", "sentAt": "2026-02-03T09:30:00Z", "from": {"handle":"@c"}, "body": "sure" } ]}
+            ]}"#,
+        )
+        .unwrap();
+        run(&db, &source_id).unwrap();
+        std::fs::write(
+            &path,
+            r#"{ "channel": "chat", "conversations": [
+              { "id": "t3", "messages": [
+                { "id": "a3", "sentAt": "03/02/2026 10:05", "from": {"handle":"@ada"}, "body": "where?" } ]},
+              { "id": "t4", "messages": [
+                { "id": "b3", "sentAt": "2026-02-03T09:45:00Z", "from": {"handle":"@bob"}, "body": "now?" } ]}
+            ]}"#,
+        )
+        .unwrap();
+        run(&db, &source_id).unwrap();
+        assert_eq!(order(&db, "t3"), ["a1", "a2", "a3"], "kept as given, the new one after");
+        assert_eq!(order(&db, "t4"), ["b1", "b2", "b3"], "in time order, read as times");
+    }
+
+    #[test]
+    fn a_message_read_again_with_its_author_written_differently_makes_up_nobody() {
+        let (dir, db, source_id) = setup();
+        run(&db, &source_id).unwrap();
+        let links = |db: &Db| -> i64 {
+            db.conn().query_row("SELECT COUNT(*) FROM conversation_participants", [], |r| r.get(0)).unwrap()
+        };
+        let before = links(&db);
+        // The same message in a later export, its author now shown by a new handle.
+        std::fs::write(
+            dir.path().join("export.json"),
+            r#"{ "channel": "chat", "conversations": [
+              { "id": "t1", "messages": [
+                { "id": "m1", "sentAt": "2026-02-03T09:14:00Z", "from": {"name":"Ada (new phone)","handle":"@ada.new"}, "body": "Does Tuesday work?" } ]}
+            ]}"#,
+        )
+        .unwrap();
+        let s = run(&db, &source_id).unwrap();
+        assert_eq!((s.inserted, s.duplicates, s.participants_created), (0, 1, 0));
+        assert_eq!(db.list_participants(10).unwrap().len(), 2, "Ada and Bob, and nobody new");
+        assert_eq!(links(&db), before);
     }
 
     #[test]

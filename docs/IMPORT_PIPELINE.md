@@ -118,7 +118,9 @@ Resolution runs through an in-memory cache keyed on the author's lowest identifi
 
 ## Batching, dedupe and cancellation
 
-Messages are inserted 500 at a time inside a transaction with `INSERT OR IGNORE`. Duplicates — same `(source_id, external_id)` — are counted and skipped. Empty bodies are counted and dropped.
+Messages are inserted 500 at a time inside a transaction with `INSERT OR IGNORE`. Duplicates — same `(source_id, external_id)` — are counted and skipped, and they are recognised before anyone is attributed for them (`Db::ids_in_source`, and a second copy within one conversation), so a message read again with its sender written differently — a new name, another address, a list's copy — adds nobody to the conversation. Empty bodies are counted and dropped.
+
+A conversation already here that is not joined by Message-ID — a later export of the same chat — gets its new messages after the ones it has (`Db::last_position`), in the order the export gives them; when every message in it has a time `julianday` can read, time then decides (`Db::every_message_timed`, `Db::resequence_by_time`, which orders by `julianday`, not by the text, so offsets compare as times). Before 0.10.0-alpha.13 they were numbered from zero, sat among the old ones, and the wrong message could decide the thread. A conversation with a message whose time is missing or not a time a clock reads ("03/02/2026 09:14", as a chat export may write it) keeps the order given, since sorting would put that message first or compare text. Two limits: in such a conversation, a message a full re-export adds in the middle goes at the end; and a `mimic_json` message without an `id` is known by its position (`t1#3`), so a later export that adds one earlier in the conversation shifts those ids.
 
 After a conversation's messages are in: `link_replies` resolves reply pointers by sequence and derives latency, then `refresh_conversation_stats` recomputes the counters from the rows.
 
