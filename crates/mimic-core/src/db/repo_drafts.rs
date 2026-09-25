@@ -478,9 +478,26 @@ mod tests {
         let first = db.create_draft(&draft("Sure, I'll send the deck tomorrow.")).unwrap();
         let shorter = beside(&db, &first, "Tomorrow!");
         let longer = beside(&db, &first, "Sure — I'll send the deck first thing tomorrow, with the notes.");
+        // Do not depend on two inserts taking more than the clock's millisecond precision.
+        db.conn().execute(
+            "UPDATE drafts SET created_at = CASE WHEN id = ?1 THEN '2026-09-24T00:00:00.000Z' ELSE '2026-09-24T00:00:01.000Z' END WHERE id IN (?1, ?2)",
+            params![shorter.id, longer.id],
+        ).unwrap();
         assert_eq!(db.pending_drafts(10).unwrap().len(), 1, "a set is one draft waiting");
         let offered: Vec<String> = db.alternatives_of(&first.id).unwrap().into_iter().map(|d| d.id).collect();
         assert_eq!(offered, [shorter.id.clone(), longer.id.clone()], "oldest first");
+
+        // Equal timestamps have a stable ID tie-break, not insertion order.
+        db.conn()
+            .execute(
+                "UPDATE drafts SET created_at = '2026-09-24T00:00:00.000Z' WHERE id IN (?1, ?2)",
+                params![shorter.id, longer.id],
+            )
+            .unwrap();
+        let mut tied = vec![shorter.id.clone(), longer.id.clone()];
+        tied.sort();
+        let offered: Vec<String> = db.alternatives_of(&first.id).unwrap().into_iter().map(|d| d.id).collect();
+        assert_eq!(offered, tied, "equal timestamps are ordered by ID");
 
         db.resolve_draft(&shorter.id, "sent_unedited", Some("Tomorrow!")).unwrap();
         assert_eq!(outcome(&db, &shorter).as_deref(), Some("sent_unedited"));
