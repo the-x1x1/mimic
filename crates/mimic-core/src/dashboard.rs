@@ -279,7 +279,10 @@ mod tests {
             Some(first.id.clone()),
             "the first, never another way of it"
         );
-        assert_eq!(ids(&c.alternatives), [shorter.id.clone(), longer.id.clone()]);
+        // Match chronological order, including the stable tie-break when the clock ties.
+        let mut expected = vec![shorter.clone(), longer.clone()];
+        expected.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        assert_eq!(ids(&c.alternatives), ids(&expected));
         assert_eq!(dashboard(&db, 10, false, false).unwrap().pending_drafts.len(), 1);
 
         // One other way put aside: the rest are still on offer, and the
