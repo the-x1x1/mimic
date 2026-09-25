@@ -45,14 +45,14 @@ export function SourcesPage() {
 
       {sources.isSuccess && sources.data.length === 0 ? (
         <EmptyState
-          title="You haven't given me any mail yet"
-          body="Connect your mailbox and I'll read your inbox and sent mail, or export your mail and point me at the file. Only bring in conversations you own or have permission to process."
+          title="Start with messages you already have"
+          body="Import a WhatsApp chat, Discord data package, email export (.mbox), or Mimic JSON file. No account connection is required. Only import conversations you own or have permission to process."
           primary={
             <div className="row gap-2">
-              <Button variant="primary" onClick={() => setConnecting(true)}>
-                Connect a mailbox
+              <Button variant="primary" onClick={() => setAdding(true)}>
+                Add a file
               </Button>
-              <Button onClick={() => setAdding(true)}>Add a file</Button>
+              <Button onClick={() => setConnecting(true)}>Connect a mailbox (optional)</Button>
             </div>
           }
         />

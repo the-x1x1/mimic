@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Card, Field, ProgressBar } from "@mimic/ui";
+import { Button, Card, Field, InlineError, ProgressBar } from "@mimic/ui";
 import {
   JOB_KINDS,
   JOB_LABELS,
   type OnboardingState,
   canFinishOnboarding,
-  canLeaveOnboarding,
   importStepState,
   nextOnboardingStep,
 } from "@mimic/contracts";
@@ -41,69 +40,116 @@ export function OnboardingFlow() {
   const qc = useQueryClient();
   const derived = onboarding.data ? nextOnboardingStep(onboarding.data) : null;
 
-  // Adding one address should not throw the user forward to the next step
-  // while they are still typing the second one, so the identity step is left
-  // behind on a click rather than on a fact — but only for a user who started
-  // there in this session.
+  // Leave the name step explicitly. The backend's hasIdentity means it has
+  // identifiers, which chat imports can establish later from their preview.
   const startedAtIdentity = useRef<boolean | null>(null);
   const [identityConfirmed, setIdentityConfirmed] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (startedAtIdentity.current === null && derived !== null) {
       startedAtIdentity.current = derived === "identity";
     }
   }, [derived]);
   const holdIdentity = startedAtIdentity.current === true && !identityConfirmed;
-  const step = holdIdentity && derived !== null ? "identity" : derived;
+  const step =
+    holdIdentity && derived !== null
+      ? "identity"
+      : derived === "identity" && identityConfirmed
+        ? onboarding.data?.hasSource
+          ? "import"
+          : "source"
+        : derived;
+  const welcome = onboarding.data && !onboarding.data.hasSource && !started;
 
   const finish = async () => {
-    await ipc.completeOnboarding();
-    qc.invalidateQueries({ queryKey: qk.onboarding });
+    setLeaving(true);
+    setError(null);
+    try {
+      await ipc.completeOnboarding();
+      await qc.invalidateQueries({ queryKey: qk.onboarding });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLeaving(false);
+    }
   };
 
   return (
     <div className="onboarding">
       <div className="onboarding__inner">
-        <h1 className="onboarding__title">Let&rsquo;s get you set up.</h1>
+        <h1 className="onboarding__title">Welcome to Mimic.</h1>
         <p className="onboarding__lede">
-          I learn how you write by reading mail you&rsquo;ve already sent, and then I draft your
-          replies for you to check and send. Everything stays on this computer.
+          Bring your own messages. Mimic learns how you write and helps draft replies for you to
+          review and send. Importing and measuring your writing happen on this computer.
         </p>
         <p className="muted small">
-          Only bring in mail that is yours, or that you have permission to read.
+          No email connection required. Only import conversations you own or have permission to
+          read.
         </p>
-
-        {step === "identity" ? (
-          <IdentityStep onContinue={() => setIdentityConfirmed(true)} />
-        ) : null}
-        {step === "source" ? <SourceStep /> : null}
-        {step === "import" ? <ImportStep /> : null}
-        {step === "analyze" ? <AnalyzeStep onFinish={finish} /> : null}
-        {step === null && onboarding.data ? (
-          <Card title="That&rsquo;s everything">
+        {error ? <InlineError>{error}</InlineError> : null}
+        {onboarding.isError ? <InlineError>{onboarding.error.message}</InlineError> : null}
+        {onboarding.isPending ? <p className="muted">Loading your setup…</p> : null}
+        {welcome ? (
+          <Card title="Start with what you already have">
             <p>
-              I&rsquo;ve read your mail and worked out how you write. Let&rsquo;s see who&rsquo;s
-              waiting on you.
+              Import a WhatsApp chat, a Discord data package, an email export (.mbox), or a Mimic
+              JSON file. You can start with one conversation and add more later.
             </p>
-            <Button variant="primary" onClick={finish}>
-              Take me in
-            </Button>
+            <p className="muted small">
+              Mimic learns your writing style from messages you wrote. It does not yet import PDFs,
+              documents, or general reference knowledge.
+            </p>
+            <div className="row gap-2">
+              <Button variant="primary" onClick={() => setStarted(true)}>
+                Import my messages
+              </Button>
+              <Button disabled={leaving} onClick={finish}>
+                Explore first
+              </Button>
+            </div>
+            <p className="muted small">
+              Exploring opens an empty workspace. Add messages and set up a writing model whenever
+              you are ready in Settings.
+            </p>
           </Card>
-        ) : null}
+        ) : (
+          <>
+            {step === "identity" ? (
+              <IdentityStep onContinue={() => setIdentityConfirmed(true)} />
+            ) : null}
+            {step === "source" ? <SourceStep /> : null}
+            {step === "import" ? <ImportStep /> : null}
+            {step === "analyze" ? <AnalyzeStep onFinish={finish} /> : null}
+            {step === null && onboarding.data ? (
+              <Card title="That&rsquo;s everything">
+                <p>
+                  I&rsquo;ve read your mail and worked out how you write. Let&rsquo;s see
+                  who&rsquo;s waiting on you.
+                </p>
+                <Button variant="primary" onClick={finish}>
+                  Take me in
+                </Button>
+              </Card>
+            ) : null}
 
-        <Card title="The part that does the writing">
-          <p className="neutral">
-            This runs on your computer rather than someone else&rsquo;s, which is why your mail
-            never leaves it. You only do this once, and you can get on with the steps above while it
-            happens.
-          </p>
-          <ModelStep />
-        </Card>
+            <Card title="The part that does the writing">
+              <p className="neutral">
+                Set up a local writing model when you are ready to draft. Importing messages and
+                measuring your writing do not need this download. You can also choose a provider in
+                Settings; a hosted provider receives the context used for drafting.
+              </p>
+              <ModelStep />
+            </Card>
 
-        <ActiveWork />
+            <ActiveWork />
 
-        {onboarding.data && step !== null ? (
-          <LeaveEarly state={onboarding.data} onLeave={finish} />
-        ) : null}
+            {onboarding.data && step !== null ? (
+              <LeaveEarly state={onboarding.data} onLeave={finish} />
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );
@@ -127,7 +173,6 @@ function LeaveEarly({ state, onLeave }: { state: OnboardingState; onLeave: () =>
       </p>
     );
   }
-  if (!canLeaveOnboarding(state)) return null;
   return (
     <p className="muted small">
       <Button variant="ghost" size="sm" onClick={onLeave}>
@@ -166,11 +211,10 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
   const identifiers = identity.data?.identifiers ?? [];
 
   return (
-    <Card title="First, your email address">
+    <Card title="What should Mimic call you?">
       <p className="neutral">
-        This is how I tell the mail you wrote apart from the mail you were sent &mdash; I only learn
-        from yours. Add every address you have written from: until you do, what you sent from a
-        missing one reads to me like someone else&rsquo;s.
+        A name is enough to start. When you choose an export, you can tell Mimic which messages are
+        yours. You do not need to connect an account.
       </p>
       {!identity.data ? (
         <>
@@ -179,23 +223,23 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
           </Field>
           <Button
             variant="primary"
-            disabled={!name.trim()}
-            onClick={() => setIdentity.mutate(name)}
+            disabled={!name.trim() || setIdentity.isPending}
+            onClick={() => setIdentity.mutate(name.trim(), { onSuccess: onContinue })}
           >
             Continue
           </Button>
         </>
       ) : (
         <>
-          <AddAddressForm primary autoFocus />
+          <p>Welcome, {identity.data.displayName}.</p>
           {identifiers.length > 0 ? (
             <p className="muted small">
               Added: {identifiers.map((i) => i.value).join(", ")}. You can add more later under
               Settings.
             </p>
           ) : null}
-          <Button variant="primary" disabled={identifiers.length === 0} onClick={onContinue}>
-            {identifiers.length === 0 ? "Add an address to continue" : "Continue"}
+          <Button variant="primary" onClick={onContinue}>
+            Continue to import
           </Button>
         </>
       )}
@@ -206,17 +250,17 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
 function SourceStep() {
   const [adding, setAdding] = useState(false);
   return (
-    <Card title="Now, your old mail">
+    <Card title="Choose messages to learn from">
       <p className="neutral">
-        Save a copy of your mailbox and point me at the file. Gmail, Outlook and Thunderbird can all
-        do this. I read it here and nothing is uploaded.
+        Start with a WhatsApp chat, Discord data package, email export (.mbox), or Mimic JSON file.
+        You will see what is in the file before importing it. Nothing is uploaded.
       </p>
       <Button variant="primary" onClick={() => setAdding(true)}>
         Choose the file
       </Button>
       <p className="muted small">
-        Not sure how? In Gmail it&rsquo;s Google Takeout; in Thunderbird, right-click the folder and
-        choose Export. Either gives you one file.
+        Choose a format to see what file it needs. Email exports need your sending address; chat
+        exports let you identify yourself from the writers in the file.
       </p>
       {adding ? <AddSourceDialog onClose={() => setAdding(false)} /> : null}
     </Card>
