@@ -4,6 +4,10 @@ The truth table. Every row has a status and evidence naming the test, fixture or
 
 Statuses: `IMPLEMENTED` Â· `PARTIAL` Â· `PLANNED` Â· `UNSUPPORTED`
 
+## CI regression fix
+
+The draft-alternative ordering regression uses fixed timestamps and checks equal timestamps against the ID tie-break. This removes a millisecond-clock dependency from `using_any_way_of_saying_it_passes_the_others_over_rather_than_turning_them_down`; production ordering is unchanged.
+
 ## First-run improvements (unreleased)
 
 The welcome screen offers message import or an empty workspace before asking for identity details. Import setup accepts a name without an email address; the file preview offers address entry for mail and writer selection for supported chat exports. The import dialog also asks for a name when opened after exploring without setup. WhatsApp, Discord, mbox, and Mimic JSON are described explicitly; arbitrary document knowledge import is not supported. Model setup is shown after choosing to import. Completion errors can be retried. Evidence: `Welcome.test.tsx` and the existing source/import dialog suites. Native installer behavior has not been manually exercised for this change.
