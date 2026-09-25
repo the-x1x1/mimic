@@ -3,9 +3,10 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Button, Field, InlineError } from "@mimic/ui";
 import { CHANNEL_LABELS, Channel, yoursAs, type ValidationReport } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
-import { useIdentity } from "@/hooks/usePeople";
+import { useIdentity, useSetIdentity } from "@/hooks/usePeople";
 import { useConnectors, useCreateSource, useStartImport } from "@/hooks/useSources";
 import { WhoIsYou } from "./WhoIsYou";
+import { AddAddressForm } from "@/features/identity/AddAddressForm";
 
 /**
  * Adding a source is: pick a format, pick a file, see what Mimic found in it,
@@ -19,6 +20,8 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
   const create = useCreateSource();
   const startImport = useStartImport();
   const identity = useIdentity();
+  const saveIdentity = useSetIdentity();
+  const [displayName, setDisplayName] = useState("");
   const whyNot = useId();
 
   const [connector, setConnector] = useState("");
@@ -77,7 +80,33 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
         <Dialog.Overlay className="dialog__overlay" />
         <Dialog.Content className="dialog dialog--wide">
           <Dialog.Title className="dialog__title">Add a source</Dialog.Title>
+          <Dialog.Description className="muted small">
+            Choose an export you already have. Preview its messages, identify your writing, then
+            import. No mailbox connection or model download is needed.
+          </Dialog.Description>
 
+          {identity.isSuccess && !identity.data ? (
+            <>
+              <Field label="Your name" htmlFor="import-your-name">
+                <input
+                  id="import-your-name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                />
+              </Field>
+              <Button
+                disabled={!displayName.trim() || saveIdentity.isPending}
+                onClick={() => saveIdentity.mutate(displayName.trim())}
+              >
+                Save name
+              </Button>
+              <p className="muted small">
+                Save a name before identifying your messages. No email address is required for chat
+                exports.
+              </p>
+            </>
+          ) : null}
+          {identity.isError ? <InlineError>{identity.error.message}</InlineError> : null}
           <Field label="Format" htmlFor="connector">
             <select
               id="connector"
@@ -149,19 +178,26 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
                       {w}
                     </p>
                   ))}
-                  {report.names.length > 0 ? (
+                  {identity.data && report.names.length > 0 ? (
                     <WhoIsYou names={report.names} connector={connector} />
                   ) : null}
                   {report.names.length === 0 && report.frequentIdentifiers.length > 0 ? (
-                    <p className="muted small">
-                      Most frequent addresses:{" "}
-                      {report.frequentIdentifiers
-                        .slice(0, 5)
-                        .map(([v, n]) => `${v} (${n})`)
-                        .join(", ")}
-                      . Make sure the ones that are yours are listed in Settings, or your own
-                      messages will import as someone else&rsquo;s.
-                    </p>
+                    <>
+                      <p className="muted small">
+                        Most frequent addresses:{" "}
+                        {report.frequentIdentifiers
+                          .slice(0, 5)
+                          .map(([v, n]) => `${v} (${n})`)
+                          .join(", ")}
+                        . Add the address you wrote from below so Mimic can recognize your messages.
+                      </p>
+                      {identity.data ? <AddAddressForm inputLabel="Your sending address" /> : null}
+                      {identifiers.length > 0 ? (
+                        <p className="muted small">
+                          Your identifiers: {identifiers.map((i) => i.value).join(", ")}
+                        </p>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               ) : null}
@@ -195,7 +231,14 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
           <div className="row gap-2 dialog__actions">
             <Button
               variant="primary"
-              disabled={!report?.ok || notYetYours || !name.trim() || create.isPending}
+              disabled={
+                !identity.data ||
+                !report?.ok ||
+                notYetYours ||
+                !name.trim() ||
+                create.isPending ||
+                startImport.isPending
+              }
               aria-describedby={report?.ok && notYetYours ? whyNot : undefined}
               onClick={confirm}
             >
