@@ -32,7 +32,9 @@ export function AnywhereSection() {
       <p className="neutral">
         WhatsApp, Discord, Messages on your phone and most other places don&rsquo;t let an app read
         or send for you. They all let you copy and paste. Copy a message there, press the shortcut,
-        and I open Write on it, ready for a reply in your voice to copy back.
+        and I open Write on it &mdash; written to whoever the window&rsquo;s title names, when
+        that&rsquo;s one person you write to. Then <strong>Paste it there</strong> puts my reply
+        back where the message was, for you to send.
       </p>
       <label className="row gap-2">
         <span>Shortcut</span>
@@ -46,8 +48,10 @@ export function AnywhereSection() {
         </select>
       </label>
       <p className="muted small">
-        I read what you copied only when you press it, and it goes into Write and nowhere else until
-        you ask for a draft. It works while I&rsquo;m running, in the notification area too.
+        I read what you copied, and the title of the window you were in, only when you press it, and
+        they go into Write and nowhere else until you ask for a draft. Paste it there presses Ctrl+V
+        in that window and nothing else. It works while I&rsquo;m running, in the notification area
+        too.
       </p>
       {error ? <InlineError>{error}</InlineError> : null}
     </Card>

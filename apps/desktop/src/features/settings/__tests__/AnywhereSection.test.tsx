@@ -36,6 +36,17 @@ describe("answering a message from anywhere", () => {
     );
   });
 
+  it("says what it reads, and when", async () => {
+    renderIt();
+    expect(
+      await screen.findByText(/the title of the window you were in, only when you press it/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Paste it there presses\s+Ctrl\+V in that window and nothing else/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/written to whoever the window.s title names/)).toBeInTheDocument();
+  });
+
   it("says so when another app already has the shortcut", async () => {
     native.setSetting.mockRejectedValue(
       new Error("Another app is already using Ctrl+Shift+Alt+R. Pick another, or turn it off."),
