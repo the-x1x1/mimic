@@ -140,6 +140,8 @@ export const DiagnosticsBundle = z.object({
   providers: z.unknown(),
   updateState: z.unknown(),
   recentErrors: z.array(z.unknown()),
+  /** Each connected mailbox's state and last error, with what was said to its server (0.10.0-alpha.38). */
+  mailboxes: z.array(z.unknown()).optional(),
   jobSummaries: z.array(z.unknown()),
   includePaths: z.boolean(),
 });

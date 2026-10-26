@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 
 use mimic_core::sources::imap::{self, Auth, Credential, ImapAccount, ImapProbe, Security};
 use mimic_core::sources::oauth::{self, OAuthError};
+use mimic_core::sources::transcript;
 use serde::Serialize;
 use serde_json::json;
 use tauri::State;
@@ -112,14 +113,20 @@ fn mailbox_error(e: mimic_core::sources::imap::ImapError) -> CommandError {
 /// folder, a mailbox bigger than the first check reads).
 #[tauri::command]
 pub async fn probe_mailbox(
+    state: State<'_, SharedState>,
     mut account: mimic_core::sources::imap::ImapAccount,
     password: String,
 ) -> CommandResult<mimic_core::sources::imap::ImapProbe> {
     account.auth = Auth::Password;
-    tauri::async_runtime::spawn_blocking(move || imap::probe(&account, &Credential::Password(password)))
-        .await
-        .map_err(|e| CommandError::new("internal", e.to_string()))?
-        .map_err(mailbox_error)
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        transcript::kept_if_it_fails(&db, "probe_failed", &account.host.clone(), || {
+            imap::probe(&account, &Credential::Password(password))
+        })
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", e.to_string()))?
+    .map_err(mailbox_error)
 }
 
 /// Connect a mailbox: check the login works, store the password in the
@@ -137,8 +144,11 @@ pub async fn connect_mailbox(
     account.auth = Auth::Password;
     let probe_account = account.clone();
     let probe_password = password.clone();
+    let db = state.db.clone();
     let probe = tauri::async_runtime::spawn_blocking(move || {
-        imap::probe(&probe_account, &Credential::Password(probe_password))
+        transcript::kept_if_it_fails(&db, "probe_failed", &probe_account.host.clone(), || {
+            imap::probe(&probe_account, &Credential::Password(probe_password))
+        })
     })
     .await
     .map_err(|e| CommandError::new("internal", e.to_string()))?
@@ -318,10 +328,18 @@ async fn browser_sign_in(
 /// Look at a mailbox through a sign-in, as `probe_mailbox` does through a
 /// password. A sign-in that works but is not this mailbox's — the user signed
 /// in as someone else — is said so.
-async fn probe_signed_in(account: ImapAccount, access_token: String) -> CommandResult<ImapProbe> {
+async fn probe_signed_in(
+    db: mimic_core::db::Db,
+    account: ImapAccount,
+    access_token: String,
+) -> CommandResult<ImapProbe> {
     let email = account.username.clone();
-    tauri::async_runtime::spawn_blocking(move || imap::probe(&account, &Credential::AccessToken(access_token)))
-        .await
+    tauri::async_runtime::spawn_blocking(move || {
+        transcript::kept_if_it_fails(&db, "probe_failed", &account.host.clone(), || {
+            imap::probe(&account, &Credential::AccessToken(access_token))
+        })
+    })
+    .await
         .map_err(|e| CommandError::new("internal", e.to_string()))?
         .map_err(|e| match e {
             imap::ImapError::SignIn(_) => CommandError::new(
@@ -364,7 +382,9 @@ pub async fn sign_in_to_mailbox(
     *state.sign_in.pending.lock().unwrap_or_else(|p| p.into_inner()) = None;
     let tokens = browser_sign_in(&app, &signing_in, provider.clone(), client, &email).await?;
     let refresh_token = tokens.refresh_token.clone().ok_or_else(|| no_refresh_token(&provider))?;
-    let probe = probe_signed_in(signed_in_account(with, &provider, &email), tokens.access_token.clone()).await?;
+    let probe =
+        probe_signed_in(state.db.clone(), signed_in_account(with, &provider, &email), tokens.access_token.clone())
+            .await?;
     // Stopped while the mailbox was being looked at: the dialog is gone, so
     // nothing is held for it. Decided under the lock `cancel_mail_sign_in`
     // takes, so a stop can't land between the look and the keeping.
@@ -430,7 +450,7 @@ pub async fn sign_in_mailbox_again(
     let signing_in = SigningIn::begin(state.inner())?;
     let tokens = browser_sign_in(&app, &signing_in, provider.clone(), client, &config.account.username).await?;
     let refresh_token = tokens.refresh_token.clone().ok_or_else(|| no_refresh_token(&provider))?;
-    probe_signed_in(config.account.clone(), tokens.access_token.clone()).await?;
+    probe_signed_in(state.db.clone(), config.account.clone(), tokens.access_token.clone()).await?;
     // Stopped while the mailbox was being looked at: the old sign-in stays.
     if signing_in.stopped() {
         return Err(sign_in_error(OAuthError::Canceled));

@@ -1,5 +1,8 @@
 //! Diagnostics bundle. Contains no credentials, no message bodies and,
-//! unless the user opts in, no full user paths.
+//! unless the user opts in, no full user paths. Since 0.10.0-alpha.38 it
+//! holds what was said to a mail server when something failed
+//! (`sources::transcript`): with each connected mailbox's last error, and in
+//! the recent errors for a failed send, sign-in or look at a mailbox.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,6 +23,11 @@ pub struct DiagnosticsBundle {
     pub update_state: Value,
     pub recent_errors: Vec<Value>,
     pub job_summaries: Vec<Value>,
+    /// Each connected mailbox's state and last error, with what was said to
+    /// its server when that check failed; not the name it is listed under
+    /// (its address), though a server's answer may still say it.
+    #[serde(default)]
+    pub mailboxes: Vec<Value>,
     pub include_paths: bool,
 }
 
@@ -60,6 +68,12 @@ pub fn build_bundle(
             })
         })
         .collect();
+    let mailboxes = db
+        .list_sources()?
+        .into_iter()
+        .filter(|s| s.connector == crate::sources::imap::CONNECTOR)
+        .map(|s| json!({ "status": s.status, "lastError": s.last_error }))
+        .collect();
     let mut providers = providers;
     for secret in ["token", "apiKey", "api_key", "password", "secret"] {
         strip_key(&mut providers, secret);
@@ -76,16 +90,21 @@ pub fn build_bundle(
         update_state: serde_json::to_value(db.update_state()?)?,
         recent_errors,
         job_summaries,
+        mailboxes,
         include_paths,
     })
 }
 
-/// Replace anything that looks like an absolute path with its file name.
+/// Replace anything that looks like an absolute path with its file name —
+/// except what a mail server was told and said (`transcript`), where a
+/// `https://` link is the server's own and no path of the user's appears.
 pub fn redact_paths(v: Value) -> Value {
     match v {
         Value::String(s) => Value::String(redact_str(&s)),
         Value::Array(a) => Value::Array(a.into_iter().map(redact_paths).collect()),
-        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, redact_paths(v))).collect()),
+        Value::Object(o) => Value::Object(
+            o.into_iter().map(|(k, v)| if k == "transcript" { (k, v) } else { (k, redact_paths(v)) }).collect(),
+        ),
         other => other,
     }
 }
@@ -139,5 +158,32 @@ mod tests {
         assert_eq!(bundle.app_version, crate::APP_VERSION);
         let with_paths = build_bundle(&db, json!({}), json!({}), true).unwrap();
         assert!(serde_json::to_string(&with_paths).unwrap().contains("Mailbox"));
+    }
+
+    #[test]
+    fn a_failing_mailbox_comes_with_what_its_server_said_and_not_its_name() {
+        let db = Db::open_in_memory().unwrap();
+        let source = db
+            .create_source(&crate::db::NewSource {
+                connector: crate::sources::imap::CONNECTOR.into(),
+                name: "c@example.com".into(),
+                channel: "email".into(),
+                location: None,
+                config: json!({}),
+            })
+            .unwrap();
+        let said = json!([
+            "imap < m1 NO [AUTHENTICATIONFAILED] Invalid credentials",
+            "smtp < 535-5.7.8 https://support.google.com/mail/?p=BadCredentials"
+        ]);
+        db.log_event(&crate::db::NewEvent::warn("mail", "send_failed", json!({ "transcript": said.clone() }))).unwrap();
+        db.set_source_status(&source.id, "failed", Some(&json!({ "message": "wrong password", "transcript": said })))
+            .unwrap();
+        let bundle = build_bundle(&db, json!({}), json!({}), false).unwrap();
+        assert_eq!(bundle.mailboxes.len(), 1);
+        assert_eq!(bundle.mailboxes[0]["status"], "failed");
+        assert_eq!(bundle.mailboxes[0]["lastError"]["transcript"], said);
+        assert!(!serde_json::to_string(&bundle).unwrap().contains("c@example.com"));
+        assert_eq!(bundle.recent_errors[0]["payload"]["transcript"], said, "a server's link is not a path");
     }
 }

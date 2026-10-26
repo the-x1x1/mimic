@@ -40,11 +40,11 @@
 //!   (`NOT_ON_IT`). A reply sent by itself goes to who wrote and no one else.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::db::{
-    Db, DbError, Draft, IdentifierInput, IdentifierKind, Message, NewOutgoing, OutboxEntry, SendHow, ALREADY_DECIDED,
-    MAY_HAVE_GONE,
+    Db, DbError, Draft, IdentifierInput, IdentifierKind, Message, NewEvent, NewOutgoing, OutboxEntry, SendHow,
+    ALREADY_DECIDED, MAY_HAVE_GONE,
 };
 use crate::sources::imap::{self, Credentials, ImapSourceConfig};
 use crate::sources::outgoing::{self, Mailbox, Outgoing, OutgoingError};
@@ -502,9 +502,19 @@ pub(crate) fn deliver(
         }
     };
     let recipients: Vec<String> = entry.to.iter().chain(&entry.cc).cloned().collect();
-    let sent = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        smtp::send(account, &credential, &entry.from_address, &recipients, bytes)
-    }));
+    let (sent, said) = crate::sources::transcript::recording(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            smtp::send(account, &credential, &entry.from_address, &recipients, bytes)
+        }))
+    });
+    if !matches!(sent, Ok(Ok(()))) {
+        // What the server said, for working out why (never the password or
+        // the message: `sources::transcript`).
+        let _ = db.log_event(
+            &NewEvent::warn("mail", "send_failed", json!({ "server": account.host, "transcript": said }))
+                .entity("outbox", &entry.id),
+        );
+    }
     match sent {
         Ok(Ok(())) => {
             db.outgoing_sent(&entry.id)?;
@@ -544,9 +554,12 @@ pub(crate) fn file_a_copy(
     if !account.copies_to_sent() {
         return;
     }
-    let copied = credentials
-        .credential(config.account.auth, &entry.source_id)
-        .and_then(|c| imap::copy_to_sent(config, &c, bytes).map_err(|e| e.to_string()));
+    let copied = credentials.credential(config.account.auth, &entry.source_id).and_then(|c| {
+        crate::sources::transcript::kept_if_it_fails(db, "sent_copy_failed", &config.account.host, || {
+            imap::copy_to_sent(config, &c, bytes)
+        })
+        .map_err(|e| e.to_string())
+    });
     if let Err(why) = copied {
         tracing::warn!(target: "sending", "a sent reply could not be copied to the Sent folder");
         let note = format!("It went, but I couldn't put a copy in your Sent folder: {why}");
@@ -872,6 +885,14 @@ mod tests {
         assert_eq!(w.db.get_draft(&w.draft.id).unwrap().unwrap().outcome, None, "still the user's to send");
         assert_eq!(w.db.threads_awaiting_reply(10).unwrap().len(), 1, "and Ada is still waiting");
 
+        // What the server said is kept for working out why, without the
+        // password or the reply.
+        let event = w.db.recent_events(10, Some("warn")).unwrap().into_iter().find(|e| e.event_type == "send_failed");
+        let payload = event.expect("the failure is recorded").payload_json;
+        assert!(payload.contains("smtp > RCPT TO:<ada@work.example>"), "{payload}");
+        assert!(payload.contains("smtp < 550"), "{payload}");
+        assert!(!payload.contains("app-pass") && !payload.contains("be there"), "{payload}");
+
         // Sent again once the address is fixed, unedited.
         let (port, _seen) = serve(Behaviour::default());
         let mut config: ImapSourceConfig =
@@ -882,6 +903,26 @@ mod tests {
             SendRequest { to: vec!["ada@example.com".into()], ..approved(&w, &envelope, "Yes, I'll be there.") };
         send_reply(&w.db, &credentials(), &retry).unwrap();
         assert_eq!(w.db.get_draft(&w.draft.id).unwrap().unwrap().outcome.as_deref(), Some("sent_unedited"));
+    }
+
+    #[test]
+    fn what_a_failed_send_said_goes_with_the_person_it_was_to_and_with_everything() {
+        let failed = |db: &Db| {
+            db.recent_events(10, Some("warn")).unwrap().into_iter().filter(|e| e.event_type == "send_failed").count()
+        };
+        for everything in [false, true] {
+            let (port, _seen) = serve(Behaviour { refuse_rcpt: Some("ada@work.example"), ..Behaviour::default() });
+            let w = world(port);
+            let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+            send_reply(&w.db, &credentials(), &approved(&w, &envelope, "Yes.")).unwrap_err();
+            assert_eq!(failed(&w.db), 1);
+            if everything {
+                w.db.delete_all_communication_data().unwrap();
+            } else {
+                w.db.delete_participant(w.draft.participant_id.as_deref().unwrap()).unwrap();
+            }
+            assert_eq!(failed(&w.db), 0, "her address was in it");
+        }
     }
 
     #[test]

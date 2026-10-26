@@ -11,6 +11,7 @@ use mimic_core::sending::{self, ReplyEnvelope, SendRequest};
 use mimic_core::sources::imap::{self, ImapSourceConfig};
 use mimic_core::sources::outgoing;
 use mimic_core::sources::smtp::{self, SmtpAccount};
+use mimic_core::sources::transcript;
 use serde::Serialize;
 use tauri::State;
 
@@ -119,10 +120,14 @@ pub async fn set_mailbox_sending(
     }
     let config = mailbox_config(&state, &source_id)?;
     let (credentials, auth, id) = (state.mail_credentials.clone(), config.account.auth, source_id.clone());
+    let db = state.db.clone();
     let account = sending.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let credential = credentials.credential(auth, &id).map_err(|why| CommandError::new("mailbox", why))?;
-        smtp::probe(&account, &credential).map_err(|e| {
+        transcript::kept_if_it_fails(&db, "sending_probe_failed", &account.host.clone(), || {
+            smtp::probe(&account, &credential)
+        })
+        .map_err(|e| {
             if matches!(e, smtp::SmtpError::SignIn(_)) {
                 credentials.forget(&id);
             }
@@ -171,9 +176,13 @@ pub async fn test_mailbox_sending(state: State<'_, SharedState>, source_id: Stri
     };
     let host = account.host.clone();
     let (credentials, auth, id) = (state.mail_credentials.clone(), config.account.auth, source_id.clone());
+    let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let credential = credentials.credential(auth, &id).map_err(|why| CommandError::new("mailbox", why))?;
-        smtp::probe(&account, &credential).map_err(|e| {
+        transcript::kept_if_it_fails(&db, "sending_probe_failed", &account.host.clone(), || {
+            smtp::probe(&account, &credential)
+        })
+        .map_err(|e| {
             if matches!(e, smtp::SmtpError::SignIn(_)) {
                 credentials.forget(&id);
             }

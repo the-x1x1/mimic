@@ -8,6 +8,7 @@ import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
 import { MailboxPassword, MailboxSignInAgain } from "./MailboxPassword";
 import { MailboxSending } from "./MailboxSending";
 import { SentList } from "./SentList";
+import { ServerTranscript } from "./ServerTranscript";
 import { formatRelative } from "@/lib/format";
 
 const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> = {
@@ -83,6 +84,9 @@ export function SourcesPage() {
                     </div>
                     {s.lastError ? (
                       <div className="danger small">{String(s.lastError.message)}</div>
+                    ) : null}
+                    {s.lastError?.transcript ? (
+                      <ServerTranscript lines={s.lastError.transcript} />
                     ) : null}
                     {s.connector === "imap" ? (
                       <MailboxSending sourceId={s.id} name={s.name} />

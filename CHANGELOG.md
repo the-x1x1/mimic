@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.38] — 2026-10-26
+
+What the server said.
+
+### Added
+
+- **What the server said**, under a mailbox whose last check failed in Your mail: what I asked its mail server and what it answered, to see why — or to copy and send to whoever is helping you. Your password, your sign-in and your messages are never in it, only what was asked and answered.
+- The diagnostics bundle carries the same for a check, a sign-in, a look at a mailbox or a send that failed.
+
 ## [0.10.0-alpha.37] — 2026-10-26
 
 People you'd rather answer yourself.
