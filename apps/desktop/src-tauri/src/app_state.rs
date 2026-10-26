@@ -36,6 +36,8 @@ pub struct AppState {
     pub sign_in: MailSignIn,
     /// A look at the replies Mimic sends by itself is running: one at a time.
     pub replying: AtomicBool,
+    /// Mailboxes watched for mail as it arrives (`watching`).
+    pub watchers: crate::watching::Watchers,
 }
 
 /// A mailbox sign-in: one at a time, stoppable, and — between signing in

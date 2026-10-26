@@ -11,6 +11,7 @@ mod logging;
 mod providers_config;
 mod secrets;
 mod startup;
+mod watching;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
