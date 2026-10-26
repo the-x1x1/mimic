@@ -74,7 +74,15 @@ export function ReplyingForYou() {
   // Slack workspaces (0.10.0-alpha.64) and Teams accounts (.67).
   const chats = (sources.data ?? []).flatMap((s) =>
     s.connector === "slack" || s.connector === "teams"
-      ? [{ id: s.id, name: s.name, connector: s.connector as "slack" | "teams" }]
+      ? [
+          {
+            id: s.id,
+            name: s.name,
+            connector: s.connector as "slack" | "teams",
+            failing:
+              s.status === "failed" ? (s.lastError?.message ?? "the last check failed") : null,
+          },
+        ]
       : [],
   );
   const prepared = settings.data?.["assist.autoDraft"];
@@ -114,8 +122,20 @@ export function ReplyingForYou() {
           <MailboxCanSend key={m.id} sourceId={m.id} name={m.name} />
         ))}
         {chats.map((c) => (
-          <Step key={c.id} done={true}>
-            {`${c.name} is connected: replies to it go in as you, from here.`}
+          <Step
+            key={c.id}
+            done={c.failing === null}
+            action={
+              c.failing !== null ? (
+                <Link to="/sources" className="muted small">
+                  See it under Your mail
+                </Link>
+              ) : null
+            }
+          >
+            {c.failing === null
+              ? `${c.name} is connected: replies to it go in as you, from here.`
+              : `${c.name} isn't working: ${c.failing}`}
           </Step>
         ))}
         <Step
@@ -180,7 +200,7 @@ export function ReplyingForYou() {
       </ul>
       <CheckEverything
         mailboxes={mailboxes.map((m) => ({ id: m.id, name: m.name }))}
-        chats={chats}
+        chats={chats.map((c) => ({ id: c.id, name: c.name, connector: c.connector }))}
         ready={sources.data !== undefined}
       />
     </Card>

@@ -39,7 +39,7 @@ pub use repo_messages::{
     word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
 };
 pub use repo_outbox::{
-    NewOutgoing, OutboxEntry, SendHow, SendStatus, ALREADY_SENDING, DID_NOT_GO, HELD_BY_ITSELF, INTERRUPTED,
+    InDoubt, NewOutgoing, OutboxEntry, SendHow, SendStatus, ALREADY_SENDING, DID_NOT_GO, HELD_BY_ITSELF, INTERRUPTED,
     MAY_HAVE_GONE, NOT_UNSURE, TOO_LATE,
 };
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};

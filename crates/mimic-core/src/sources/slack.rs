@@ -585,6 +585,7 @@ fn sync_inner(
     let conversations = api.conversations()?;
     let mut people: HashMap<String, Person> = HashMap::new();
     let mut summary = SlackSummary::default();
+    let (mut tried, mut last_refusal) = (0usize, String::new());
     let mut importer = Importer::begin(db, source_id)?;
     'conversations: for conversation in conversations {
         if should_stop() {
@@ -593,6 +594,7 @@ fn sync_inner(
         }
         let mark = config.marks.get(&conversation.id).cloned();
         let most = if mark.is_some() { MOST_NEW } else { FIRST_READ };
+        tried += 1;
         let raw = match api.history(&conversation.id, mark.as_deref(), most) {
             Ok((raw, complete)) => {
                 // More new than a check reads: what is between is passed over.
@@ -614,6 +616,11 @@ fn sync_inner(
             // This conversation alone: passed over, the rest read.
             Err(e) => {
                 tracing::warn!(target: "slack", error = %e, "a conversation couldn't be read");
+                // Slack's own word for it, once: the error says "Slack said no".
+                last_refusal = match e {
+                    SlackError::Refused(why) => why,
+                    other => other.to_string(),
+                };
                 summary.unreadable += 1;
                 continue;
             }
@@ -731,6 +738,12 @@ fn sync_inner(
             summary.conversations += 1;
         }
         config.marks.insert(conversation.id.clone(), newest);
+    }
+    // Not one would Slack give: that is the workspace, not a conversation
+    // (0.10.0-alpha.72).
+    if tried > 0 && summary.unreadable == tried {
+        importer.abandon();
+        return Err(SlackError::Refused(format!("it gave none of your conversations ({last_refusal})")));
     }
     let imported = importer.finish()?;
     summary.inserted = imported.inserted;
@@ -1147,6 +1160,23 @@ mod tests {
         let (base, _) = fake::slack(Box::new(|_, _| (200, r#"{"ok":false,"error":"token_revoked"}"#.into())));
         let err = SlackApi::at(&base, TOKEN).unwrap().auth_test().unwrap_err();
         assert!(matches!(err, SlackError::Token(_)), "{err:?}");
+    }
+
+    #[test]
+    fn a_workspace_that_gives_no_conversation_fails_the_check() {
+        let (base, _) = fake::slack(Box::new(|method, _| match method {
+            "auth.test" => (200, r#"{"ok":true,"team_id":"T1","team":"Acme","user_id":"U1","user":"c"}"#.into()),
+            "users.conversations" => {
+                (200, r#"{"ok":true,"channels":[{"id":"D1","user":"U2"},{"id":"D2","user":"U3"}]}"#.into())
+            }
+            _ => (200, r#"{"ok":false,"error":"access_denied"}"#.into()),
+        }));
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        let err = sync(&db, &source, &SlackApi::at(&base, TOKEN).unwrap(), &|| false).unwrap_err();
+        assert!(err.to_string().contains("gave none of your conversations (access_denied)"), "{err}");
+        assert_eq!(err.to_string().matches("Slack said no").count(), 1, "{err}");
+        assert_eq!(db.get_source(&source).unwrap().unwrap().status, "failed");
     }
 
     #[test]

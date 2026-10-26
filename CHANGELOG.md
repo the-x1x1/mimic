@@ -2,6 +2,17 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.72] — 2026-10-26
+
+Tightened.
+
+### Fixed
+
+- **A reply whose answer was lost is found once.** When Slack or Teams took a reply I sent by myself but its answer never reached me, I recognise it by its words when I read it back — now only once, only among your messages sent after the one it answers, and from then on it is recorded as sent. If you later write the same words yourself, they are yours.
+- **A chat service that gives nothing says so.** A Slack or Teams check that could read none of your conversations now fails with the reason, instead of saying there was nothing new. One Teams chat that is always refused, beside chats with nothing new, doesn't count against the account.
+- **Copy it for me waits for the copy.** Some apps take a moment to put what you selected on the clipboard; I wait for it rather than reading it too soon. If nothing comes — nothing was selected — Write opens empty rather than on whatever you copied before.
+- **Replying for you shows a chat that isn't working.** A Slack workspace or Teams account whose last check failed is shown with what went wrong and a link to Your mail, not as connected.
+
 ## [0.10.0-alpha.71] — 2026-10-26
 
 Copy it for me.

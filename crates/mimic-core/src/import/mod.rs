@@ -237,6 +237,17 @@ fn joins_by_message_id(connector: &str) -> bool {
 /// kept once, across them, as mail is by its Message-ID.
 pub const SAME_IDS_CONNECTORS: [&str; 3] = ["telegram", "meta", "sms"];
 
+/// Whether a message read back is the reply in doubt: the same words, sent
+/// no earlier than the message it answers (both by the service's clock).
+fn own_words(doubt: &crate::db::InDoubt, raw: &sources::RawMessage) -> bool {
+    let parse = |t: &str| chrono::DateTime::parse_from_rfc3339(t).ok();
+    let after = match (raw.sent_at.as_deref().and_then(parse), parse(&doubt.since)) {
+        (Some(sent), Some(since)) => sent >= since,
+        _ => false,
+    };
+    after && doubt.body.split_whitespace().eq(raw.body.split_whitespace())
+}
+
 fn same_ids(connector: &str) -> Option<String> {
     SAME_IDS_CONNECTORS.contains(&connector).then(|| connector.to_string())
 }
@@ -319,11 +330,14 @@ impl ImportState<'_> {
         // before it was put in its conversation: marked as such, never as a
         // machine's mail by its `Auto-Submitted`, and never as the user's
         // writing (`crate::autoreply`).
-        let its_own = if is_email || self.sends { self.db.sent_on_its_own_among(&ids)? } else { HashSet::new() };
         // And one Mimic sent by itself whose answer was lost, before it knew
-        // the id it went under: known by its words.
-        let in_doubt = if self.sends { self.db.own_sends_in_doubt(&conversation_id)? } else { Vec::new() };
-        let same_words = |a: &str, b: &str| a.split_whitespace().eq(b.split_whitespace());
+        // the id it went under: known by its words, once, and only if it
+        // came after the message it answers (0.10.0-alpha.72). Asked before the
+        // ids, so a reply moving from `sending` to `sent` meanwhile is caught
+        // by one or the other.
+        let mut in_doubt = if self.sends { self.db.own_sends_in_doubt(&conversation_id)? } else { Vec::new() };
+        let its_own = if is_email || self.sends { self.db.sent_on_its_own_among(&ids)? } else { HashSet::new() };
+        let mut found: Vec<(String, String)> = Vec::new();
         // A conversation already here that is not joined by Message-ID — a
         // later export of the same chat — gets its new messages after the
         // ones it has: numbered from zero, they would sit among the old ones,
@@ -363,6 +377,13 @@ impl ImportState<'_> {
                 Direction::Unknown => self.summary.unattributed += 1,
                 Direction::Other => {}
             }
+            let by_words = direction == Direction::Self_ && {
+                let matched = in_doubt.iter().position(|d| own_words(d, raw));
+                if let Some(i) = matched {
+                    found.push((in_doubt.remove(i).id, raw.external_id.clone()));
+                }
+                matched.is_some()
+            };
             batch.push(NewMessage {
                 conversation_id: conversation_id.clone(),
                 source_id: self.source_id.clone(),
@@ -381,7 +402,7 @@ impl ImportState<'_> {
                 // reply has no mark, and stays automated, so it hides nothing.
                 metadata: if its_own.contains(&raw.external_id)
                     || (direction == Direction::Self_ && sources::outgoing::is_sent_on_its_own(&raw.external_id))
-                    || (direction == Direction::Self_ && in_doubt.iter().any(|w| same_words(w, &raw.body)))
+                    || by_words
                 {
                     let mut m = raw.metadata.clone();
                     if let Some(map) = m.as_object_mut() {
@@ -400,6 +421,10 @@ impl ImportState<'_> {
         }
         if !batch.is_empty() {
             counts = add(counts, self.db.insert_messages(&batch)?);
+        }
+        // What was found went, under the id it was read back by.
+        for (outgoing, message) in found {
+            self.db.outgoing_found_as(&outgoing, &message)?;
         }
         for keys in self.db.add_readings(&self.source_id, &readings)? {
             if keys.iter().any(|k| k == "sentFolder") {
