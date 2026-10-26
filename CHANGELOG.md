@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.41] — 2026-10-26
+
+Replying by myself, one person at a time.
+
+### Added
+
+- Under each reply on the home screen, while replying by myself is on: whether I may answer that person by myself, and one click to change it — **Never by myself to them**, **Let me answer them by myself**, or, when only the people you chose are answered, **Answer them by myself too**.
+
 ## [0.10.0-alpha.40] — 2026-10-26
 
 A moment to take it back.

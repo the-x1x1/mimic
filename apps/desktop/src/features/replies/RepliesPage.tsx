@@ -34,6 +34,7 @@ import { SentFolderNotice } from "@/features/identity/AddAddressForm";
 import { ThreadMessages } from "./ThreadMessages";
 import { SendPanel } from "./SendPanel";
 import { HeldReply } from "./HeldReply";
+import { ByMyself } from "./ByMyself";
 
 /**
  * The one screen: who is waiting, what they said, and what Mimic would say
@@ -854,6 +855,7 @@ export function DraftReview({
         {said}
       </p>
       {error ? <InlineError>{error.message}</InlineError> : null}
+      {draft.channel === "email" ? <ByMyself participantId={draft.participantId} /> : null}
       <div className="thread__actions">
         {others.length > 0 ? (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => quietly(drop(draft))}>

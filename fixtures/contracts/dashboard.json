@@ -5,38 +5,38 @@
   "ownMessages": 22,
   "awaiting": [
     {
-      "conversationId": "ee6e8249-fd85-4f31-8028-1d08c82f1b6f",
+      "conversationId": "ff78b78f-37ce-495e-a68b-04658170225e",
       "channel": "sms",
       "subject": "Pub",
       "isGroup": false,
       "messageCount": 5,
       "lastMessage": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
       "lastMessageAt": "2026-01-25T18:40:00Z",
-      "lastMessageId": "02fac7ad-c445-4097-af03-28b9a63e5cfc",
+      "lastMessageId": "ba3c6da4-8027-4e16-b8a0-8654bd982e75",
       "earlier": 4,
       "later": 0,
       "participant": {
-        "id": "f9c43bc0-177d-42b1-9c95-ce2bca56018a",
+        "id": "b92945e1-957f-4a88-bea3-9b1990f603a0",
         "displayName": "Bob",
         "isSelf": false,
         "relationship": null,
         "notes": null,
         "identifiers": [
           {
-            "id": "d56783ee-9bd8-4555-a178-1c63c6b24b7f",
+            "id": "0b6ef19c-a902-4da9-8a4a-8ef6eaa9c5a5",
             "kind": "phone",
             "value": "+1 (555) 010-2222",
             "normalizedValue": "5550102222"
           }
         ],
-        "createdAt": "2026-10-26T13:29:36.504Z",
-        "updatedAt": "2026-10-26T13:29:36.504Z"
+        "createdAt": "2026-10-26T13:32:34.532Z",
+        "updatedAt": "2026-10-26T13:32:34.532Z"
       },
       "hasRelationshipProfile": false,
       "draft": {
-        "id": "1db249cb-fd84-47c8-8b52-45c4a4730122",
-        "participantId": "f9c43bc0-177d-42b1-9c95-ce2bca56018a",
-        "conversationId": "ee6e8249-fd85-4f31-8028-1d08c82f1b6f",
+        "id": "b5a3ed6c-6c05-4cca-a5e4-99a9f6b1cacf",
+        "participantId": "b92945e1-957f-4a88-bea3-9b1990f603a0",
+        "conversationId": "ff78b78f-37ce-495e-a68b-04658170225e",
         "channel": "sms",
         "situationId": null,
         "incomingMessage": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
@@ -73,28 +73,28 @@
           ],
           "examples": [
             {
-              "messageId": "48660b3b-25bb-47f5-a692-6fd49e9841ce",
+              "messageId": "bf766925-f566-4e27-afc9-9927c3fbd78c",
               "reason": "similar wording: friday",
               "score": 0.059
             },
             {
-              "messageId": "a3bf4857-2ad3-4afc-bae9-939607e9476a",
+              "messageId": "9dfa04b0-7492-484d-93e1-ba83f1f18022",
               "reason": "same person and channel",
               "score": -0.0
             }
           ]
         },
-        "createdAt": "2026-10-26T13:29:36.549Z",
+        "createdAt": "2026-10-26T13:32:34.585Z",
         "resolvedAt": null,
         "outcome": null,
-        "incomingMessageId": "02fac7ad-c445-4097-af03-28b9a63e5cfc",
+        "incomingMessageId": "ba3c6da4-8027-4e16-b8a0-8654bd982e75",
         "alternativeTo": null
       },
       "alternatives": [
         {
-          "id": "009e285c-24f7-4abc-b556-13dfe2241eac",
-          "participantId": "f9c43bc0-177d-42b1-9c95-ce2bca56018a",
-          "conversationId": "ee6e8249-fd85-4f31-8028-1d08c82f1b6f",
+          "id": "8332552b-1826-4e50-8075-815c2e82f2e8",
+          "participantId": "b92945e1-957f-4a88-bea3-9b1990f603a0",
+          "conversationId": "ff78b78f-37ce-495e-a68b-04658170225e",
           "channel": "sms",
           "situationId": null,
           "incomingMessage": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
@@ -130,22 +130,22 @@
             ],
             "examples": [
               {
-                "messageId": "48660b3b-25bb-47f5-a692-6fd49e9841ce",
+                "messageId": "bf766925-f566-4e27-afc9-9927c3fbd78c",
                 "reason": "similar wording: friday",
                 "score": 0.059
               },
               {
-                "messageId": "a3bf4857-2ad3-4afc-bae9-939607e9476a",
+                "messageId": "9dfa04b0-7492-484d-93e1-ba83f1f18022",
                 "reason": "same person and channel",
                 "score": -0.0
               }
             ]
           },
-          "createdAt": "2026-10-26T13:29:36.593Z",
+          "createdAt": "2026-10-26T13:32:34.656Z",
           "resolvedAt": null,
           "outcome": null,
-          "incomingMessageId": "02fac7ad-c445-4097-af03-28b9a63e5cfc",
-          "alternativeTo": "1db249cb-fd84-47c8-8b52-45c4a4730122"
+          "incomingMessageId": "ba3c6da4-8027-4e16-b8a0-8654bd982e75",
+          "alternativeTo": "b5a3ed6c-6c05-4cca-a5e4-99a9f6b1cacf"
         }
       ],
       "automated": null,
@@ -161,14 +161,14 @@
   },
   "leftOutThreads": [
     {
-      "conversationId": "93551126-876f-4a46-b05e-3a90dd7e7058",
+      "conversationId": "a8582d1c-1677-48c5-8e2c-e4b354fa1f5d",
       "channel": "chat",
       "subject": "This week",
       "isGroup": false,
       "messageCount": 1,
       "lastMessage": "Twenty percent off everything this week.",
       "lastMessageAt": "2026-01-01T08:00:00Z",
-      "lastMessageId": "c97a15d8-2d2a-4dd4-8387-9714dc79b274",
+      "lastMessageId": "8b7efb28-b919-431c-8c61-c657a5cd5b97",
       "earlier": 0,
       "later": 0,
       "participant": null,
@@ -180,32 +180,32 @@
       "quiet": true
     },
     {
-      "conversationId": "be764b4d-0cc6-4513-9bb8-1a5823fb7792",
+      "conversationId": "cdac8627-58e4-4cfc-bdaf-b0542037f239",
       "channel": "email",
       "subject": "The lease",
       "isGroup": false,
       "messageCount": 1,
       "lastMessage": "Any news on the lease?",
       "lastMessageAt": "2026-01-08T09:00:00Z",
-      "lastMessageId": "aa8fe6cb-e6e3-430e-bc43-fc9331c76091",
+      "lastMessageId": "c6a9acfe-acc3-4cb1-bbe0-ee7a6c50fe93",
       "earlier": 0,
       "later": 0,
       "participant": {
-        "id": "8845a2a9-4933-4eb8-83ab-656fa10691da",
+        "id": "010011bc-5c43-4b83-9530-69fb10c1d47d",
         "displayName": "Carol",
         "isSelf": false,
         "relationship": null,
         "notes": null,
         "identifiers": [
           {
-            "id": "3e0e7c24-7b44-4ea4-bef8-92d0083b1da4",
+            "id": "d92ebe87-84e9-4e9d-affe-217cc36f8607",
             "kind": "email",
             "value": "carol@example.com",
             "normalizedValue": "carol@example.com"
           }
         ],
-        "createdAt": "2026-10-26T13:29:36.588Z",
-        "updatedAt": "2026-10-26T13:29:36.588Z"
+        "createdAt": "2026-10-26T13:32:34.651Z",
+        "updatedAt": "2026-10-26T13:32:34.651Z"
       },
       "hasRelationshipProfile": false,
       "draft": null,
@@ -219,9 +219,9 @@
   "waitingWithinDays": 30,
   "pendingDrafts": [
     {
-      "id": "1db249cb-fd84-47c8-8b52-45c4a4730122",
-      "participantId": "f9c43bc0-177d-42b1-9c95-ce2bca56018a",
-      "conversationId": "ee6e8249-fd85-4f31-8028-1d08c82f1b6f",
+      "id": "b5a3ed6c-6c05-4cca-a5e4-99a9f6b1cacf",
+      "participantId": "b92945e1-957f-4a88-bea3-9b1990f603a0",
+      "conversationId": "ff78b78f-37ce-495e-a68b-04658170225e",
       "channel": "sms",
       "situationId": null,
       "incomingMessage": "got it — one more thing, can you confirm the Friday numbers before I send them on?",
@@ -258,21 +258,21 @@
         ],
         "examples": [
           {
-            "messageId": "48660b3b-25bb-47f5-a692-6fd49e9841ce",
+            "messageId": "bf766925-f566-4e27-afc9-9927c3fbd78c",
             "reason": "similar wording: friday",
             "score": 0.059
           },
           {
-            "messageId": "a3bf4857-2ad3-4afc-bae9-939607e9476a",
+            "messageId": "9dfa04b0-7492-484d-93e1-ba83f1f18022",
             "reason": "same person and channel",
             "score": -0.0
           }
         ]
       },
-      "createdAt": "2026-10-26T13:29:36.549Z",
+      "createdAt": "2026-10-26T13:32:34.585Z",
       "resolvedAt": null,
       "outcome": null,
-      "incomingMessageId": "02fac7ad-c445-4097-af03-28b9a63e5cfc",
+      "incomingMessageId": "ba3c6da4-8027-4e16-b8a0-8654bd982e75",
       "alternativeTo": null
     }
   ],
@@ -285,7 +285,7 @@
     "uneditedRate": null,
     "meanLengthDelta": null
   },
-  "lastImportAt": "2026-10-26T13:29:36.510Z",
+  "lastImportAt": "2026-10-26T13:32:34.539Z",
   "autoDraft": true,
   "mailChecking": null
 }
