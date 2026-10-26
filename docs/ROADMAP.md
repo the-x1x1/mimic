@@ -70,7 +70,9 @@ Scheduled by the owner on 2026-10-25. See `docs/PRODUCT.md` for what each will a
 
 Done in 0.10.0-alpha.23: replies the user approves are sent from their own mailbox (`sources::smtp`, `sources::outgoing`, `crate::sending`), recorded before and after in `outbox`, never sent twice and never again after a send that may have gone; how each mailbox sends is its provider's usual server or one set under Your mail, checked by signing in first. Not done: never run against a real mail server; no copy put in a Sent folder the provider doesn't fill; no reply to everyone on a thread.
 
-Next, 0.10.0-alpha.24: Trusted mode — replies sent by themselves under the rules in `docs/PRODUCT.md`: off by default, per mailbox and per person, held before they go, a daily limit, nothing automated or already answered, `Auto-Submitted`, one switch to stop it all. Then signing in with Google, a Sent copy where the provider keeps none, and mail arriving within a minute.
+Done in 0.10.0-alpha.24: Trusted mode (`crate::autoreply`) — replies sent by themselves under the rules in `docs/PRODUCT.md`: off by default, per mailbox and per person, held before they go and checked again when they go, a daily limit and two a conversation a day, nothing automated, quiet, asked for or already answered, `Auto-Submitted`, one switch to stop it all, and none of it read as the user's writing. Not done: never run against a real mail server.
+
+Next: signing in with Google, a Sent copy where the provider keeps none, mail arriving within a minute, and other places messages arrive (Slack, Telegram, Teams).
 
 ## Phase 8 — Advanced personalization
 

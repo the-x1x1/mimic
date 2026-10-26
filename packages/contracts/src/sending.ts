@@ -38,31 +38,6 @@ export const SendingMailbox = z.object({
 });
 export type SendingMailbox = z.infer<typeof SendingMailbox>;
 
-/** Everything the Send panel shows before anything goes. */
-export const ReplyEnvelope = z.object({
-  draftId: z.string(),
-  /** Every connected mailbox, the one the message came in to first. */
-  mailboxes: z.array(SendingMailbox),
-  /** The one it goes through unless the user picks another. */
-  mailbox: z.string().nullable(),
-  to: z.array(z.string()),
-  /** The person's other addresses, to send to instead. */
-  otherAddresses: z.array(z.string()),
-  subject: z.string(),
-  /** Why it can't be sent from here at all. */
-  whyNot: z.string().nullable(),
-});
-export type ReplyEnvelope = z.infer<typeof ReplyEnvelope>;
-
-/** What the user approved, sent exactly as given. */
-export interface SendRequest {
-  draftId: string;
-  text: string;
-  sourceId: string;
-  to: string[];
-  subject: string;
-}
-
 export const SendHow = z.enum(["approved", "autonomous"]);
 export type SendHow = z.infer<typeof SendHow>;
 export const SendStatus = z.enum(["held", "sending", "sent", "unsure", "failed", "canceled"]);
@@ -91,6 +66,33 @@ export const OutboxEntry = z.object({
   sentAt: z.string().nullable(),
 });
 export type OutboxEntry = z.infer<typeof OutboxEntry>;
+
+/** Everything the Send panel shows before anything goes. */
+export const ReplyEnvelope = z.object({
+  draftId: z.string(),
+  /** Every connected mailbox, the one the message came in to first. */
+  mailboxes: z.array(SendingMailbox),
+  /** The one it goes through unless the user picks another. */
+  mailbox: z.string().nullable(),
+  to: z.array(z.string()),
+  /** The person's other addresses, to send to instead. */
+  otherAddresses: z.array(z.string()),
+  subject: z.string(),
+  /** Why it can't be sent from here at all. */
+  whyNot: z.string().nullable(),
+  /** A reply to it held to go by itself, which can be stopped or sent now. */
+  held: OutboxEntry.nullable(),
+});
+export type ReplyEnvelope = z.infer<typeof ReplyEnvelope>;
+
+/** What the user approved, sent exactly as given. */
+export interface SendRequest {
+  draftId: string;
+  text: string;
+  sourceId: string;
+  to: string[];
+  subject: string;
+}
 
 /** The address list as one would write it on an envelope. */
 export function listAddresses(addresses: readonly string[]): string {

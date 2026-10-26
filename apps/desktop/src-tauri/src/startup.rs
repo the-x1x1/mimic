@@ -4,6 +4,7 @@
 //! UI rather than blocking launch.
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::RwLock;
 use std::time::Duration;
 
@@ -182,6 +183,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         instance,
         mail_credentials,
         sign_in: Default::default(),
+        replying: AtomicBool::new(false),
     })
 }
 
@@ -382,6 +384,17 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,
                 }
+            }
+        });
+    }
+    // Replies Mimic sends by itself: every half minute, hold what may go and
+    // send what is due. Does nothing unless the user turned it on.
+    {
+        let (st, app2) = (state.clone(), app.clone());
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                crate::commands::autoreply::look(&app2, &st).await;
             }
         });
     }

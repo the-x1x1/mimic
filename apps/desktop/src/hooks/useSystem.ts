@@ -66,6 +66,29 @@ export function useNativeEventBridge() {
       }),
     );
     unsubs.push(events.onEngineStatus(() => qc.invalidateQueries({ queryKey: qk.system })));
+    // Replies sent by themselves: what is held shows under its message, and
+    // what went is in What I've sent.
+    unsubs.push(
+      events.onSending((run) => {
+        for (const key of [qk.dashboard, qk.sent, qk.autoReply, qk.drafts]) {
+          qc.invalidateQueries({ queryKey: key });
+        }
+        if (run.sent > 0) {
+          toast.success(
+            run.sent === 1 ? "I sent a reply by myself." : `I sent ${run.sent} replies by myself.`,
+            "They're under Your mail, in What I've sent.",
+          );
+        }
+        if (run.failed > 0) {
+          toast.danger(
+            run.failed === 1
+              ? "A reply I held didn't go."
+              : `${run.failed} replies I held didn't go.`,
+            "What I've sent, under Your mail, says why. Their drafts wait for you.",
+          );
+        }
+      }),
+    );
     return () => {
       for (const u of unsubs) void u.then((fn) => fn());
     };

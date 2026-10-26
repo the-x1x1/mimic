@@ -133,7 +133,12 @@ pub fn draft_waiting_threads_by_meaning(
             meaning: meaning(&thread.last_message),
         };
         match compose(db, provider, &request) {
-            Ok(_) => summary.drafted += 1,
+            Ok(draft) => {
+                summary.drafted += 1;
+                // Prepared in advance, not asked for: the only drafts a reply
+                // sent by itself is ever made from (`crate::autoreply`).
+                db.mark_prepared(&draft.id)?;
+            }
             // One unreachable provider or one refused request must not fail
             // the whole run; the count is reported and the thread is simply
             // still waiting.

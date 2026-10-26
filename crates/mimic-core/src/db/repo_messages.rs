@@ -108,6 +108,15 @@ pub struct ImportCounts {
     pub empty: usize,
 }
 
+/// SQL: the message, under `alias`, is one the user wrote — not a reply Mimic
+/// sent on its own (`metadata.sentOnItsOwn`, 0.10.0-alpha.24). Such a reply
+/// is filed as the user's, so the thread is answered, but it is how Mimic
+/// writes, not how the user does: what measures or shows the user's writing
+/// leaves it out.
+pub(crate) fn written_by_the_user(alias: &str) -> String {
+    format!("instr({alias}.metadata_json, '\"sentOnItsOwn\"') = 0")
+}
+
 /// Words are whitespace-separated runs containing at least one alphanumeric
 /// character, so "—" and stray punctuation do not inflate the count.
 pub fn word_count(body: &str) -> i64 {
@@ -323,7 +332,8 @@ impl Db {
         limit: usize,
     ) -> DbResult<Vec<Message>> {
         let conn = self.conn();
-        let mut sql = format!("SELECT {COLS} FROM messages m WHERE direction = 'self'");
+        let mut sql =
+            format!("SELECT {COLS} FROM messages m WHERE direction = 'self' AND {}", written_by_the_user("m"));
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(c) = scope.channel {
             sql.push_str(" AND channel = ?");
@@ -413,7 +423,14 @@ impl Db {
                     _ => continue,
                 };
                 let mut keys = Vec::new();
+                // A reply Mimic sent on its own says so to other programs
+                // (`Auto-Submitted`); the copy read back from the Sent folder
+                // must not make it read as a machine's mail here.
+                let its_own = metadata.contains_key("sentOnItsOwn");
                 for (key, value) in &reading.add {
+                    if its_own && key == "automated" {
+                        continue;
+                    }
                     if !metadata.contains_key(key) {
                         metadata.insert(key.clone(), value.clone());
                         keys.push(key.clone());
@@ -666,23 +683,32 @@ impl Db {
     }
 
     pub fn count_self_messages(&self, channel: Option<&str>, participant_id: Option<&str>) -> DbResult<i64> {
+        let mine = written_by_the_user("messages");
         let conn = self.conn();
         Ok(match (channel, participant_id) {
-            (None, None) => conn.query_row("SELECT COUNT(*) FROM messages WHERE direction='self'", [], |r| r.get(0))?,
-            (Some(c), None) => {
-                conn.query_row("SELECT COUNT(*) FROM messages WHERE direction='self' AND channel=?1", [c], |r| {
-                    r.get(0)
-                })?
-            }
+            (None, None) => conn.query_row(
+                &format!("SELECT COUNT(*) FROM messages WHERE direction='self' AND {mine}"),
+                [],
+                |r| r.get(0),
+            )?,
+            (Some(c), None) => conn.query_row(
+                &format!("SELECT COUNT(*) FROM messages WHERE direction='self' AND channel=?1 AND {mine}"),
+                [c],
+                |r| r.get(0),
+            )?,
             (None, Some(p)) => conn.query_row(
-                "SELECT COUNT(*) FROM messages WHERE direction='self' AND conversation_id IN
-                 (SELECT conversation_id FROM conversation_participants WHERE participant_id=?1)",
+                &format!(
+                    "SELECT COUNT(*) FROM messages WHERE direction='self' AND {mine} AND conversation_id IN
+                     (SELECT conversation_id FROM conversation_participants WHERE participant_id=?1)"
+                ),
                 [p],
                 |r| r.get(0),
             )?,
             (Some(c), Some(p)) => conn.query_row(
-                "SELECT COUNT(*) FROM messages WHERE direction='self' AND channel=?1 AND conversation_id IN
-                 (SELECT conversation_id FROM conversation_participants WHERE participant_id=?2)",
+                &format!(
+                    "SELECT COUNT(*) FROM messages WHERE direction='self' AND channel=?1 AND {mine} AND conversation_id IN
+                     (SELECT conversation_id FROM conversation_participants WHERE participant_id=?2)"
+                ),
                 params![c, p],
                 |r| r.get(0),
             )?,
@@ -692,9 +718,10 @@ impl Db {
     /// Channels the user has actually written in, with counts.
     pub fn self_message_channels(&self) -> DbResult<Vec<(String, i64)>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT channel, COUNT(*) FROM messages WHERE direction='self' GROUP BY channel ORDER BY COUNT(*) DESC",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT channel, COUNT(*) FROM messages WHERE direction='self' AND {} GROUP BY channel ORDER BY COUNT(*) DESC",
+            written_by_the_user("messages")
+        ))?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.map(|r| r.map_err(DbError::from)).collect()
     }

@@ -33,6 +33,7 @@ import { qk } from "@/app/queryClient";
 import { SentFolderNotice } from "@/features/identity/AddAddressForm";
 import { ThreadMessages } from "./ThreadMessages";
 import { SendPanel } from "./SendPanel";
+import { HeldReply } from "./HeldReply";
 
 /**
  * The one screen: who is waiting, what they said, and what Mimic would say
@@ -801,6 +802,7 @@ export function DraftReview({
 
   return (
     <div className="thread__part thread__part--ruled">
+      {envelope.data?.held ? <HeldReply entry={envelope.data.held} /> : null}
       {/* One tree however many ways there are, so what was typed into the
           first survives others arriving and going. */}
       <div className={others.length > 0 ? "thread__ways" : undefined}>

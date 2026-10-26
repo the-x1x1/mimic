@@ -251,11 +251,12 @@ impl Db {
         let (at, id) = before.unwrap_or(("", ""));
         let mut stmt = conn.prepare(&format!(
             "SELECT {cols} FROM messages m
-             WHERE m.direction = 'self'
+             WHERE m.direction = 'self' AND {mine}
                AND NOT EXISTS (SELECT 1 FROM situation_readings sr WHERE sr.message_id = m.id)
                AND (?3 OR COALESCE(m.sent_at, '') < ?1 OR (COALESCE(m.sent_at, '') = ?1 AND m.id < ?2))
              ORDER BY COALESCE(m.sent_at, '') DESC, m.id DESC LIMIT {limit}",
-            cols = super::repo_messages::COLS
+            cols = super::repo_messages::COLS,
+            mine = super::repo_messages::written_by_the_user("m")
         ))?;
         let rows = stmt.query_map(params![at, id, before.is_none()], super::repo_messages::map)?;
         rows.map(|r| r.map_err(DbError::from)).collect()
@@ -293,10 +294,13 @@ impl Db {
     /// How the user's own messages came to be filed.
     pub fn filing_counts(&self) -> DbResult<FilingCounts> {
         Ok(self.conn().query_row(
-            "SELECT COALESCE(SUM(sr.read_by IS NULL), 0), COALESCE(SUM(sr.read_by = 'model'), 0),
-                    COALESCE(SUM(sr.read_by = 'user'), 0)
-             FROM messages m LEFT JOIN situation_readings sr ON sr.message_id = m.id
-             WHERE m.direction = 'self'",
+            &format!(
+                "SELECT COALESCE(SUM(sr.read_by IS NULL), 0), COALESCE(SUM(sr.read_by = 'model'), 0),
+                        COALESCE(SUM(sr.read_by = 'user'), 0)
+                 FROM messages m LEFT JOIN situation_readings sr ON sr.message_id = m.id
+                 WHERE m.direction = 'self' AND {}",
+                super::repo_messages::written_by_the_user("m")
+            ),
             [],
             |r| Ok(FilingCounts { by_rules: r.get(0)?, by_model: r.get(1)?, by_you: r.get(2)? }),
         )?)
@@ -317,12 +321,13 @@ impl Db {
     /// How many of the user's own messages are filed under each situation.
     pub fn self_situation_counts(&self) -> DbResult<Vec<(String, i64)>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT ms.situation_id, COUNT(*) FROM message_situations ms
              JOIN messages m ON m.id = ms.message_id
-             WHERE m.direction = 'self'
+             WHERE m.direction = 'self' AND {}
              GROUP BY ms.situation_id ORDER BY ms.situation_id",
-        )?;
+            super::repo_messages::written_by_the_user("m")
+        ))?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }

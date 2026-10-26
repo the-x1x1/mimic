@@ -215,6 +215,28 @@ impl Db {
         self.get_draft(id)?.ok_or_else(|| DbError::NotFound(id.into()))
     }
 
+    /// Mark a draft as one prepared in advance by assisted drafting rather
+    /// than asked for (`context.prepared`): only such a draft is ever sent by
+    /// itself.
+    pub fn mark_prepared(&self, id: &str) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE drafts SET context_json = json_set(context_json, '$.prepared', json('true')) WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a draft as one Mimic sent on its own (0.10.0-alpha.24): it is
+    /// not something the user did, so neither the learning loop
+    /// (`sent_drafts_for_learning`) nor the measured outcomes count it.
+    pub fn mark_sent_on_its_own(&self, id: &str) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE drafts SET context_json = json_set(context_json, '$.sentOnItsOwn', json('true')) WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
     /// Store a feedback row. `kind` is `edit` (derived from the difference
     /// between draft and sent text), `preference` (the user said so) or
     /// `rating`. Weight is how much the learning loop should trust it: an
@@ -337,13 +359,15 @@ impl Db {
     /// and nor is a draft written with an adjustment — another way the user
     /// asked for, or Compose's Shorter and the rest: what was changed in it
     /// was changed from what the user asked for, not from how Mimic writes,
-    /// so trimming a Longer draft back down says nothing about length.
+    /// so trimming a Longer draft back down says nothing about length. Nor is
+    /// a draft Mimic sent on its own: nobody read it before it went.
     pub fn sent_drafts_for_learning(&self) -> DbResult<Vec<(Option<String>, String, String)>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT participant_id, generated_text, final_text FROM drafts
              WHERE outcome IN ('sent_unedited','sent_edited') AND final_text IS NOT NULL
                AND json_extract(context_json, '$.adjustment') IS NULL
+               AND json_extract(context_json, '$.sentOnItsOwn') IS NULL
              ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
@@ -366,7 +390,7 @@ impl Db {
                     SUM(outcome = 'sent_unedited'),
                     SUM(outcome = 'sent_edited'),
                     SUM(outcome = 'discarded')
-             FROM drafts",
+             FROM drafts WHERE json_extract(context_json, '$.sentOnItsOwn') IS NULL",
             [],
             |r| {
                 Ok((
@@ -384,7 +408,8 @@ impl Db {
             "SELECT AVG(ABS(
                  (LENGTH(final_text) - LENGTH(REPLACE(final_text, ' ', ''))) -
                  (LENGTH(generated_text) - LENGTH(REPLACE(generated_text, ' ', '')))
-             )) FROM drafts WHERE outcome = 'sent_edited' AND final_text IS NOT NULL",
+             )) FROM drafts WHERE outcome = 'sent_edited' AND final_text IS NOT NULL
+                  AND json_extract(context_json, '$.sentOnItsOwn') IS NULL",
             [],
             |r| r.get(0),
         )?;
@@ -543,6 +568,20 @@ mod tests {
         db.resolve_draft(&first.id, "sent_edited", Some("Sure, tomorrow at 9.")).unwrap();
         assert!(refused(&first.id), "a choice already made");
         assert_eq!(db.recent_drafts(10).unwrap().len(), 2, "nothing refused was kept");
+    }
+
+    #[test]
+    fn a_draft_sent_on_its_own_is_neither_learned_from_nor_counted() {
+        let db = Db::open_in_memory().unwrap();
+        let mine = db.create_draft(&draft("Sure, tomorrow.")).unwrap();
+        let its_own = db.create_draft(&draft("Sure, see you then.")).unwrap();
+        db.resolve_draft(&mine.id, "sent_unedited", Some("Sure, tomorrow.")).unwrap();
+        db.resolve_draft(&its_own.id, "sent_unedited", Some("Sure, see you then.")).unwrap();
+        db.mark_sent_on_its_own(&its_own.id).unwrap();
+        assert_eq!(db.sent_drafts_for_learning().unwrap().len(), 1);
+        let out = db.measured_draft_outcomes().unwrap();
+        assert_eq!((out.total, out.sent_unedited), (1, 1), "only what the user decided is measured");
+        assert_eq!(db.get_draft(&its_own.id).unwrap().unwrap().context["sentOnItsOwn"], json!(true));
     }
 
     #[test]

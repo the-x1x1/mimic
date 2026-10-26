@@ -284,6 +284,11 @@ impl ImportState<'_> {
         // is attributed for it: a copy whose author reads differently this
         // time (a new name, another address) makes up nobody.
         let already = self.db.ids_in_source(&self.source_id, &ids)?;
+        // A reply Mimic sent on its own, read back from the Sent folder
+        // before it was put in its conversation: marked as such, never as a
+        // machine's mail by its `Auto-Submitted`, and never as the user's
+        // writing (`crate::autoreply`).
+        let its_own = if is_email { self.db.sent_on_its_own_among(&ids)? } else { HashSet::new() };
         // A conversation already here that is not joined by Message-ID — a
         // later export of the same chat — gets its new messages after the
         // ones it has: numbered from zero, they would sit among the old ones,
@@ -334,7 +339,16 @@ impl ImportState<'_> {
                 sequence_index: first + i as i64,
                 body: raw.body.clone(),
                 reply_to_external_id: None,
-                metadata: raw.metadata.clone(),
+                metadata: if its_own.contains(&raw.external_id) {
+                    let mut m = raw.metadata.clone();
+                    if let Some(map) = m.as_object_mut() {
+                        map.remove("automated");
+                        map.insert("sentOnItsOwn".into(), serde_json::Value::Bool(true));
+                    }
+                    m
+                } else {
+                    raw.metadata.clone()
+                },
             });
             if batch.len() >= BATCH {
                 counts = add(counts, self.db.insert_messages(&batch)?);

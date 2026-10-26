@@ -32,6 +32,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/app/queryClient";
 import { DeleteEverythingDialog } from "./DeleteEverythingDialog";
 import { MeaningSection } from "./MeaningSection";
+import { AutoReplySection } from "./AutoReplySection";
 import { ModelStep } from "@/features/onboarding/ModelStep";
 
 export function SettingsPage() {
@@ -44,6 +45,7 @@ export function SettingsPage() {
       <ProviderSection />
       <WaitingSection />
       <AssistSection />
+      <AutoReplySection />
       <MeaningSection />
       <MailSection />
       <EngineSection />
@@ -385,8 +387,8 @@ function AssistSection() {
         {active?.local
           ? `Those messages go to ${active.displayName}, which runs on this computer.`
           : `Those messages are sent to ${active?.displayName ?? "the configured provider"} — including messages you have not read yet.`}{" "}
-        A reply prepared this way is never sent by itself: each waits for you to send it, change it
-        or put it aside.
+        A reply prepared this way waits for you to send it, change it or put it aside &mdash; unless
+        you turn on replying by myself, below.
       </p>
     </Card>
   );
@@ -607,7 +609,8 @@ function MailSection() {
     <Card title="Checking your mail">
       <p className="neutral">
         I look for new mail in {boxes.length === 1 ? "your mailbox" : "your mailboxes"} on a
-        schedule, read-only: nothing is marked as read, moved or deleted, and nothing is sent.
+        schedule, read-only: nothing is marked as read, moved or deleted. A reply goes out only when
+        you send it, or when replying by myself is on.
       </p>
       <label className="row gap-2">
         <span>Check</span>
@@ -616,6 +619,7 @@ function MailSection() {
           onChange={(e) => ipc.setSetting("mail.checkEveryMinutes", Number(e.target.value))}
         >
           <option value={0}>only when I ask</option>
+          <option value={2}>every 2 minutes</option>
           <option value={5}>every 5 minutes</option>
           <option value={15}>every 15 minutes</option>
           <option value={30}>every 30 minutes</option>

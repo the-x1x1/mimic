@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { EngineEvent, EngineStatus, JobEvent } from "@mimic/contracts";
+import { AutoReplyRun, EngineEvent, EngineStatus, JobEvent } from "@mimic/contracts";
 import { isTauri } from "./tauri";
 
 type Handler<T> = (payload: T) => void;
@@ -23,4 +23,14 @@ export const events = {
   onEngineStatus: (h: Handler<EngineStatus>) =>
     on("engine://status", (r) => EngineStatus.safeParse(r).data ?? null, h),
   onReady: (h: Handler<unknown>) => on("app://ready", (r) => r, h),
+  /**
+   * Replies sent by themselves were held, sent, stopped or failed — or their
+   * rules changed (then every count is absent, read as 0).
+   */
+  onSending: (h: Handler<AutoReplyRun>) =>
+    on(
+      "sending://changed",
+      (r) => AutoReplyRun.safeParse(r).data ?? { held: 0, sent: 0, stopped: 0, failed: 0 },
+      h,
+    ),
 };

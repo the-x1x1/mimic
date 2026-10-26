@@ -70,6 +70,6 @@ Each reply is recorded in the database (`outbox`) before the mail server is spok
 
 ## What Mimic will not do
 
-It will not send a message the user has not approved. Replies sent by themselves — Trusted mode, `docs/PRODUCT.md` — are being built for 0.10.0-alpha.24, will be off unless the user turns them on, and are bounded by the rules written there.
+It will not send a message the user has not approved, except under replying by itself (Trusted mode, 0.10.0-alpha.24, `docs/PRODUCT.md`), which is off unless the user turns it on in Settings and is bounded by the rules written there: the mailboxes and people they chose, a hold before each reply goes during which it can be stopped, a daily limit, and never mail that looks automated or a message answered before. Every reply it sends is recorded like one the user sent, marked as sent by itself, and is not read as the user's writing.
 
 It will not write to a mailbox: reading is `EXAMINE` and `BODY.PEEK[]`, and nothing Mimic sends is put in the Sent folder by Mimic (Gmail and Microsoft put it there themselves).

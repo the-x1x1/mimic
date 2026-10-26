@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SendRequest, SmtpAccount } from "@mimic/contracts";
+import type { AutoReplyRules, SendRequest, SmtpAccount } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 
@@ -62,4 +62,42 @@ export function useSetMailboxSending(sourceId: string) {
       qc.invalidateQueries({ queryKey: qk.dashboard });
     },
   });
+}
+
+/** The rules for replies sent by themselves, whether they run, and the last day's count. */
+export function useAutoReply() {
+  return useQuery({ queryKey: qk.autoReply, queryFn: ipc.autoReply });
+}
+
+export function useSetAutoReply() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rules: AutoReplyRules) => ipc.setAutoReply(rules),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.autoReply, data);
+      // Turning it on turns on preparing replies in advance.
+      qc.invalidateQueries({ queryKey: qk.settings });
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+      qc.invalidateQueries({ queryKey: qk.sent });
+    },
+  });
+}
+
+/** Stop a reply held to go by itself, or let it go now. */
+export function useHeldReply() {
+  const qc = useQueryClient();
+  const settle = () => {
+    qc.invalidateQueries({ queryKey: qk.dashboard });
+    qc.invalidateQueries({ queryKey: qk.sent });
+    qc.invalidateQueries({ queryKey: qk.drafts });
+  };
+  const stop = useMutation({
+    mutationFn: (outboxId: string) => ipc.stopHeldReply(outboxId),
+    onSettled: settle,
+  });
+  const now = useMutation({
+    mutationFn: (outboxId: string) => ipc.sendHeldReplyNow(outboxId),
+    onSettled: settle,
+  });
+  return { stop, now };
 }

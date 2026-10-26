@@ -2,6 +2,24 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.24] — 2026-10-26
+
+Replying by myself.
+
+### Added
+
+- **Replying by myself**, under Settings. With it on, I send the replies I prepare in advance by myself, from your mailbox, as you — through the mailboxes you tick, to people you've written to yourself or only to the people you choose. It's off until you turn it on, and turning it on says what it does before it does anything.
+- **Nothing goes at once.** Each reply waits under the message it answers, for ten minutes unless you choose otherwise, saying when it will go and to whom. **Stop it** and the draft waits for you like any other; **Send it now** sends it at once.
+- **What it won't answer:** anything that came before you turned it on, mail that wasn't sent to you by name (a list, or a copy you were hidden on), mail that looks automated, a thread you said needs no reply, anything older than your waiting window, a message from someone you haven't written to yourself, a draft you asked for yourself or are choosing between ways of saying, and the same message twice. A reply by itself goes only to the address they wrote from, never to a different reply-to address. It stops at your daily limit (ten unless you choose otherwise), and at two replies by itself in one conversation a day.
+- Each reply sent by itself tells other mail programs it was sent automatically (`Auto-Submitted: auto-replied`), so their automatic replies don't answer it.
+- Everything checked when a reply is held is checked again when it goes, after your mailbox has been checked again — so an answer you sent from your phone in the meantime counts: if you answered first, wrote since, or turned it off, it's stopped and says why under What I've sent.
+- Turning it off stops everything still waiting, at once.
+
+### Changed
+
+- Your mailbox can be checked every 2 minutes, under Settings → Checking your mail. When a reply's wait is over, I check its mailbox at once rather than at the next scheduled check.
+- What I send by myself isn't read as how you write: it's left out of what I measure, of the examples I show a draft, of what I learn from what you change, and of how often my drafts go out unchanged.
+
 ## [0.10.0-alpha.23] — 2026-10-25
 
 Send it from here.

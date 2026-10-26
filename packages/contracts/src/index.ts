@@ -9,6 +9,7 @@
  * from drifting.
  */
 export * from "./app";
+export * from "./autoreply";
 export * from "./compose";
 export * from "./evaluation";
 export * from "./identity";

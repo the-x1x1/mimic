@@ -938,9 +938,10 @@ fn sync_inner(
 /// How often connected mailboxes are checked, in minutes. `0` is off.
 pub const INTERVAL_SETTING: &str = "mail.checkEveryMinutes";
 pub const DEFAULT_INTERVAL_MINUTES: i64 = 15;
-/// Checking more often than this is not polite to a mail server, and not
-/// useful to a person.
-pub const MIN_INTERVAL_MINUTES: i64 = 5;
+/// Checking more often than this is not polite to a mail server. Two
+/// minutes since 0.10.0-alpha.24, when a reply sent by itself began to wait
+/// for the mailbox to be read again.
+pub const MIN_INTERVAL_MINUTES: i64 = 2;
 /// After a failed check, wait this many intervals (at most six hours) before
 /// trying again: a mailbox whose password was changed should not produce an
 /// error every few minutes.
