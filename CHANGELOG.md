@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.39] — 2026-10-26
+
+Only at the hours you choose.
+
+### Added
+
+- **Only at the hours I choose**, under Replying by myself: replies I send by myself go only between the hours you set on this computer's clock — 8:00 to 20:00 to begin with, or across midnight if you like. One that would go outside them waits on the home screen until they start, where you can still stop it or send it at once.
+
 ## [0.10.0-alpha.38] — 2026-10-26
 
 What the server said.

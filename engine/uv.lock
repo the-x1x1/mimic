@@ -212,7 +212,7 @@ wheels = [
 
 [[package]]
 name = "mimic-engine"
-version = "0.10.0a38"
+version = "0.10.0a39"
 source = { editable = "." }
 dependencies = [
     { name = "joblib" },

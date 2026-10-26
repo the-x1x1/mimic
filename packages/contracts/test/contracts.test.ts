@@ -1486,6 +1486,15 @@ describe("replying by itself says what it will do", () => {
     ).toMatch(/^On: I answer people you've written to yourself, except the 2 you named,/);
     expect(
       describeAutoReply({
+        rules: { ...rules, hours: { from: 8, to: 20 } },
+        running: true,
+        lastDay: 0,
+      }),
+    ).toBe(
+      "On: I answer people you've written to yourself, holding each reply 10 minutes first, only between 8:00 and 20:00, 10 a day at most.",
+    );
+    expect(
+      describeAutoReply({
         rules: { ...rules, who: "listed", people: ["p1", "p2"], never: ["p2"] },
         running: true,
         lastDay: 0,
@@ -1519,5 +1528,21 @@ describe("replying by itself says what it will do", () => {
       "I'll send this to ada@example.com by myself in 10 minutes, unless you stop it.",
     );
     expect(describeHeld(held, new Date("2026-10-26T09:10:00Z"))).toMatch(/in a moment/);
+    // Waiting for the hours allowed: said by the clock, not in hundreds of minutes.
+    const later = new Date("2026-10-26T09:00:30Z");
+    const sameDay = new Date(later.getTime() + 3 * 3600_000);
+    const nextDay = new Date(later.getTime() + 20 * 3600_000);
+    const at = (d: Date) => describeHeld({ ...held, sendAfter: d.toISOString() }, later);
+    expect(at(sameDay)).toMatch(
+      sameDay.toDateString() === later.toDateString()
+        ? /by myself at \S/
+        : /by myself tomorrow at \S/,
+    );
+    expect(at(nextDay)).toMatch(
+      nextDay.toDateString() === later.toDateString()
+        ? /by myself at \S/
+        : /by myself tomorrow at \S/,
+    );
+    expect(at(nextDay)).not.toMatch(/minutes/);
   });
 });
