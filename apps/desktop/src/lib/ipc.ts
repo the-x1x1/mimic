@@ -257,6 +257,14 @@ export const ipc = {
    * The token is tried first; nothing is kept if it doesn't work.
    */
   connectSlack: (token: string) => call("connect_slack", Source, { token }),
+  /**
+   * Sign in with Microsoft in the browser for Teams, and connect the account
+   * signed in as. Resolves once the browser has come back; stopped with
+   * `cancelMailSignIn`.
+   */
+  connectTeams: () => call("connect_teams", Source),
+  /** Sign a connected Teams account in again, as the same account. */
+  signInTeamsAgain: (sourceId: string) => call("sign_in_teams_again", Source, { sourceId }),
   /** A connected workspace's token, given again for the same account. */
   setSlackToken: (sourceId: string, token: string) =>
     call("set_slack_token", Source, { sourceId, token }),

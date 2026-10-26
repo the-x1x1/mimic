@@ -4,6 +4,7 @@ import {
   CHANNEL_LABELS,
   mailboxAuth,
   slackWorkspace,
+  teamsAccount,
   type Channel,
   type Source,
 } from "@mimic/contracts";
@@ -12,6 +13,7 @@ import { useDeleteSource, useSources, useStartImport } from "@/hooks/useSources"
 import { AddSourceDialog } from "./AddSourceDialog";
 import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
 import { ConnectSlackDialog, SlackToken } from "./ConnectSlackDialog";
+import { ConnectTeamsDialog, TeamsSignInAgain } from "./ConnectTeamsDialog";
 import { MailboxPassword, MailboxSignInAgain } from "./MailboxPassword";
 import { MailboxSending } from "./MailboxSending";
 import { SentList } from "./SentList";
@@ -35,6 +37,8 @@ function whereFrom(s: Source): string {
   }
   const slack = slackWorkspace(s);
   if (slack) return `Slack, as ${slack.user} · checked ${formatRelative(slack.lastCheckedAt)}`;
+  const teams = teamsAccount(s);
+  if (teams) return `Teams, as ${teams.user} · checked ${formatRelative(teams.lastCheckedAt)}`;
   return s.location ?? s.connector;
 }
 
@@ -45,6 +49,7 @@ export function SourcesPage() {
   const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectingSlack, setConnectingSlack] = useState(false);
+  const [connectingTeams, setConnectingTeams] = useState(false);
   const hasMailbox = (sources.data ?? []).some((s) => s.connector === "imap");
 
   return (
@@ -60,6 +65,7 @@ export function SourcesPage() {
           <div className="row gap-2">
             <Button onClick={() => setConnecting(true)}>Connect a mailbox</Button>
             <Button onClick={() => setConnectingSlack(true)}>Connect Slack</Button>
+            <Button onClick={() => setConnectingTeams(true)}>Connect Teams</Button>
             <Button variant="primary" onClick={() => setAdding(true)}>
               Add a file
             </Button>
@@ -78,6 +84,7 @@ export function SourcesPage() {
               </Button>
               <Button onClick={() => setConnecting(true)}>Connect a mailbox (optional)</Button>
               <Button onClick={() => setConnectingSlack(true)}>Connect Slack (optional)</Button>
+              <Button onClick={() => setConnectingTeams(true)}>Connect Teams (optional)</Button>
             </div>
           }
         />
@@ -123,7 +130,9 @@ export function SourcesPage() {
                         onClick={() => startImport.mutate(s.id)}
                         disabled={s.status === "importing" || startImport.isPending}
                       >
-                        {s.connector === "imap" || s.connector === "slack"
+                        {s.connector === "imap" ||
+                        s.connector === "slack" ||
+                        s.connector === "teams"
                           ? "Check now"
                           : s.messageCount > 0
                             ? "Import again"
@@ -143,6 +152,8 @@ export function SourcesPage() {
                       <MailboxPassword sourceId={s.id} name={s.name} />
                     ) : s.connector === "slack" ? (
                       <SlackToken sourceId={s.id} name={s.name} />
+                    ) : s.connector === "teams" ? (
+                      <TeamsSignInAgain sourceId={s.id} name={s.name} />
                     ) : null}
                   </td>
                 </tr>
@@ -163,6 +174,7 @@ export function SourcesPage() {
       {adding ? <AddSourceDialog onClose={() => setAdding(false)} /> : null}
       {connecting ? <ConnectMailboxDialog onClose={() => setConnecting(false)} /> : null}
       {connectingSlack ? <ConnectSlackDialog onClose={() => setConnectingSlack(false)} /> : null}
+      {connectingTeams ? <ConnectTeamsDialog onClose={() => setConnectingTeams(false)} /> : null}
     </div>
   );
 }

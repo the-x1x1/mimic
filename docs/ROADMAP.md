@@ -78,7 +78,9 @@ Done in 0.10.0-alpha.26: signing in with Google. Done in 0.10.0-alpha.27: mail r
 
 Done in 0.10.0-alpha.64: Slack — a workspace's direct and group messages, read with a user token from the user's own Slack app (`sources::slack`), on the mail schedule. Done in 0.10.0-alpha.65: a reply the user approves, sent into the Slack conversation it answers. Done in 0.10.0-alpha.66: replying in Slack by itself, to direct messages, under the same rules. Not done: never run against a real workspace; threads inside a direct message (only what reaches the conversation itself is read).
 
-Next: other places messages arrive (Teams).
+Done in 0.10.0-alpha.67: Microsoft Teams — a work or school account's one-to-one and group chats, read through Microsoft Graph (`sources::teams`). Not done: never run against a real tenant; channels and meeting chats; a personal account's Teams, which Graph doesn't offer.
+
+Next: replying in Teams, the reply the user approves and then by itself.
 
 ## Phase 8 — Advanced personalization
 

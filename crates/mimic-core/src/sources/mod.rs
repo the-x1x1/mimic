@@ -28,6 +28,7 @@ pub mod outgoing;
 pub mod slack;
 pub mod sms;
 pub mod smtp;
+pub mod teams;
 pub mod telegram;
 pub mod transcript;
 pub mod whatsapp;
