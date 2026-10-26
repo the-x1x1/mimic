@@ -104,6 +104,9 @@ pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
 pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
 pub const LIST: &str = "It came through a mailing list, where a reply goes to everyone on it, so it waits for you.";
+/// Filed by the user's own rules into another folder (0.10.0-alpha.73,
+/// `imap::ImapSourceConfig::also_read`): theirs to look at.
+pub const FILED: &str = "It was in another of your folders, not your inbox, so it waits for you.";
 /// It came with something a reply can't have read (0.10.0-alpha.53).
 pub const ATTACHED: &str = "It came with an attachment or an invitation, which I can't read, so it waits for you.";
 /// A reply to it is already in the Sent folder (0.10.0-alpha.56): from Mimic
@@ -421,6 +424,10 @@ fn refusal(
     // Through a list, a reply goes to the list (RFC 3834 §2).
     if incoming.metadata.get("list").and_then(serde_json::Value::as_bool) == Some(true) {
         return Ok(Some(LIST));
+    }
+    // Filed away from the inbox by the user's own rules (0.10.0-alpha.73).
+    if incoming.metadata.get("folder").is_some_and(|f| !f.is_null()) {
+        return Ok(Some(FILED));
     }
     // Something besides the words: a reply by itself would answer without
     // having read it.
@@ -1308,6 +1315,8 @@ mod tests {
                 copy_to_sent: Some(false),
             }),
             signature: None,
+            also_read: Vec::new(),
+            passed_over: Vec::new(),
         };
         let mailbox = db
             .create_source(&NewSource {
@@ -1520,6 +1529,18 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "{NOT_LOOKED_AT}");
+
+        // Filed in another of the user's folders by their own rules.
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_set(metadata_json, '$.folder', 'Receipts')
+                 WHERE external_id = 'l3@x.example'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "{FILED}");
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(0)).unwrap().as_deref(), Some(FILED));
 
         // One already held is stopped, saying why.
         let w = world(Behaviour::default());

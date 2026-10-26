@@ -201,6 +201,8 @@ pub fn run() {
             commands::sending::list_sent,
             commands::sending::reply_did_not_go,
             commands::sending::get_mailbox_sending,
+            commands::mail_folders::mailbox_folders,
+            commands::mail_folders::set_mailbox_folders,
             commands::sending::set_mailbox_sending,
             commands::sending::reset_mailbox_sending,
             commands::compose::get_draft_outcomes,

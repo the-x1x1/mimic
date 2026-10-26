@@ -306,6 +306,27 @@ export const ImapProbe = z.object({
 });
 export type ImapProbe = z.infer<typeof ImapProbe>;
 
+/** A folder a mailbox may be read in as well as its inbox and sent folder (0.10.0-alpha.73). */
+export const MailboxFolder = z.object({
+  /** As the server names it: what is sent back to choose it. */
+  name: z.string(),
+  /** As people read it. */
+  shown: z.string(),
+  chosen: z.boolean(),
+});
+export type MailboxFolder = z.infer<typeof MailboxFolder>;
+
+/** The folders offered, and those chosen that the server no longer has. */
+export const MailboxFolders = z.object({
+  folders: z.array(MailboxFolder),
+  gone: z.array(z.string()),
+  /** Chosen, and not opened by the last check: passed over. */
+  unopened: z.array(z.string()),
+  /** How many may be chosen. */
+  most: z.number(),
+});
+export type MailboxFolders = z.infer<typeof MailboxFolders>;
+
 /**
  * Server settings for the providers most people use. Most want an app
  * password for IMAP, not the account password; the dialog says so. Microsoft
