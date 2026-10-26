@@ -23,17 +23,29 @@ use crate::SharedState;
 const FIRST_PAUSE: Duration = Duration::from_secs(30);
 const LONGEST_PAUSE: Duration = Duration::from_secs(10 * 60);
 
-/// The mailboxes being watched, and those whose server can't be.
+/// The mailboxes being watched, those the server is listening for now, and
+/// those whose server can't be.
 #[derive(Default)]
 pub struct Watchers {
     running: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    listening: Mutex<HashSet<String>>,
     no_idle: Mutex<HashSet<String>>,
 }
 
 impl Watchers {
-    /// How many mailboxes are watched now.
-    pub fn watching(&self) -> usize {
-        self.running.lock().unwrap_or_else(|p| p.into_inner()).len()
+    /// How many mailboxes the server is listening for now: what the home
+    /// screen may say arrives as it comes.
+    pub fn listening(&self) -> usize {
+        self.listening.lock().unwrap_or_else(|p| p.into_inner()).len()
+    }
+
+    fn heard(&self, source_id: &str, on: bool) {
+        let mut listening = self.listening.lock().unwrap_or_else(|p| p.into_inner());
+        if on {
+            listening.insert(source_id.to_string());
+        } else {
+            listening.remove(source_id);
+        }
     }
 }
 
@@ -115,8 +127,11 @@ fn run(state: SharedState, source_id: String, stop: Arc<AtomicBool>) {
         };
         let folder = config.folders.first().cloned().unwrap_or_else(|| "INBOX".to_string());
         let should_stop = || stop.load(Ordering::SeqCst);
+        let listening = |on: bool| state.watchers.heard(&source_id, on);
         let mut arrived = || crate::commands::autoreply::queue_check(&state, &source_id);
-        match imap::watch(&config.account, &folder, &credential, Watching::USUAL, &should_stop, &mut arrived) {
+        let watched =
+            imap::watch(&config.account, &folder, &credential, Watching::USUAL, &should_stop, &listening, &mut arrived);
+        match watched {
             Ok(Watched::Stopped) => break,
             Ok(Watched::Renew) => pause = FIRST_PAUSE,
             Ok(Watched::NoIdle) => {

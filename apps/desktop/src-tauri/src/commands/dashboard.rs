@@ -12,7 +12,17 @@ pub async fn get_dashboard(
     show_left_out: Option<bool>,
 ) -> CommandResult<mimic_core::dashboard::Dashboard> {
     let auto = mimic_core::assist::is_enabled(&state.db)?;
-    Ok(mimic_core::dashboard::dashboard(&state.db, limit.unwrap_or(25).min(200), auto, show_left_out.unwrap_or(false))?)
+    let mut dashboard = mimic_core::dashboard::dashboard(
+        &state.db,
+        limit.unwrap_or(25).min(200),
+        auto,
+        show_left_out.unwrap_or(false),
+    )?;
+    // Only the app knows which mailboxes a server is listening for now.
+    if let Some(checking) = dashboard.mail_checking.as_mut() {
+        checking.listening = state.watchers.listening().min(checking.mailboxes);
+    }
+    Ok(dashboard)
 }
 
 /// Up to `limit` messages of a conversation next to one of its messages,
