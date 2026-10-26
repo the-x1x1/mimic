@@ -61,6 +61,36 @@ pub struct SmtpAccount {
     pub username: String,
     /// The address replies go out from.
     pub from_address: String,
+    /// Whether a copy of each reply is put in the mailbox's Sent folder
+    /// (0.10.0-alpha.25): `None` for what the provider is known to need —
+    /// nothing for those that keep one themselves (`keeps_sent`).
+    #[serde(default)]
+    pub copy_to_sent: Option<bool>,
+}
+
+impl SmtpAccount {
+    /// Whether Mimic puts a copy of a reply in the Sent folder itself.
+    pub fn copies_to_sent(&self) -> bool {
+        self.copy_to_sent.unwrap_or_else(|| !keeps_sent(&self.host))
+    }
+}
+
+/// The servers whose providers put what is sent through them in the Sent
+/// folder themselves, so a copy from Mimic would be a second one: Gmail,
+/// Outlook.com and Microsoft 365, Yahoo and AOL, and Proton Mail Bridge on
+/// this computer. Any other is copied to unless the user says not to.
+pub fn keeps_sent(smtp_host: &str) -> bool {
+    matches!(
+        smtp_host.trim().to_ascii_lowercase().as_str(),
+        "smtp.gmail.com"
+            | "smtp.googlemail.com"
+            | "smtp-mail.outlook.com"
+            | "smtp.office365.com"
+            | "smtp.mail.yahoo.com"
+            | "smtp.aol.com"
+            | "127.0.0.1"
+            | "localhost"
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -573,7 +603,7 @@ pub fn known_for(imap_host: &str, username: &str) -> Option<SmtpAccount> {
         "127.0.0.1" | "localhost" => ("127.0.0.1", 1025, SmtpSecurity::Plain),
         _ => return None,
     };
-    Some(SmtpAccount { host: smtp.to_string(), port, security, username, from_address })
+    Some(SmtpAccount { host: smtp.to_string(), port, security, username, from_address, copy_to_sent: None })
 }
 
 /// Microsoft's own mail domains — not an organisation's.
@@ -735,6 +765,7 @@ mod tests {
             security,
             username: "c@example.com".into(),
             from_address: "c@example.com".into(),
+            copy_to_sent: None,
         }
     }
 
@@ -927,6 +958,22 @@ mod tests {
         assert!(ext.starttls);
         assert_eq!(ext.size, Some(35882577));
         assert!(ext.auth.contains(&"XOAUTH2".to_string()) && ext.auth.contains(&"PLAIN".to_string()));
+    }
+
+    #[test]
+    fn a_copy_goes_to_the_sent_folder_only_where_the_provider_keeps_none() {
+        let gmail = known_for("imap.gmail.com", "c@gmail.com").unwrap();
+        assert!(!gmail.copies_to_sent(), "Gmail keeps its own");
+        let icloud = known_for("imap.mail.me.com", "c@icloud.com").unwrap();
+        assert!(icloud.copies_to_sent());
+        assert!(!SmtpAccount { copy_to_sent: Some(false), ..icloud }.copies_to_sent(), "the user says");
+        let read: SmtpAccount = serde_json::from_value(serde_json::json!({
+            "host": "smtp.fastmail.com", "port": 465, "security": "tls",
+            "username": "c@fastmail.com", "fromAddress": "c@fastmail.com"
+        }))
+        .unwrap();
+        assert_eq!(read.copy_to_sent, None, "set up before there was a choice");
+        assert!(read.copies_to_sent());
     }
 
     #[test]

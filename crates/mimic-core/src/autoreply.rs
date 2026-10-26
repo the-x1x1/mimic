@@ -424,6 +424,7 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
         match sending::deliver(db, credentials, &config, &account, &entry, &bytes) {
             Ok(()) => {
                 run.sent += 1;
+                sending::file_a_copy(db, credentials, &config, &account, &entry, &bytes);
                 // Marked first: a draft decided as sent but not marked would
                 // be learned from as the user's.
                 if let Err(e) =
@@ -546,6 +547,7 @@ mod tests {
                 security: SmtpSecurity::Plain,
                 username: "c@example.com".into(),
                 from_address: "c@example.com".into(),
+                copy_to_sent: Some(false),
             }),
         };
         let mailbox = db

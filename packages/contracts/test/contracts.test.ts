@@ -1336,6 +1336,14 @@ describe("what was sent says where it went and whether it got there", () => {
     expect(describeOutboxEntry(entry({ status: "unsure" }))).toMatch(/Look in your Sent folder/);
   });
 
+  it("says when a reply went but its copy in the Sent folder couldn't be made", () => {
+    const note = "It went, but I couldn't put a copy in your Sent folder: the server said no";
+    expect(describeOutboxEntry(entry({ error: note }))).toBe(`Sent to ada@example.com. ${note}`);
+    expect(describeOutboxEntry(entry({ how: "autonomous", error: note }))).toBe(
+      `I sent this to ada@example.com by myself. ${note}`,
+    );
+  });
+
   it("treats only a send that may have gone as one not to repeat", () => {
     expect(sendMayHaveGone("send_unsure")).toBe(true);
     expect(sendMayHaveGone("send_failed")).toBe(false);

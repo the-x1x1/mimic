@@ -496,6 +496,39 @@ impl<S: Read + Write> Session<S> {
         Ok(out)
     }
 
+    /// Put a message in a folder, marked as read: `APPEND`, the message
+    /// as a literal after the server's go-ahead. Only `copy_to_sent` calls
+    /// it, with a reply Mimic has just sent; nothing else in this module
+    /// writes to a mailbox.
+    pub fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), ImapError> {
+        self.tag += 1;
+        let tag = format!("m{}", self.tag);
+        self.stream
+            .write_all(format!("{tag} APPEND {} (\\Seen) {{{}}}\r\n", quote(folder)?, message.len()).as_bytes())?;
+        self.stream.flush()?;
+        loop {
+            let line = self.read_line()?;
+            if line.text.starts_with('+') {
+                break;
+            }
+            if let Some(rest) = line.text.strip_prefix(&format!("{tag} ")) {
+                return Err(ImapError::Refused(refusal(rest)));
+            }
+        }
+        self.stream.write_all(message)?;
+        self.stream.write_all(b"\r\n")?;
+        self.stream.flush()?;
+        loop {
+            let line = self.read_line()?;
+            if let Some(rest) = line.text.strip_prefix(&format!("{tag} ")) {
+                if rest.to_ascii_uppercase().starts_with("OK") {
+                    return Ok(());
+                }
+                return Err(ImapError::Refused(refusal(rest)));
+            }
+        }
+    }
+
     pub fn logout(&mut self) {
         let _ = self.command("LOGOUT");
     }
@@ -642,9 +675,30 @@ impl Connection {
     pub fn sizes(&mut self, uids: &[u32]) -> Result<Vec<(u32, u64)>, ImapError> {
         with_session!(self, s => s.sizes(uids))
     }
+    pub fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), ImapError> {
+        with_session!(self, s => s.append(folder, message))
+    }
     pub fn logout(&mut self) {
         with_session!(self, s => s.logout())
     }
+}
+
+/// Put a copy of a reply Mimic sent in the mailbox's Sent folder, marked as
+/// read, for a provider that doesn't keep one itself (`smtp::keeps_sent`):
+/// the one write to a mailbox Mimic makes, and only of what it sent.
+pub fn copy_to_sent(config: &ImapSourceConfig, credential: &Credential, message: &[u8]) -> Result<(), ImapError> {
+    let mut conn = Connection::open(&config.account, credential)?;
+    let sent = match &config.sent_folder {
+        Some(folder) => Some(folder.clone()),
+        None => choose_folders(&conn.list()?).1,
+    };
+    let Some(sent) = sent else {
+        conn.logout();
+        return Err(ImapError::Refused("this mailbox has no Sent folder I could find".into()));
+    };
+    let appended = conn.append(&sent, message);
+    conn.logout();
+    appended
 }
 
 /// What connecting found, before anything is imported: shown on the screen
@@ -1418,6 +1472,17 @@ mod tests {
                             }
                         }
                         w.write_all(format!("{tag} OK fetch done\r\n").as_bytes()).unwrap();
+                    } else if upper.starts_with("APPEND") {
+                        // `APPEND "Sent" (\Seen) {n}`: the go-ahead, then n
+                        // bytes and a line ending.
+                        let n: usize = cmd.rsplit('{').next().unwrap().trim_end_matches('}').parse().unwrap();
+                        w.write_all(b"+ Ready for literal data\r\n").unwrap();
+                        let mut body = vec![0u8; n];
+                        std::io::Read::read_exact(&mut r, &mut body).unwrap();
+                        let mut end = String::new();
+                        r.read_line(&mut end).unwrap();
+                        seen.push(format!("(appended {})", String::from_utf8_lossy(&body)));
+                        w.write_all(format!("{tag} OK [APPENDUID 1 99] APPEND completed\r\n").as_bytes()).unwrap();
                     } else if upper.starts_with("LOGOUT") {
                         w.write_all(format!("* BYE\r\n{tag} OK bye\r\n").as_bytes()).unwrap();
                         break;
@@ -2264,6 +2329,43 @@ mod tests {
 
         db.create_job(JOB_KIND, &json!({ "sourceId": source }), true).unwrap();
         assert!(due(&db, now + chrono::Duration::minutes(60)).unwrap().is_empty(), "a queued check is not doubled");
+    }
+
+    #[test]
+    fn a_sent_reply_is_copied_to_the_sent_folder_read_and_nothing_else_is_written() {
+        let boxes = vec![
+            Mailbox { name: "INBOX", validity: 1, messages: vec![] },
+            Mailbox { name: "Sent", validity: 1, messages: vec![] },
+        ];
+        let (port, seen) = serve(boxes, "pw");
+        let config = ImapSourceConfig {
+            account: ImapAccount {
+                host: "127.0.0.1".into(),
+                port,
+                username: "c@example.com".into(),
+                security: Security::Plain,
+                auth: Auth::Password,
+            },
+            folders: vec![],
+            sent_folder: None,
+            marks: BTreeMap::new(),
+            last_checked_at: None,
+            sending: None,
+        };
+        let reply = b"From: c@example.com\r\nTo: ada@example.com\r\nSubject: Re: Lunch\r\n\r\nsee you there\r\n";
+        copy_to_sent(&config, &pw("pw"), reply).unwrap();
+        let commands = seen.recv().unwrap();
+        let append = commands.iter().find(|c| c.contains("APPEND")).expect("an APPEND");
+        assert!(append.ends_with(&format!("APPEND \"Sent\" (\\Seen) {{{}}}", reply.len())), "{append}");
+        assert!(commands.iter().any(|c| c.contains("(appended From: c@example.com")), "{commands:?}");
+        assert!(
+            !commands.iter().any(|c| ["STORE", "EXPUNGE", "DELETE", "COPY", "MOVE", "SELECT"].iter().any(|w| c
+                .to_ascii_uppercase()
+                .split_whitespace()
+                .nth(1)
+                == Some(w))),
+            "only the copy is written: {commands:?}"
+        );
     }
 
     #[test]

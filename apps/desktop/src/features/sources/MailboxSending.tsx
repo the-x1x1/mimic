@@ -43,7 +43,7 @@ export function MailboxSending({ sourceId, name }: { sourceId: string; name: str
     return (
       <p className="muted small">
         {sending
-          ? `Replies go out through ${sending.host} as ${sending.fromAddress}${current.data?.setByUser ? "" : ", this provider's usual server"}. `
+          ? `Replies go out through ${sending.host} as ${sending.fromAddress}${current.data?.setByUser ? "" : ", this provider's usual server"}${(sending.copyToSent ?? !current.data?.keepsSent) ? ", and I put a copy of each in your Sent folder" : ""}. `
           : "I can't send replies from this mailbox until you tell me its outgoing server. "}
         <button type="button" className="linkish" onClick={start}>
           {sending ? "Change" : "Set up sending"}
@@ -120,6 +120,17 @@ export function MailboxSending({ sourceId, name }: { sourceId: string; name: str
           value={form.fromAddress}
           onChange={(e) => set("fromAddress", e.target.value)}
         />
+      </label>
+      <label className="row gap-2">
+        <input
+          type="checkbox"
+          checked={form.copyToSent ?? !(current.data?.keepsSent ?? false)}
+          onChange={(e) => set("copyToSent", e.target.checked)}
+        />
+        <span>
+          Put a copy of each reply in my Sent folder
+          {current.data?.keepsSent ? " (this provider already does)" : ""}
+        </span>
       </label>
       <p className="muted small">
         I sign in with this mailbox&rsquo;s own password or sign-in to check it, and send nothing.

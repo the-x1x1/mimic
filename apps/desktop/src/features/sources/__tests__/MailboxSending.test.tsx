@@ -34,7 +34,7 @@ describe("how a mailbox sends", () => {
   });
 
   it("says which server replies go out through, and that it is the provider's usual one", async () => {
-    native.mailboxSending.mockResolvedValue({ sending: gmail, setByUser: false });
+    native.mailboxSending.mockResolvedValue({ sending: gmail, setByUser: false, keepsSent: true });
     renderIt();
     expect(
       await screen.findByText(
@@ -45,10 +45,11 @@ describe("how a mailbox sends", () => {
   });
 
   it("is set up by hand for a provider it doesn't know, checked before it is kept", async () => {
-    native.mailboxSending.mockResolvedValue({ sending: null, setByUser: false });
+    native.mailboxSending.mockResolvedValue({ sending: null, setByUser: false, keepsSent: false });
     native.setMailboxSending.mockImplementation(async (_id: string, sending: unknown) => ({
       sending,
       setByUser: true,
+      keepsSent: false,
     }));
     renderIt();
     fireEvent.click(await screen.findByRole("button", { name: "Set up sending" }));
@@ -67,11 +68,14 @@ describe("how a mailbox sends", () => {
         fromAddress: "me@example.org",
       }),
     );
+    expect(
+      await screen.findByText(/and I put a copy of each in your Sent folder/),
+    ).toBeInTheDocument();
     expect(await screen.findByText(/Replies go out through mail.example.org/)).toBeInTheDocument();
   });
 
   it("keeps the form open with the server's answer when the check fails", async () => {
-    native.mailboxSending.mockResolvedValue({ sending: gmail, setByUser: true });
+    native.mailboxSending.mockResolvedValue({ sending: gmail, setByUser: true, keepsSent: true });
     native.setMailboxSending.mockRejectedValue(
       new Error("The mail server turned down the sign-in for sending (535)."),
     );

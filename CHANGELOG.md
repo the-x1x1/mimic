@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.25] — 2026-10-26
+
+A copy in your Sent folder.
+
+### Added
+
+- **Replies I send land in your Sent folder.** Gmail, Outlook.com, Microsoft 365, Yahoo and AOL put what is sent through them there themselves. For any other provider — iCloud, Fastmail and the rest — I put a copy of each reply there, marked as read, so your mail program shows what went. You can turn the copy on or off for a mailbox under Your mail → sending. It's the one thing I ever write to your mailbox.
+- If the copy can't be made, the reply still went: What I've sent says so beside it.
+
 ## [0.10.0-alpha.24] — 2026-10-26
 
 Replying by myself.
