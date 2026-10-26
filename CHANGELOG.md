@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.65] — 2026-10-26
+
+Replying in Slack.
+
+### Added
+
+- **Send a reply into Slack.** A draft for a Slack message now has **Send**, like one for an email: it shows the workspace you send as and the conversation it goes into, and goes in as you when you press **Send it** — into that conversation only, word for word. If Slack's answer gets lost on the way, I say so and won't send it again until you've looked. **Use this** still copies it instead.
+
 ## [0.10.0-alpha.64] — 2026-10-26
 
 Slack.

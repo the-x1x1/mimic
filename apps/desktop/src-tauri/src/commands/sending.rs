@@ -29,6 +29,31 @@ pub async fn reply_envelope(state: State<'_, SharedState>, draft_id: String) -> 
 /// words, the addresses and the subject stay in the database.
 #[tauri::command]
 pub async fn send_reply(state: State<'_, SharedState>, request: SendRequest) -> CommandResult<OutboxEntry> {
+    // Into Slack, with the workspace's own token (0.10.0-alpha.65).
+    let to_slack =
+        state.db.get_source(&request.source_id)?.is_some_and(|s| s.connector == mimic_core::sources::slack::CONNECTOR);
+    if to_slack {
+        use mimic_core::providers::SecretStore;
+        let token = state
+            .secrets
+            .get(&mimic_core::sources::slack::secret_key(&request.source_id))
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| {
+                CommandError::new(
+                    "cannot_send",
+                    "I don't have a Slack token I can use for this workspace. Give me one under Your mail.",
+                )
+            })?;
+        let db = state.db.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let api = mimic_core::sources::slack::SlackApi::new(&token)
+                .map_err(|e| sending::SendError::Slack(e.to_string()))?;
+            sending::slack::send_reply(&db, &api, &request)
+        })
+        .await
+        .map_err(|e| CommandError::new("internal", e.to_string()))?
+        .map_err(CommandError::from);
+    }
     let (db, credentials) = (state.db.clone(), state.mail_credentials.clone());
     tauri::async_runtime::spawn_blocking(move || sending::send_reply(&db, &credentials, &request))
         .await

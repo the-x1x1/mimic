@@ -919,7 +919,7 @@ export function DraftReview({
           : "You didn't tell me what you wanted to say, so this comes from their message and how you usually write — worth a read before you use it."}{" "}
         {sendable
           ? "Send shows you who it goes to before it goes; “Use this” copies it for you to send yourself."
-          : `“Use this” copies it so you can paste it into your email.${envelope.data?.whyNot ? ` ${envelope.data.whyNot}` : ""}`}
+          : `“Use this” copies it so you can paste it ${draft.channel === "email" ? "into your email" : "where you reply"}.${envelope.data?.whyNot ? ` ${envelope.data.whyNot}` : ""}`}
       </p>
     </div>
   );

@@ -6,7 +6,7 @@
 //! app of their own, installed to their workspace with the user scopes
 //! `im:history`, `im:read`, `mpim:history`, `mpim:read` and `users:read`
 //! (`users:read.email` to match people with their email too; `chat:write`
-//! for sending, later). The token is kept in the secret store
+//! to send a reply the user approves, `post`, 0.10.0-alpha.65). The token is kept in the secret store
 //! (`secret_key`), never in the source's settings.
 //!
 //! A check (`sync`, the `check_slack` job) lists the user's direct messages
@@ -159,18 +159,7 @@ impl SlackApi {
         if value.get("ok").and_then(Value::as_bool) == Some(true) {
             return Ok(value);
         }
-        let error = value.get("error").and_then(Value::as_str).unwrap_or("unknown_error").to_string();
-        Err(match error.as_str() {
-            "invalid_auth" | "not_authed" | "token_revoked" | "token_expired" | "account_inactive" => {
-                SlackError::Token(error)
-            }
-            "missing_scope" => SlackError::Scope {
-                scope: value.get("needed").and_then(Value::as_str).unwrap_or("needed").to_string(),
-                what,
-            },
-            "ratelimited" => SlackError::RateLimited,
-            _ => SlackError::Refused(error),
-        })
+        Err(refusal(&value, what))
     }
 
     pub fn auth_test(&self) -> Result<Identity, SlackError> {
@@ -260,6 +249,52 @@ impl SlackApi {
         Ok(me)
     }
 
+    /// Post `text` into a conversation as the user (`chat.postMessage`,
+    /// 0.10.0-alpha.65): the new message's `ts`, or why not — and whether it
+    /// may have gone anyway.
+    pub fn post(&self, channel: &str, text: &str) -> Result<String, PostError> {
+        let response = self
+            .client
+            .post(format!("{}/chat.postMessage", self.base))
+            .bearer_auth(&self.token)
+            .json(&json!({ "channel": channel, "text": escaped(text) }))
+            .send();
+        let response = match response {
+            Ok(r) => r,
+            // Never reached Slack: nothing went.
+            Err(e) if e.is_connect() || e.is_builder() => {
+                return Err(PostError::NotSent(SlackError::Network(one_line(&e.to_string()))))
+            }
+            Err(e) => return Err(PostError::Unsure(one_line(&e.to_string()))),
+        };
+        let status = response.status().as_u16();
+        if status == 429 {
+            return Err(PostError::NotSent(SlackError::RateLimited));
+        }
+        let value: Value = match response.json() {
+            Ok(v) => v,
+            Err(e) => return Err(PostError::Unsure(format!("Slack answered {status}: {}", one_line(&e.to_string())))),
+        };
+        if value.get("ok").and_then(Value::as_bool) == Some(true) {
+            return value
+                .get("ts")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| PostError::Unsure("Slack said it went, without saying which message it was".into()));
+        }
+        // Slack's own failures may come after it took the message.
+        let error = value.get("error").and_then(Value::as_str).unwrap_or("");
+        if status >= 500
+            || matches!(error, "fatal_error" | "internal_error" | "service_unavailable" | "request_timeout")
+        {
+            return Err(PostError::Unsure(format!("Slack answered {status} {error}")));
+        }
+        if error == "rate_limited" {
+            return Err(PostError::NotSent(SlackError::RateLimited));
+        }
+        Err(PostError::NotSent(refusal(&value, "send as you")))
+    }
+
     pub fn user(&self, id: &str) -> Result<Person, SlackError> {
         let v = self.call("users.info", &[("user", id)], "say who people are")?;
         let user = v.get("user").cloned().unwrap_or(Value::Null);
@@ -273,6 +308,39 @@ impl SlackApi {
             .unwrap_or_else(|| id.to_string());
         Ok(Person { name, email: pick(profile.and_then(|p| p.get("email"))) })
     }
+}
+
+/// Why Slack said no, from its answer.
+fn refusal(value: &Value, what: &'static str) -> SlackError {
+    let error = value.get("error").and_then(Value::as_str).unwrap_or("unknown_error").to_string();
+    match error.as_str() {
+        "invalid_auth" | "not_authed" | "token_revoked" | "token_expired" | "account_inactive" => {
+            SlackError::Token(error)
+        }
+        "missing_scope" => SlackError::Scope {
+            scope: value.get("needed").and_then(Value::as_str).unwrap_or("needed").to_string(),
+            what,
+        },
+        "ratelimited" => SlackError::RateLimited,
+        _ => SlackError::Refused(error),
+    }
+}
+
+/// Why a post didn't go — or might have.
+#[derive(Debug, thiserror::Error)]
+pub enum PostError {
+    #[error(transparent)]
+    NotSent(SlackError),
+    /// Asked, and no clear answer came back: it may have gone.
+    #[error("I lost Slack's answer as it was being sent ({0}), so it may or may not have gone.")]
+    Unsure(String),
+}
+
+/// Text as Slack should show it, word for word: its markup characters
+/// escaped, so `<@U1>` or `<!channel>` typed in a reply is shown, not acted
+/// on. `readable` reads it back to what was written.
+pub fn escaped(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 /// A message's text as people read it: `<@U1>` as `@name`, `<#C1|general>`
@@ -321,7 +389,7 @@ fn ts_key(ts: &str) -> (u64, u64) {
     (secs.parse().unwrap_or(0), micros.parse().unwrap_or(0))
 }
 
-fn ts_time(ts: &str) -> Option<String> {
+pub(crate) fn ts_time(ts: &str) -> Option<String> {
     let (secs, _) = ts_key(ts);
     Utc.timestamp_opt(i64::try_from(secs).ok()?, 0).single().map(|t| t.to_rfc3339_opts(SecondsFormat::Secs, true))
 }
@@ -736,13 +804,21 @@ impl crate::jobs::JobExecutor for CheckSlackExecutor {
 pub(crate) mod fake {
     //! A Slack to talk to: each request answered by `answer` from its method
     //! and query, and every request's method and query kept.
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
 
+    use super::{account_id, connected_as, new_source, Identity};
+    use crate::db::{Db, IdentifierKind};
+
+    pub(crate) const TOKEN: &str = "xoxp-1111111111-2222222222-abcdefabcdef";
+
     pub(crate) type Answer = Box<dyn Fn(&str, &str) -> (u16, String) + Send>;
 
-    pub(crate) fn slack(answer: Answer) -> (String, Arc<Mutex<Vec<String>>>) {
+    /// Every request, as `method?query` (or `method?body` for a post).
+    pub(crate) type Seen = Arc<Mutex<Vec<String>>>;
+
+    pub(crate) fn slack(answer: Answer) -> (String, Seen) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let base = format!("http://127.0.0.1:{}/api", listener.local_addr().unwrap().port());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -756,24 +832,40 @@ pub(crate) mod fake {
                     continue;
                 }
                 let mut authorized = false;
+                let mut length = 0;
                 loop {
                     let mut line = String::new();
                     if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim_end().is_empty() {
                         break;
                     }
-                    if line.to_ascii_lowercase().starts_with("authorization: bearer xoxp-") {
+                    let lower = line.to_ascii_lowercase();
+                    if lower.starts_with("authorization: bearer xoxp-") {
                         authorized = true;
                     }
+                    if let Some(n) = lower.strip_prefix("content-length:") {
+                        length = n.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut sent = vec![0; length];
+                if reader.read_exact(&mut sent).is_err() {
+                    continue;
                 }
                 let target = first.split_whitespace().nth(1).unwrap_or("").to_string();
                 let (path, query) = target.split_once('?').unwrap_or((target.as_str(), ""));
                 let method = path.rsplit('/').next().unwrap_or("").to_string();
+                // What was posted stands for the query.
+                let query =
+                    if sent.is_empty() { query.to_string() } else { String::from_utf8_lossy(&sent).into_owned() };
                 kept.lock().unwrap().push(format!("{method}?{query}"));
                 let (status, body) = if authorized {
-                    answer(&method, query)
+                    answer(&method, &query)
                 } else {
                     (200, r#"{"ok":false,"error":"not_authed"}"#.into())
                 };
+                // Status 0: the connection is dropped without an answer.
+                if status == 0 {
+                    continue;
+                }
                 let mut w = stream;
                 let reply = format!(
                     "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -784,13 +876,54 @@ pub(crate) mod fake {
         });
         (base, seen)
     }
+
+    /// A workspace with one direct message with Ada, and one group message.
+    pub(crate) fn acme(round: Arc<std::sync::atomic::AtomicUsize>) -> Answer {
+        Box::new(move |method, query| {
+            let round = round.load(std::sync::atomic::Ordering::SeqCst);
+            let body = match method {
+                "auth.test" => r#"{"ok":true,"team_id":"T1","team":"Acme","user_id":"U1","user":"c"}"#.to_string(),
+                "users.conversations" => r#"{"ok":true,"channels":[{"id":"D1","is_im":true,"user":"U2"},{"id":"G1","is_mpim":true}],"response_metadata":{"next_cursor":""}}"#.to_string(),
+                "users.info" if query.contains("user=U1") => r#"{"ok":true,"user":{"id":"U1","name":"c","profile":{"display_name":"C","email":"c@example.com"}}}"#.to_string(),
+                "users.info" if query.contains("user=U2") => r#"{"ok":true,"user":{"id":"U2","name":"ada","profile":{"display_name":"","real_name":"Ada Lovelace","email":"ada@example.com"}}}"#.to_string(),
+                "users.info" => r#"{"ok":true,"user":{"id":"U3","name":"bob","profile":{"display_name":"Bob"}}}"#.to_string(),
+                "conversations.history" if query.contains("channel=D1") && round == 0 => r#"{"ok":true,"has_more":false,"messages":[
+                    {"type":"message","user":"U2","text":"lunch thursday, <@U1>?","ts":"1770110400.000200"},
+                    {"type":"message","user":"U1","text":"yes!","ts":"1770110040.000100"},
+                    {"type":"message","subtype":"channel_join","user":"U2","text":"joined","ts":"1770110000.000100"},
+                    {"type":"message","bot_id":"B1","text":"reminder","ts":"1770110300.000100"}]}"#.to_string(),
+                "conversations.history" if query.contains("channel=D1") && round == 2 => r#"{"ok":true,"has_more":false,"messages":[
+                    {"type":"message","user":"U1","text":"Yes &lt;noon&gt; &amp; thanks","ts":"1770112000.000100"}]}"#.to_string(),
+                "chat.postMessage" => r#"{"ok":true,"channel":"D1","ts":"1770112000.000100"}"#.to_string(),
+                "conversations.history" if query.contains("channel=D1") => {
+                    assert!(query.contains("oldest=1770110400.000200"), "{query}");
+                    r#"{"ok":true,"has_more":false,"messages":[{"type":"message","user":"U2","text":"noon?","ts":"1770111000.000100"}]}"#.to_string()
+                }
+                "conversations.history" if round == 0 => r#"{"ok":true,"has_more":false,"messages":[
+                    {"type":"message","user":"U3","text":"dinner sunday","ts":"1770111100.000100"}]}"#.to_string(),
+                "conversations.history" => r#"{"ok":true,"has_more":false,"messages":[]}"#.to_string(),
+                _ => r#"{"ok":false,"error":"unknown_method"}"#.to_string(),
+            };
+            (200, body)
+        })
+    }
+
+    pub(crate) fn workspace(db: &Db) -> String {
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::AccountId, &account_id("T1", "U1")).unwrap();
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
+        let me = Identity { team_id: "T1".into(), team: "Acme".into(), user_id: "U1".into(), user: "c".into() };
+        let source = db.create_source(&new_source(&me).unwrap()).unwrap();
+        assert_eq!(connected_as(db, &me).unwrap().as_deref(), Some(source.id.as_str()));
+        assert_eq!(connected_as(db, &Identity { user_id: "U2".into(), ..me }).unwrap(), None);
+        source.id
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::fake::TOKEN;
     use super::*;
-
-    const TOKEN: &str = "xoxp-1111111111-2222222222-abcdefabcdef";
 
     #[test]
     fn a_user_token_is_told_from_a_bots() {
@@ -815,49 +948,10 @@ mod tests {
         assert_eq!(mentioned("hi <@U2> and <@U3|bob>"), ["U2", "U3"]);
     }
 
-    /// A workspace with one direct message with Ada, and one group message.
-    fn answer(round: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> fake::Answer {
-        Box::new(move |method, query| {
-            let round = round.load(std::sync::atomic::Ordering::SeqCst);
-            let body = match method {
-                "auth.test" => r#"{"ok":true,"team_id":"T1","team":"Acme","user_id":"U1","user":"c"}"#.to_string(),
-                "users.conversations" => r#"{"ok":true,"channels":[{"id":"D1","is_im":true,"user":"U2"},{"id":"G1","is_mpim":true}],"response_metadata":{"next_cursor":""}}"#.to_string(),
-                "users.info" if query.contains("user=U1") => r#"{"ok":true,"user":{"id":"U1","name":"c","profile":{"display_name":"C","email":"c@example.com"}}}"#.to_string(),
-                "users.info" if query.contains("user=U2") => r#"{"ok":true,"user":{"id":"U2","name":"ada","profile":{"display_name":"","real_name":"Ada Lovelace","email":"ada@example.com"}}}"#.to_string(),
-                "users.info" => r#"{"ok":true,"user":{"id":"U3","name":"bob","profile":{"display_name":"Bob"}}}"#.to_string(),
-                "conversations.history" if query.contains("channel=D1") && round == 0 => r#"{"ok":true,"has_more":false,"messages":[
-                    {"type":"message","user":"U2","text":"lunch thursday, <@U1>?","ts":"1770110400.000200"},
-                    {"type":"message","user":"U1","text":"yes!","ts":"1770110040.000100"},
-                    {"type":"message","subtype":"channel_join","user":"U2","text":"joined","ts":"1770110000.000100"},
-                    {"type":"message","bot_id":"B1","text":"reminder","ts":"1770110300.000100"}]}"#.to_string(),
-                "conversations.history" if query.contains("channel=D1") => {
-                    assert!(query.contains("oldest=1770110400.000200"), "{query}");
-                    r#"{"ok":true,"has_more":false,"messages":[{"type":"message","user":"U2","text":"noon?","ts":"1770111000.000100"}]}"#.to_string()
-                }
-                "conversations.history" if round == 0 => r#"{"ok":true,"has_more":false,"messages":[
-                    {"type":"message","user":"U3","text":"dinner sunday","ts":"1770111100.000100"}]}"#.to_string(),
-                "conversations.history" => r#"{"ok":true,"has_more":false,"messages":[]}"#.to_string(),
-                _ => r#"{"ok":false,"error":"unknown_method"}"#.to_string(),
-            };
-            (200, body)
-        })
-    }
-
-    fn workspace(db: &Db) -> String {
-        db.set_user_identity("C").unwrap();
-        db.add_user_identifier(IdentifierKind::AccountId, &account_id("T1", "U1")).unwrap();
-        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
-        let me = Identity { team_id: "T1".into(), team: "Acme".into(), user_id: "U1".into(), user: "c".into() };
-        let source = db.create_source(&new_source(&me).unwrap()).unwrap();
-        assert_eq!(connected_as(db, &me).unwrap().as_deref(), Some(source.id.as_str()));
-        assert_eq!(connected_as(db, &Identity { user_id: "U2".into(), ..me }).unwrap(), None);
-        source.id
-    }
-
     #[test]
     fn connecting_asks_for_one_of_each_thing_a_check_does() {
         let round = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let (base, seen) = fake::slack(answer(round));
+        let (base, seen) = fake::slack(fake::acme(round));
         let me = SlackApi::at(&base, TOKEN).unwrap().check().unwrap();
         assert_eq!((me.team.as_str(), me.user_id.as_str()), ("Acme", "U1"));
         let seen = seen.lock().unwrap().clone();
@@ -870,9 +964,9 @@ mod tests {
     #[test]
     fn a_check_reads_both_sides_then_only_whats_new() {
         let round = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let (base, seen) = fake::slack(answer(round.clone()));
+        let (base, seen) = fake::slack(fake::acme(round.clone()));
         let db = Db::open_in_memory().unwrap();
-        let source = workspace(&db);
+        let source = fake::workspace(&db);
         let api = SlackApi::at(&base, TOKEN).unwrap();
 
         let first = sync(&db, &source, &api, &|| false).unwrap();
@@ -904,7 +998,7 @@ mod tests {
             _ => (200, r#"{"ok":false,"error":"missing_scope","needed":"im:history","provided":"users:read"}"#.into()),
         }));
         let db = Db::open_in_memory().unwrap();
-        let source = workspace(&db);
+        let source = fake::workspace(&db);
         let err = sync(&db, &source, &SlackApi::at(&base, TOKEN).unwrap(), &|| false).unwrap_err();
         assert!(matches!(&err, SlackError::Scope { scope, .. } if scope == "im:history"), "{err:?}");
         assert!(err.to_string().contains("add the im:history scope"), "{err}");
@@ -930,7 +1024,7 @@ mod tests {
         }
         }));
         let db = Db::open_in_memory().unwrap();
-        let source = workspace(&db);
+        let source = fake::workspace(&db);
         let summary = sync(&db, &source, &SlackApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
         assert_eq!((summary.inserted, summary.unreadable, summary.partial), (1, 1, false));
         let people = db.list_participants(10).unwrap();
@@ -954,7 +1048,7 @@ mod tests {
             _ => (429, r#"{"ok":false,"error":"ratelimited"}"#.into()),
         }));
         let db = Db::open_in_memory().unwrap();
-        let source = workspace(&db);
+        let source = fake::workspace(&db);
         let summary = sync(&db, &source, &SlackApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
         assert!(summary.partial);
         assert_eq!(summary.inserted, 1);

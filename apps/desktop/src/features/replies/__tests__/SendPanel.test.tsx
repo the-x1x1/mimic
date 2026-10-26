@@ -139,6 +139,50 @@ describe("sending a reply from Mimic", () => {
     expect(native.resolveDraft).not.toHaveBeenCalled();
   });
 
+  it("sends a reply to a Slack message into that conversation, as the user, with no subject", async () => {
+    native.replyEnvelope.mockResolvedValue(
+      envelope({
+        kind: "slack",
+        mailboxes: [
+          {
+            sourceId: "s9",
+            name: "Acme (Slack)",
+            fromAddress: "c in Acme",
+            server: "Slack",
+            whyNot: null,
+          },
+        ],
+        mailbox: "s9",
+        to: ["Ada Lovelace"],
+        otherAddresses: [],
+        subject: "",
+      }),
+    );
+    native.sendReply.mockImplementation(async (r: { to: string[] }) => ({
+      ...sent(r.to),
+      sourceId: "s9",
+      fromAddress: "slack:T1:U1",
+      subject: "",
+    }));
+    const onDone = renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    expect(within(panel).getByText("c in Acme")).toBeInTheDocument();
+    expect(within(panel).getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(within(panel).queryByLabelText("Subject")).toBeNull();
+    expect(within(panel).getByText(/into that conversation in Slack, as you/)).toBeInTheDocument();
+    await sendIt(panel);
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(native.sendReply).toHaveBeenCalledWith({
+      draftId: "d1",
+      text: "yes, friday works",
+      sourceId: "s9",
+      to: ["Ada Lovelace"],
+      cc: [],
+      subject: "",
+    });
+  });
+
   it("copies in only the others on their message that are ticked", async () => {
     native.replyEnvelope.mockResolvedValue(
       envelope({ othersOnIt: ["bob@example.com", "cy@example.com", "di@example.com"] }),

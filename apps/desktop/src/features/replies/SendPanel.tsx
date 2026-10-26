@@ -17,6 +17,11 @@ import { toast } from "@/state/toast";
  * to the others on their message only when ticked under **Copy in**
  * (`othersOnIt`, none ticked to begin with), and says which.
  *
+ * A reply to a message read from Slack (`envelope.kind`, 0.10.0-alpha.65)
+ * goes into the conversation it came from, as the user: the workspace is
+ * the one "mailbox", who it goes to is that conversation, and there is no
+ * subject, signature or anyone to copy in.
+ *
  * **Send it** waits the seconds the user chose (`send.undoSeconds`, five
  * unless changed) before anything goes, with **Don't send it** to take it
  * back (0.10.0-alpha.40). Leaving the panel in that time sends nothing, and
@@ -38,6 +43,7 @@ export function SendPanel({
 }) {
   const send = useSendReply();
   const id = useId();
+  const slack = envelope.kind === "slack";
   const settings = useSettings();
   const wait = settings.data?.["send.undoSeconds"] ?? 5;
   // The countdown before it goes: seconds left, or null when not counting.
@@ -108,11 +114,22 @@ export function SendPanel({
       cc,
       subject,
     });
+    const changed = text !== draft.generatedText;
+    if (slack) {
+      toast.success(
+        `Sent to ${listAddresses(entry.to)} in Slack.`,
+        changed
+          ? "It went in as you, and I noticed what you changed."
+          : "It went in as you, as if you'd written it there yourself.",
+      );
+      onSent();
+      return;
+    }
     toast.success(
       entry.cc.length > 0
         ? `Sent to ${listAddresses(entry.to)}, copying in ${listAddresses(entry.cc)}.`
         : `Sent to ${listAddresses(entry.to)}.`,
-      text !== draft.generatedText
+      changed
         ? "It went from your mailbox, and I noticed what you changed."
         : "It went from your mailbox, as if you'd sent it yourself.",
     );
@@ -209,28 +226,37 @@ export function SendPanel({
           <p className="letter signature-preview">{from.signature}</p>
         </div>
       ) : null}
-      <div className="thread__send-row">
-        <label htmlFor={`${id}-subject`} className="muted small">
-          Subject
-        </label>
-        <input
-          id={`${id}-subject`}
-          type="text"
-          value={subject}
-          maxLength={300}
-          disabled={left !== null}
-          onChange={(e) => setSubject(e.target.value)}
-        />
-      </div>
-      <p className="muted small">
-        It goes from your mailbox{from?.server ? ` (through ${from.server})` : ""}, threaded under
-        their message, to {to.length === 1 ? "them" : "those addresses"}
-        {cc.length > 0
-          ? `, copying in ${listAddresses(cc)} — no one else.`
-          : others.length > 0
-            ? " only — not to anyone else on the thread unless you copy them in."
-            : " only — not to anyone else on the thread."}
-      </p>
+      {slack ? null : (
+        <div className="thread__send-row">
+          <label htmlFor={`${id}-subject`} className="muted small">
+            Subject
+          </label>
+          <input
+            id={`${id}-subject`}
+            type="text"
+            value={subject}
+            maxLength={300}
+            disabled={left !== null}
+            onChange={(e) => setSubject(e.target.value)}
+          />
+        </div>
+      )}
+      {slack ? (
+        <p className="muted small">
+          It goes into that conversation in Slack, as you, and nowhere else &mdash; word for word,
+          with nothing in it read as a mention.
+        </p>
+      ) : (
+        <p className="muted small">
+          It goes from your mailbox{from?.server ? ` (through ${from.server})` : ""}, threaded under
+          their message, to {to.length === 1 ? "them" : "those addresses"}
+          {cc.length > 0
+            ? `, copying in ${listAddresses(cc)} — no one else.`
+            : others.length > 0
+              ? " only — not to anyone else on the thread unless you copy them in."
+              : " only — not to anyone else on the thread."}
+        </p>
+      )}
       {send.error ? (
         <InlineError>
           {unsure ? `${send.error.message} I won't send it again by myself.` : send.error.message}
