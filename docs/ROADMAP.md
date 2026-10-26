@@ -74,7 +74,7 @@ Done in 0.10.0-alpha.24: Trusted mode (`crate::autoreply`) — replies sent by t
 
 Done in 0.10.0-alpha.25: a copy of each reply in the Sent folder where the provider keeps none; mail checked every 2 minutes at most, and at once when a held reply is waiting on a check.
 
-Done in 0.10.0-alpha.26: signing in with Google. Done in 0.10.0-alpha.27: mail read as it arrives, where the server can say so (IMAP `IDLE`).
+Done in 0.10.0-alpha.26: signing in with Google. Done in 0.10.0-alpha.27: mail read as it arrives, where the server can say so (IMAP `IDLE`). Done in 0.10.0-alpha.28: running in the notification area, starting with Windows when asked, and Windows notifications.
 
 Next: other places messages arrive (Slack, Telegram, Teams).
 

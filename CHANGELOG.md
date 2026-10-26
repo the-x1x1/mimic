@@ -2,6 +2,16 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.28] — 2026-10-26
+
+Running in the background.
+
+### Added
+
+- **Closing my window leaves me running** in the notification area, by the clock, so I keep checking your mail, writing replies and — if you turned it on — sending them. Click my icon to open me; right-click it to quit. You can have closing quit me instead, under Settings → When the window is closed.
+- **Start when you sign in to Windows**, with no window, only the icon. Off until you turn it on.
+- **Windows notifications** when replies are ready to look over, when one will go by itself soon, has gone, or didn't go. They say how many and where to look — never who wrote or what they said — and none comes while you're looking at me. You can turn them off.
+
 ## [0.10.0-alpha.27] — 2026-10-26
 
 Mail as it arrives.

@@ -29,6 +29,10 @@ export const Settings = z.object({
    */
   "waiting.withinDays": z.number(),
   "onboarding.completed": z.boolean(),
+  /** Closing the window keeps Mimic running in the notification area. */
+  "app.keepRunning": z.boolean(),
+  /** Windows notifications when there is something to look at. */
+  "notify.enabled": z.boolean(),
 });
 export type Settings = z.infer<typeof Settings>;
 export type SettingKey = keyof Settings;
