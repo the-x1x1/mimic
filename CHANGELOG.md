@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.47] — 2026-10-26
+
+Off from the icon.
+
+### Added
+
+- While I'm replying by myself, or rehearsing it, the icon in the notification area says so, and its menu has **Turn replying by myself off**: one click from anywhere, stopping every reply still held, as Settings does.
+
 ## [0.10.0-alpha.46] — 2026-10-26
 
 Paste it there.

@@ -84,6 +84,11 @@ pub async fn set_setting(
     if key.starts_with("generation.") {
         state.rebuild_providers();
     }
+    // Replying by itself runs only with replies prepared in advance: the
+    // icon says whether it does.
+    if key == mimic_core::assist::SETTING {
+        crate::background::refresh_tray(&app);
+    }
     get_settings(state).await
 }
 
