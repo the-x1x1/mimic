@@ -855,7 +855,9 @@ export function DraftReview({
         {said}
       </p>
       {error ? <InlineError>{error.message}</InlineError> : null}
-      {draft.channel === "email" ? <ByMyself participantId={draft.participantId} /> : null}
+      {draft.channel === "email" ? (
+        <ByMyself draftId={draft.id} participantId={draft.participantId} />
+      ) : null}
       <div className="thread__actions">
         {others.length > 0 ? (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => quietly(drop(draft))}>

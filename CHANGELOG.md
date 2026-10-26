@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.57] — 2026-10-26
+
+Why not by myself.
+
+### Added
+
+- While replying by myself is on, under a reply I won't send by myself I say why: it came with an attachment, you were only copied in, you asked for this one yourself, I've sent as many today as you allow, a reply was already in your Sent folder — whatever it is. A reply I'm holding still says when it goes instead, and a reply to someone you'd rather answer yourself is said in the line about them, as before.
+
 ## [0.10.0-alpha.56] — 2026-10-26
 
 One reply, even from two computers.

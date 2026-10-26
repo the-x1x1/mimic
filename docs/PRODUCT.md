@@ -68,7 +68,7 @@ Two things make this safe to have on: it is off until switched on in Settings, b
 - **One reply, even from two computers** (0.10.0-alpha.56): just before a reply goes, Mimic looks in the mailbox's Sent folder for a reply to the same message — from Mimic on the user's other computer, or the user — and doesn't send if there is one; if it can't look, the reply waits half an hour at most, then waits for the user. Mail without a Message-ID, which a reply can't say it answers, waits for the user. A reply Mimic sent by itself is marked in its Message-ID, naming nothing, so Mimic on another computer reads it as sent by itself and not as the user's writing.
 - **A daily limit** (ten unless changed) on replies sent by itself, across every mailbox; past it, replies wait for the user.
 - **It says what it is to other programs** (`Auto-Submitted: auto-replied`), so another automatic responder doesn't answer it and start a loop.
-- **Everything it sent is listed**, under Your mail, saying it went by itself.
+- **Everything it sent is listed**, under Your mail, saying it went by itself; and under a reply it won't send by itself, it says why (0.10.0-alpha.57).
 - What it wrote by itself is not read as how the user writes: the user didn't write or approve it.
 
 ## Positioning

@@ -186,6 +186,7 @@ pub fn run() {
             commands::autoreply::set_autoreply,
             commands::autoreply::stop_held_reply,
             commands::autoreply::send_held_reply_now,
+            commands::autoreply::why_not_by_itself,
             commands::sending::send_reply,
             commands::sending::test_mailbox_sending,
             commands::sending::list_sent,

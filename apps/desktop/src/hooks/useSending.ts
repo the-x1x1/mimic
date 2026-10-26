@@ -87,6 +87,15 @@ export function useAutoReply() {
   return useQuery({ queryKey: qk.autoReply, queryFn: ipc.autoReply });
 }
 
+/** Why the reply under a message won't go by itself; null when it may, or while off. */
+export function useWhyNotByItself(draftId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.whyNotByItself(draftId),
+    queryFn: () => ipc.whyNotByItself(draftId),
+    enabled,
+  });
+}
+
 export function useSetAutoReply() {
   const qc = useQueryClient();
   return useMutation({

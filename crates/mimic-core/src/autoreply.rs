@@ -74,6 +74,10 @@ pub const NO_PERSON: &str = "I don't know who this is from, so I don't reply to 
 pub const ASKED_FOR: &str = "You asked for this one yourself, so it waits for you.";
 pub const CHOOSING: &str = "You're choosing between ways of saying this, so it waits for you.";
 pub const ONCE: &str = "I've already answered this message by myself once.";
+/// Under a reply whose held one the user stopped (0.10.0-alpha.57).
+pub const YOU_STOPPED: &str = "You stopped the reply I held for this, so it waits for you.";
+/// Under a reply whose held one didn't go; the mail server's words follow.
+pub const FAILED: &str = "The reply I held for this didn't go, so it waits for you.";
 pub const DAILY_LIMIT: &str = "I've sent as many replies by myself today as you allow.";
 pub const LOOPING: &str = "I've already replied by myself twice in this conversation today.";
 pub const NOT_EMAIL: &str = "This isn't an email, so it can't be sent from here.";
@@ -840,6 +844,43 @@ pub fn tick(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Result<Ru
     Ok(run)
 }
 
+/// Why the reply under a message won't go by itself, as things stand — what
+/// the home screen says under it while replying by itself is on
+/// (0.10.0-alpha.57): the reason a reply held for it was stopped, or else
+/// the first of `refusal`'s, held or not. `None` while replying by itself is
+/// off, while a reply for it is held (which says so itself), when it may go,
+/// and for `PERSON_OFF`, which the line about the person says.
+pub fn why_not_by_itself(db: &Db, draft_id: &str, now: DateTime<Utc>) -> Result<Option<String>, SendError> {
+    let rules = rules(db)?;
+    if !is_on(db, &rules)? {
+        return Ok(None);
+    }
+    let Some(draft) = db.get_draft(draft_id)? else { return Ok(None) };
+    if db.held_outgoing_for_draft(&draft.id)?.is_some() {
+        return Ok(None);
+    }
+    if let Some(last) = draft.incoming_message_id.as_deref().map(|m| db.last_autonomous_for(m)).transpose()?.flatten() {
+        use crate::db::SendStatus;
+        return Ok(match (last.status, last.error) {
+            // The line about the person says that.
+            (SendStatus::Canceled, Some(why)) if why == PERSON_OFF => None,
+            (SendStatus::Canceled, Some(why)) => Some(why),
+            // Stop it, pressed by the user, records no reason.
+            (SendStatus::Canceled, None) => Some(YOU_STOPPED.to_string()),
+            (SendStatus::Failed, why) => Some(why.map_or_else(|| FAILED.to_string(), |w| format!("{FAILED} {w}"))),
+            _ => Some(ONCE.to_string()),
+        });
+    }
+    Ok(refusal(db, &rules, &draft, &waiting_now(db)?, None, true, now)?
+        .filter(|why| *why != PERSON_OFF)
+        .map(str::to_string))
+}
+
+/// `why_not_by_itself` at the current time.
+pub fn why_not_by_itself_now(db: &Db, draft_id: &str) -> Result<Option<String>, SendError> {
+    why_not_by_itself(db, draft_id, Utc::now())
+}
+
 /// What Settings shows: the rules, whether they run, and how many replies
 /// went, or are held, by themselves in the last day against the limit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1564,6 +1605,44 @@ mod tests {
         assert_eq!((entry.status, entry.error.as_deref()), (SendStatus::Canceled, Some(ALREADY_IN_SENT)));
         assert!(w.seen.try_recv().is_err(), "nothing was said to the server");
         assert_eq!(tick(&w.db, &credentials(), at(30)).unwrap(), Run::default(), "and it isn't held again");
+    }
+
+    #[test]
+    fn under_a_reply_it_says_why_it_wont_go_by_itself() {
+        // It may go, then it is held: the held reply says so itself.
+        let w = world(Behaviour::default());
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(0)).unwrap(), None);
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(1)).unwrap(), None);
+        // Stopped: why it was.
+        w.db.stop_held_outgoing(&only_entry(&w.db).id, ALREADY_IN_SENT).unwrap();
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(2)).unwrap().as_deref(), Some(ALREADY_IN_SENT));
+        // Stopped by the user, which says no reason; or for the person,
+        // which the line about them says.
+        w.db.conn().execute("UPDATE outbox SET error = NULL", []).unwrap();
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(2)).unwrap().as_deref(), Some(YOU_STOPPED));
+        w.db.conn().execute("UPDATE outbox SET error = ?1", [PERSON_OFF]).unwrap();
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(2)).unwrap(), None);
+
+        // Never held: the first reason there is.
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_set(metadata_json, '$.attachments', json('true'))
+                 WHERE external_id = 'l3@x.example'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(0)).unwrap().as_deref(), Some(ATTACHED));
+        // Off: nothing to say.
+        set_rules(&w.db, Rules { enabled: false, ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(0)).unwrap(), None);
+
+        // About the person: the line about them says that, not this.
+        let w = world(Behaviour::default());
+        set_rules(&w.db, Rules { never: vec![w.ada.clone()], ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(why_not(&w), Some(PERSON_OFF));
+        assert_eq!(why_not_by_itself(&w.db, &w.draft.id, at(0)).unwrap(), None);
     }
 
     #[test]

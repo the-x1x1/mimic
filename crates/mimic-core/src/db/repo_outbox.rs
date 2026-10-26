@@ -389,6 +389,22 @@ impl Db {
         )? > 0)
     }
 
+    /// The last reply held to answer this message by itself, whatever
+    /// became of it.
+    pub fn last_autonomous_for(&self, message_id: &str) -> DbResult<Option<OutboxEntry>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM outbox WHERE how = 'autonomous' AND answers_message_id = ?1
+                     ORDER BY created_at DESC, id DESC LIMIT 1"
+                ),
+                [message_id],
+                map,
+            )
+            .optional()?)
+    }
+
     /// The reply held for any draft of this draft's set, if one is.
     pub fn held_outgoing_for_draft(&self, draft_id: &str) -> DbResult<Option<OutboxEntry>> {
         Ok(self
