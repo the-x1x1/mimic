@@ -83,14 +83,30 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
         return;
     }
     let (db, credentials, secrets) = (state.db.clone(), state.mail_credentials.clone(), state.secrets.clone());
+    let teams_access = state.teams_access.clone();
     let ran = tauri::async_runtime::spawn_blocking(move || {
-        // Each Slack workspace with its own token (0.10.0-alpha.66).
+        // Each Slack workspace with its own token (0.10.0-alpha.66), each
+        // Teams account with its own sign-in (0.10.0-alpha.68).
         let slack = |source_id: &str| {
             use mimic_core::providers::SecretStore;
             let token = secrets.get(&mimic_core::sources::slack::secret_key(source_id)).filter(|t| !t.is_empty())?;
             mimic_core::sources::slack::SlackApi::new(&token).ok()
         };
-        autoreply::tick_now(&db, &credentials, &slack)
+        // No sign-in waits for the user; a failure to sign in this time
+        // waits a while, as for any service that doesn't answer.
+        let teams = |source_id: &str| {
+            use autoreply::TeamsUnavailable;
+            use mimic_core::sources::teams::{GraphApi, NOT_SIGNED_IN, NO_CLIENT};
+            let token = teams_access.token(source_id).map_err(|why| {
+                if why == NOT_SIGNED_IN || why == NO_CLIENT {
+                    TeamsUnavailable::NotSignedIn
+                } else {
+                    TeamsUnavailable::Failed(why)
+                }
+            })?;
+            GraphApi::new(&token).map_err(|e| TeamsUnavailable::Failed(e.to_string()))
+        };
+        autoreply::tick_now(&db, &credentials, &slack, &teams)
     })
     .await;
     state.replying.store(false, Ordering::SeqCst);
@@ -123,11 +139,12 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
 pub(crate) fn queue_check(state: &SharedState, source_id: &str) {
     let source = state.db.get_source(source_id).ok().flatten();
     let failing = source.as_ref().is_none_or(|s| s.status == "failed");
-    // A Slack workspace is checked by its own job (0.10.0-alpha.66).
-    let kind = if source.is_some_and(|s| s.connector == mimic_core::sources::slack::CONNECTOR) {
-        mimic_core::sources::slack::JOB_KIND
-    } else {
-        mimic_core::sources::imap::JOB_KIND
+    // A Slack workspace, or a Teams account, is checked by its own job
+    // (0.10.0-alpha.66, .68).
+    let kind = match source.map(|s| s.connector).as_deref() {
+        Some(mimic_core::sources::slack::CONNECTOR) => mimic_core::sources::slack::JOB_KIND,
+        Some(mimic_core::sources::teams::CONNECTOR) => mimic_core::sources::teams::JOB_KIND,
+        _ => mimic_core::sources::imap::JOB_KIND,
     };
     let queued = state.db.list_jobs(500, true).map(|jobs| {
         jobs.iter().any(|j| j.kind == kind && j.status == "queued" && j.payload["sourceId"].as_str() == Some(source_id))

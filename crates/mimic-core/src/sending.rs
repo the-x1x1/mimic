@@ -51,6 +51,7 @@ use crate::sources::outgoing::{self, Mailbox, Outgoing, OutgoingError};
 use crate::sources::smtp::{self, SmtpAccount, SmtpError};
 
 pub mod slack;
+pub mod teams;
 
 /// Why a reply can't be sent from here.
 pub const NO_MAILBOX: &str =
@@ -83,12 +84,12 @@ pub enum SendError {
     Message(#[from] OutgoingError),
     #[error(transparent)]
     Db(#[from] DbError),
-    /// Slack didn't take it (0.10.0-alpha.65).
+    /// Slack or Teams didn't take it (0.10.0-alpha.65, .68).
     #[error("{0}")]
-    Slack(String),
-    /// Slack's answer was lost: it may have gone.
+    Service(String),
+    /// Their answer was lost: it may have gone.
     #[error("{0}")]
-    SlackUnsure(String),
+    ServiceUnsure(String),
 }
 
 impl SendError {
@@ -96,7 +97,7 @@ impl SendError {
     pub fn may_have_gone(&self) -> bool {
         match self {
             SendError::Smtp(e) => e.may_have_gone(),
-            SendError::SlackUnsure(_) => true,
+            SendError::ServiceUnsure(_) => true,
             SendError::Cannot(why) => why == PANICKED,
             _ => false,
         }
@@ -120,13 +121,15 @@ pub struct SendingMailbox {
     pub signature: Option<String>,
 }
 
-/// Where a reply goes: out of a mailbox, or into Slack (0.10.0-alpha.65).
+/// Where a reply goes: out of a mailbox, or into Slack (0.10.0-alpha.65)
+/// or Teams (0.10.0-alpha.68).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReplyKind {
     #[default]
     Mail,
     Slack,
+    Teams,
 }
 
 /// Everything the Send panel shows before anything goes.
@@ -219,9 +222,13 @@ fn is_users(mine: &std::collections::HashSet<String>, address: &str) -> bool {
 pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError> {
     let draft = db.get_draft(draft_id)?.ok_or_else(|| SendError::Cannot(DRAFT_GONE.into()))?;
     let incoming = answered(db, &draft)?;
-    // A message read from Slack is answered in Slack.
+    // A message read from Slack is answered in Slack, one from Teams in
+    // Teams.
     if let Some(m) = &incoming {
         if let Some(envelope) = slack::envelope_for(db, &draft, m)? {
+            return Ok(envelope);
+        }
+        if let Some(envelope) = teams::envelope_for(db, &draft, m)? {
             return Ok(envelope);
         }
     }

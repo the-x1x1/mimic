@@ -32,6 +32,9 @@ pub struct AppState {
     /// What mailboxes sign in with, shared with the mailbox check, so a
     /// sign-in made here replaces what the check has kept.
     pub mail_credentials: Arc<mimic_core::sources::imap::Credentials>,
+    /// Access tokens for connected Teams accounts (0.10.0-alpha.67), shared
+    /// with their check, and used to send (0.10.0-alpha.68).
+    pub teams_access: Arc<mimic_core::sources::teams::Access>,
     /// A mailbox sign-in waiting on the browser.
     pub sign_in: MailSignIn,
     /// A look at the replies Mimic sends by itself is running: one at a time.

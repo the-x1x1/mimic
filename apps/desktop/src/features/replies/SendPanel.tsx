@@ -43,7 +43,8 @@ export function SendPanel({
 }) {
   const send = useSendReply();
   const id = useId();
-  const slack = envelope.kind === "slack";
+  // Into a chat service: Slack (0.10.0-alpha.65) or Teams (.68).
+  const service = envelope.kind === "slack" ? "Slack" : envelope.kind === "teams" ? "Teams" : null;
   const settings = useSettings();
   const wait = settings.data?.["send.undoSeconds"] ?? 5;
   // The countdown before it goes: seconds left, or null when not counting.
@@ -115,9 +116,9 @@ export function SendPanel({
       subject,
     });
     const changed = text !== draft.generatedText;
-    if (slack) {
+    if (service) {
       toast.success(
-        `Sent to ${listAddresses(entry.to)} in Slack.`,
+        `Sent to ${listAddresses(entry.to)} in ${service}.`,
         changed
           ? "It went in as you, and I noticed what you changed."
           : "It went in as you, as if you'd written it there yourself.",
@@ -226,7 +227,7 @@ export function SendPanel({
           <p className="letter signature-preview">{from.signature}</p>
         </div>
       ) : null}
-      {slack ? null : (
+      {service ? null : (
         <div className="thread__send-row">
           <label htmlFor={`${id}-subject`} className="muted small">
             Subject
@@ -241,10 +242,10 @@ export function SendPanel({
           />
         </div>
       )}
-      {slack ? (
+      {service ? (
         <p className="muted small">
-          It goes into that conversation in Slack, as you, and nowhere else &mdash; word for word,
-          with nothing in it read as a mention.
+          It goes into that conversation in {service}, as you, and nowhere else &mdash; word for
+          word, with nothing in it read as a mention.
         </p>
       ) : (
         <p className="muted small">

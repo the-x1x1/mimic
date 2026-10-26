@@ -31,7 +31,7 @@
 //!   (left out of the learning loop and the measured outcomes) and so is the
 //!   message put in the conversation (left out of everything that measures
 //!   or shows how the user writes: `db::written_by_the_user`).
-//! * **In Slack too** (0.10.0-alpha.66), through a workspace the user named
+//! * **In Slack and Teams too** (0.10.0-alpha.66, .68), through a workspace the user named
 //!   among `Rules.mailboxes`, under the same rules, but only for a direct
 //!   message (`slackDirect`), never a group; with the workspace's own token,
 //!   only while it is the account connected (`sending::slack::still_theirs`);
@@ -49,6 +49,7 @@ use crate::sending::{self, SendError};
 use crate::sources::imap::{Credentials, ImapError, ImapSourceConfig};
 use crate::sources::outgoing;
 use crate::sources::slack::{SlackApi, SlackSourceConfig};
+use crate::sources::teams::{GraphApi, TeamsSourceConfig};
 
 /// Where the rules are kept.
 pub const SETTING: &str = "autoreply";
@@ -94,6 +95,11 @@ pub const ALREADY_IN_SLACK: &str = "You'd already replied in Slack, so this one 
 pub const SAID_SINCE: &str = "They wrote again in Slack after the message this answers, so it waits for you.";
 pub const SLACK_UNKNOWN: &str = "I couldn't look in Slack for a reply already there, so this one waits for you.";
 pub const NO_SLACK: &str = "I don't have a Slack token I can use for this workspace, so this one waits for you.";
+/// Teams (0.10.0-alpha.68).
+pub const ALREADY_IN_TEAMS: &str = "You'd already replied in Teams, so this one didn't go.";
+pub const SAID_SINCE_TEAMS: &str = "They wrote again in Teams after the message this answers, so it waits for you.";
+pub const TEAMS_UNKNOWN: &str = "I couldn't look in Teams for a reply already there, so this one waits for you.";
+pub const NO_TEAMS: &str = "I don't have a Teams sign-in I can use for this account, so this one waits for you.";
 pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
 pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
@@ -334,10 +340,13 @@ fn waiting_now(db: &Db) -> Result<HashSet<(String, String)>, DbError> {
         .collect())
 }
 
-/// Whether a draft answers a message read from a Slack workspace.
-fn answers_slack(db: &Db, draft: &Draft) -> Result<bool, DbError> {
+/// Whether a draft answers a message read from a Slack workspace or a
+/// Teams account.
+fn answers_chat(db: &Db, draft: &Draft) -> Result<bool, DbError> {
     let Some(incoming) = sending::answered(db, draft)? else { return Ok(false) };
-    Ok(db.get_source(&incoming.source_id)?.is_some_and(|s| s.connector == crate::sources::slack::CONNECTOR))
+    Ok(db.get_source(&incoming.source_id)?.is_some_and(|s| {
+        s.connector == crate::sources::slack::CONNECTOR || s.connector == crate::sources::teams::CONNECTOR
+    }))
 }
 
 /// Why this draft may not go by itself now; `None` when it may. `except` is
@@ -358,9 +367,9 @@ fn refusal(
     if draft.outcome.is_some() {
         return Ok(Some(DEALT_WITH));
     }
-    // Mail, or a message read from Slack (0.10.0-alpha.66).
-    let in_slack = draft.channel != "email";
-    if in_slack && !answers_slack(db, draft)? {
+    // Mail, or a message read from Slack (0.10.0-alpha.66) or Teams (.68).
+    let in_chat = draft.channel != "email";
+    if in_chat && !answers_chat(db, draft)? {
         return Ok(Some(NOT_EMAIL));
     }
     // Only a draft assisted drafting prepared: one the user asked for, even
@@ -423,7 +432,7 @@ fn refusal(
     // A reply says what it answers by its Message-ID, which is also how one
     // sent from another computer is found (0.10.0-alpha.56); mail read
     // without one has `sha-…` in its place.
-    if !in_slack && !outgoing::is_message_id(&incoming.external_id) {
+    if !in_chat && !outgoing::is_message_id(&incoming.external_id) {
         return Ok(Some(NO_MESSAGE_ID));
     }
     if let Some(why) = unfinished(&draft.generated_text, &incoming.body) {
@@ -438,9 +447,12 @@ fn refusal(
     // Written to the user, by name — not a list, not a copy they were hidden
     // on, and not mail too old to say (RFC 3834); and in `To`, not only
     // copied in (0.10.0-alpha.54).
-    if in_slack {
+    if in_chat {
         // A direct message is to the user; a group's reply goes to the group.
-        if incoming.metadata.get("slackDirect").and_then(serde_json::Value::as_bool) != Some(true) {
+        let direct = ["slackDirect", "teamsDirect"]
+            .iter()
+            .any(|k| incoming.metadata.get(*k).and_then(serde_json::Value::as_bool) == Some(true));
+        if !direct {
             return Ok(Some(GROUP));
         }
     }
@@ -455,7 +467,7 @@ fn refusal(
             .filter_map(serde_json::Value::as_str)
             .any(|a| mine.contains(&IdentifierInput::new(IdentifierKind::Email, a).key()))
     };
-    if !in_slack && !names_me("to") {
+    if !in_chat && !names_me("to") {
         return Ok(Some(if names_me("cc") { ONLY_COPIED } else { NOT_TO_YOU }));
     }
     let Some(person) = draft.participant_id.as_deref() else {
@@ -615,6 +627,9 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
                 draft.generated_text.clone(),
                 sending::slack::pending_id(&config, &channel),
             )
+        } else if envelope.kind == sending::ReplyKind::Teams {
+            let Ok((config, chat)) = sending::teams::route(db, &incoming) else { continue };
+            (sending::teams::from_address(&config), draft.generated_text.clone(), sending::teams::pending_id(&chat))
         } else {
             let Ok((config, account)) = sending::sending_from(db, &incoming.source_id) else { continue };
             if !goes_to_them(db, draft.participant_id.as_deref(), &envelope.to)? {
@@ -680,9 +695,24 @@ pub fn send_due(
     db: &Db,
     credentials: &Credentials,
     slack: &SlackFor<'_>,
+    teams: &TeamsFor<'_>,
     now: DateTime<Utc>,
 ) -> Result<Run, SendError> {
-    send_due_all(db, credentials, now, &reply_in_sent(credentials), slack)
+    send_due_all(db, credentials, now, &reply_in_sent(credentials), slack, teams)
+}
+
+/// A Teams account's Graph with its own sign-in (by source id), or why it
+/// can't be had now (0.10.0-alpha.68).
+pub type TeamsFor<'a> = dyn Fn(&str) -> Result<GraphApi, TeamsUnavailable> + 'a;
+
+/// Why a Teams account's Graph can't be had.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TeamsUnavailable {
+    /// No sign-in to use: it waits for the user.
+    NotSignedIn,
+    /// Signing in failed this time (offline, Microsoft's service): it may
+    /// work later.
+    Failed(String),
 }
 
 /// A Slack workspace's API with its own token (by source id), when there is
@@ -755,17 +785,18 @@ pub fn send_due_with(
     now: DateTime<Utc>,
     in_sent: &SentCheck<'_>,
 ) -> Result<Run, SendError> {
-    send_due_all(db, credentials, now, in_sent, &|_| None)
+    send_due_all(db, credentials, now, in_sent, &|_| None, &|_| Err(TeamsUnavailable::NotSignedIn))
 }
 
-/// `send_due`, asking `in_sent` about Sent folders and `slack` for each
-/// workspace's API.
+/// `send_due`, asking `in_sent` about Sent folders, `slack` for each
+/// workspace's API and `teams` for each Teams account's.
 pub fn send_due_all(
     db: &Db,
     credentials: &Credentials,
     now: DateTime<Utc>,
     in_sent: &SentCheck<'_>,
     slack: &SlackFor<'_>,
+    teams: &TeamsFor<'_>,
 ) -> Result<Run, SendError> {
     let mut run = Run::default();
     let now_text = fmt_rfc3339(now);
@@ -796,9 +827,14 @@ pub fn send_due_all(
                 continue;
             }
         }
-        // Into Slack: its own way from here on.
-        if db.get_source(&entry.source_id)?.is_some_and(|s| s.connector == crate::sources::slack::CONNECTOR) {
+        // Into Slack or Teams: their own way from here on.
+        let connector = db.get_source(&entry.source_id)?.map(|s| s.connector);
+        if connector.as_deref() == Some(crate::sources::slack::CONNECTOR) {
             send_into_slack(db, &rules, &draft, &entry, now, slack, &mut run)?;
+            continue;
+        }
+        if connector.as_deref() == Some(crate::sources::teams::CONNECTOR) {
+            send_into_teams(db, &rules, &draft, &entry, now, teams, &mut run)?;
             continue;
         }
         let (config, account) = match sending::sending_from(db, &entry.source_id) {
@@ -1007,20 +1043,119 @@ fn slack_read_since(db: &Db, config: &SlackSourceConfig, source_id: &str, since:
     Ok(settled && matches!((read, held), (Some(r), Some(h)) if r > h))
 }
 
-/// One look: hold what may go, then send what is due.
-pub fn tick(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Result<Run, SendError> {
-    tick_with(db, credentials, &|_| None, now)
+/// `send_into_slack`, for a reply held to go into Teams (0.10.0-alpha.68).
+fn send_into_teams(
+    db: &Db,
+    rules: &Rules,
+    draft: &Draft,
+    entry: &crate::db::OutboxEntry,
+    now: DateTime<Utc>,
+    teams: &TeamsFor<'_>,
+    run: &mut Run,
+) -> Result<(), SendError> {
+    let Some(incoming) = sending::answered(db, draft)? else { return stopped(db, entry, run, NOT_WAITING) };
+    let (config, chat) = match sending::teams::route(db, &incoming) {
+        Ok(found) => found,
+        Err(why) => return stopped(db, entry, run, why),
+    };
+    if entry.from_address != sending::teams::from_address(&config) {
+        return stopped(db, entry, run, FROM_CHANGED);
+    }
+    if !teams_read_since(db, &config, &entry.source_id, &entry.send_after)? {
+        if !run.waiting_for_check.contains(&entry.source_id) {
+            run.waiting_for_check.push(entry.source_id.clone());
+        }
+        return Ok(());
+    }
+    let waiting = waiting_now(db)?;
+    if let Some(why) = refusal(db, rules, draft, &waiting, Some(&entry.id), false, now)? {
+        return stopped(db, entry, run, why);
+    }
+    let waited_long = || {
+        DateTime::parse_from_rfc3339(&entry.send_after)
+            .ok()
+            .is_none_or(|t| now - t.with_timezone(&Utc) > Duration::minutes(SENT_PATIENCE_MINUTES))
+    };
+    let api = match teams(&entry.source_id) {
+        Ok(api) => api,
+        Err(TeamsUnavailable::NotSignedIn) => return stopped(db, entry, run, NO_TEAMS),
+        Err(TeamsUnavailable::Failed(why)) => {
+            tracing::warn!(target: "autoreply", error = %why, "couldn't sign in to Teams");
+            return if waited_long() { stopped(db, entry, run, TEAMS_UNKNOWN) } else { Ok(()) };
+        }
+    };
+    match sending::teams::still_theirs(&api, &config) {
+        Ok(()) => {}
+        Err(SendError::Cannot(why)) => return stopped(db, entry, run, &why),
+        Err(e) => {
+            tracing::warn!(target: "autoreply", error = %e, "couldn't ask Teams whose sign-in it is");
+            return if waited_long() { stopped(db, entry, run, TEAMS_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    match sending::teams::said_since(&api, &config, &chat, &incoming) {
+        Ok(Ok(sending::slack::Since::Nothing)) => {}
+        Ok(Ok(sending::slack::Since::You)) => return stopped(db, entry, run, ALREADY_IN_TEAMS),
+        Ok(Ok(sending::slack::Since::Them)) => return stopped(db, entry, run, SAID_SINCE_TEAMS),
+        Ok(Err(why)) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = true, "couldn't look in Teams");
+            return stopped(db, entry, run, TEAMS_UNKNOWN);
+        }
+        Err(why) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = false, "couldn't look in Teams");
+            return if waited_long() { stopped(db, entry, run, TEAMS_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    if rules.rehearse {
+        run.rehearsed += usize::from(db.stop_held_outgoing(&entry.id, REHEARSED)?);
+        return Ok(());
+    }
+    if !db.take_held_outgoing(&entry.id, &fmt_rfc3339(now))? {
+        return Ok(());
+    }
+    match sending::teams::post(db, &api, entry, &chat, &entry.body) {
+        Ok(created) => {
+            run.sent += 1;
+            if let Err(e) = db
+                .mark_sent_on_its_own(&draft.id)
+                .and_then(|_| sending::record_sent_draft(db, draft, &draft.generated_text))
+            {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be recorded on its draft");
+            }
+            if let Err(e) =
+                sending::teams::record_in_conversation(db, entry, &config, &chat, &entry.body, created.as_deref(), true)
+            {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be put in its conversation");
+            }
+        }
+        Err(e) if e.may_have_gone() => run.unsure += 1,
+        Err(_) => run.failed += 1,
+    }
+    Ok(())
 }
 
-/// `tick`, with each Slack workspace's API.
+/// Whether a check that read the Teams account through began after `since`.
+fn teams_read_since(db: &Db, config: &TeamsSourceConfig, source_id: &str, since: &str) -> Result<bool, DbError> {
+    let settled = db.get_source(source_id)?.is_some_and(|s| s.status != "failed" && s.status != "importing");
+    let read = config.last_read_at.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let held = DateTime::parse_from_rfc3339(since).ok();
+    Ok(settled && matches!((read, held), (Some(r), Some(h)) if r > h))
+}
+
+/// One look: hold what may go, then send what is due.
+pub fn tick(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Result<Run, SendError> {
+    tick_with(db, credentials, &|_| None, &|_| Err(TeamsUnavailable::NotSignedIn), now)
+}
+
+/// `tick`, with each Slack workspace's and Teams account's API.
 pub fn tick_with(
     db: &Db,
     credentials: &Credentials,
     slack: &SlackFor<'_>,
+    teams: &TeamsFor<'_>,
     now: DateTime<Utc>,
 ) -> Result<Run, SendError> {
     let held = hold_replies(db, now)?;
-    let mut run = send_due(db, credentials, slack, now)?;
+    let mut run = send_due(db, credentials, slack, teams, now)?;
     run.held = held;
     Ok(run)
 }
@@ -1079,8 +1214,13 @@ pub fn status(db: &Db) -> Result<Status, DbError> {
 }
 
 /// `tick` at the current time.
-pub fn tick_now(db: &Db, credentials: &Credentials, slack: &SlackFor<'_>) -> Result<Run, SendError> {
-    tick_with(db, credentials, slack, Utc::now())
+pub fn tick_now(
+    db: &Db,
+    credentials: &Credentials,
+    slack: &SlackFor<'_>,
+    teams: &TeamsFor<'_>,
+) -> Result<Run, SendError> {
+    tick_with(db, credentials, slack, teams, Utc::now())
 }
 
 /// Replies sent, or held to send, by themselves in the last day: what the
@@ -2095,9 +2235,14 @@ mod slack_tests {
     }
 
     fn send(w: &World, minutes: i64) -> Run {
-        send_due_all(&w.db, &credentials(), at(minutes), &|_, _, _, _| Ok(false), &|_| {
-            Some(SlackApi::at(&w.base, TOKEN).unwrap())
-        })
+        send_due_all(
+            &w.db,
+            &credentials(),
+            at(minutes),
+            &|_, _, _, _| Ok(false),
+            &|_| Some(SlackApi::at(&w.base, TOKEN).unwrap()),
+            &|_| Err(TeamsUnavailable::NotSignedIn),
+        )
         .unwrap()
     }
 
@@ -2212,7 +2357,10 @@ mod slack_tests {
         let w = world();
         hold_replies(&w.db, at(0)).unwrap();
         checked(&w);
-        let run = send_due_all(&w.db, &credentials(), at(20), &|_, _, _, _| Ok(false), &|_| None).unwrap();
+        let run = send_due_all(&w.db, &credentials(), at(20), &|_, _, _, _| Ok(false), &|_| None, &|_| {
+            Err(TeamsUnavailable::NotSignedIn)
+        })
+        .unwrap();
         assert_eq!(run.stopped, 1);
         assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(NO_SLACK));
 
@@ -2244,5 +2392,193 @@ mod slack_tests {
                 .unwrap();
         let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
         assert_eq!(metadata["sentOnItsOwn"], true);
+    }
+}
+
+#[cfg(test)]
+mod teams_tests {
+    //! Replying by itself in Teams (0.10.0-alpha.68), against a Graph that
+    //! keeps what it is told (`sources::teams::live`).
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::db::{NewDraft, SendStatus};
+    use crate::sources::teams::fake::{self, TOKEN};
+    use crate::sources::teams::live::{self, said, Chats};
+    use crate::sources::teams::{new_source, sync, GraphApi, Me};
+
+    fn credentials() -> Credentials {
+        Credentials::new(
+            Arc::new(|_: &str| None),
+            Arc::new(|_: &str, _: &str| Ok(())),
+            crate::sources::oauth::Provider::microsoft(),
+            None,
+        )
+    }
+
+    fn at(minutes: i64) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-26T09:00:00Z").unwrap().with_timezone(&Utc) + Duration::minutes(minutes)
+    }
+
+    fn time(minutes: i64) -> String {
+        at(minutes).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    }
+
+    struct World {
+        db: Db,
+        source: String,
+        chats: Chats,
+        base: String,
+        direct: String,
+        group: String,
+    }
+
+    /// One Teams account read once: a chat with Ada, where the user wrote
+    /// before and her question waits, and a group where Bob's does; a draft
+    /// prepared for each; replying by itself on for the account.
+    fn world() -> World {
+        let chats: Chats = Arc::new(Mutex::new(vec![
+            live::Chat {
+                id: "19:ada@unq.gbl.spaces".into(),
+                other: Some(("u2".into(), "Ada Lovelace".into())),
+                messages: vec![
+                    said("u1", "C Haynes", "a1", &time(-120), "lunch soon?"),
+                    said("u2", "Ada Lovelace", "a2", &time(-10), "the place by the river?"),
+                ],
+            },
+            live::Chat {
+                id: "19:group@thread.v2".into(),
+                other: None,
+                messages: vec![said("u3", "Bob", "g1", &time(-10), "dinner sunday, all of us?")],
+            },
+        ]));
+        let (base, _) = fake::graph(live::graph(chats.clone()));
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C Haynes").unwrap();
+        db.add_user_identifier(IdentifierKind::AccountId, &crate::sources::teams::account_id("u1")).unwrap();
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
+        db.set_setting(crate::assist::SETTING, &true).unwrap();
+        let me = Me { id: "u1".into(), name: "C Haynes".into(), email: Some("c@formicaria.example".into()) };
+        let source = db.create_source(&new_source(&me).unwrap()).unwrap().id;
+        sync(&db, &source, &GraphApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
+        db.conn().execute("UPDATE messages SET imported_at = ?1", [fmt_rfc3339(at(-5))]).unwrap();
+        read_through(&db, &source, at(-5));
+        let direct = prepared(&db, "teams:19:ada@unq.gbl.spaces:a2", "yes, the river place. 12:30?");
+        let group = prepared(&db, "teams:19:group@thread.v2:g1", "sunday works");
+        set_rules(&db, Rules { enabled: true, mailboxes: vec![source.clone()], ..Rules::default() }).unwrap();
+        let on = Rules { enabled_at: Some("2026-01-01T00:00:00.000Z".into()), ..rules(&db).unwrap() };
+        db.set_setting(SETTING, &on).unwrap();
+        World { db, source, chats, base, direct, group }
+    }
+
+    fn prepared(db: &Db, external_id: &str, text: &str) -> String {
+        let (message, conversation, person, body): (String, String, Option<String>, String) = db
+            .conn()
+            .query_row(
+                "SELECT id, conversation_id, participant_id, body FROM messages WHERE external_id = ?1",
+                [external_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        let draft = db
+            .create_draft(&NewDraft {
+                participant_id: person,
+                conversation_id: Some(conversation),
+                channel: "chat".into(),
+                situation_id: None,
+                incoming_message: Some(body),
+                incoming_message_id: Some(message),
+                intent: None,
+                generated_text: text.into(),
+                provider: "mock".into(),
+                model: "m".into(),
+                context: json!({}),
+                prompt_hash: "h".into(),
+                evidence: json!({}),
+                alternative_to: None,
+            })
+            .unwrap();
+        db.mark_prepared(&draft.id).unwrap();
+        draft.id
+    }
+
+    fn read_through(db: &Db, source: &str, began: DateTime<Utc>) {
+        let mut config: TeamsSourceConfig =
+            serde_json::from_value(db.get_source(source).unwrap().unwrap().config).unwrap();
+        config.last_read_at = Some(fmt_rfc3339(began));
+        db.set_source_config(source, &serde_json::to_value(&config).unwrap()).unwrap();
+        db.set_source_status(source, "imported", None).unwrap();
+    }
+
+    fn send(w: &World, minutes: i64) -> Run {
+        send_due_all(&w.db, &credentials(), at(minutes), &|_, _, _, _| Ok(false), &|_| None, &|_| {
+            Ok(GraphApi::at(&w.base, TOKEN).unwrap())
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_one_to_one_chat_is_answered_by_itself_and_a_group_is_not() {
+        let w = world();
+        assert_eq!(why_not_by_itself(&w.db, &w.group, at(0)).unwrap().as_deref(), Some(GROUP));
+        assert_eq!(why_not_by_itself(&w.db, &w.direct, at(0)).unwrap(), None);
+        assert_eq!(hold_replies(&w.db, at(0)).unwrap(), 1);
+        let held = w.db.recent_outgoing(5).unwrap();
+        assert_eq!((held[0].status, held[0].from_address.as_str()), (SendStatus::Held, "teams:u1"));
+
+        let early = send(&w, 20);
+        assert_eq!((early.sent, early.waiting_for_check.clone()), (0, vec![w.source.clone()]));
+        read_through(&w.db, &w.source, at(60 * 24));
+        let run = send(&w, 20);
+        assert_eq!(run.sent, 1, "{run:?}");
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert_eq!(entry.status, SendStatus::Sent);
+        let posted = w.chats.lock().unwrap()[0].messages.last().cloned().unwrap();
+        assert_eq!(posted["body"]["content"], "yes, the river place. 12:30?");
+        assert_eq!(entry.message_id, format!("teams:19:ada@unq.gbl.spaces:{}", posted["id"].as_str().unwrap()));
+        let draft = w.db.get_draft(&w.direct).unwrap().unwrap();
+        assert_eq!(draft.context["sentOnItsOwn"], true);
+        let next = sync(&w.db, &w.source, &GraphApi::at(&w.base, TOKEN).unwrap(), &|| false).unwrap();
+        assert_eq!((next.inserted, next.duplicates), (0, 1));
+    }
+
+    #[test]
+    fn a_reply_sent_by_itself_read_back_first_is_known_by_its_id() {
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert!(w.db.take_held_outgoing(&entry.id, &fmt_rfc3339(at(20))).unwrap());
+        w.db.outgoing_sent_as(&entry.id, "teams:19:ada@unq.gbl.spaces:x9").unwrap();
+        w.chats.lock().unwrap()[0].messages.push(said(
+            "u1",
+            "C Haynes",
+            "x9",
+            &time(-1),
+            "yes, the river place. 12:30?",
+        ));
+        sync(&w.db, &w.source, &GraphApi::at(&w.base, TOKEN).unwrap(), &|| false).unwrap();
+        let metadata: String =
+            w.db.conn()
+                .query_row(
+                    "SELECT metadata_json FROM messages WHERE external_id = 'teams:19:ada@unq.gbl.spaces:x9'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert!(metadata.contains(r#""sentOnItsOwn":true"#), "{metadata}");
+    }
+
+    #[test]
+    fn a_reply_in_teams_since_stops_it() {
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        read_through(&w.db, &w.source, at(60 * 24));
+        w.chats.lock().unwrap()[0].messages.push(said("u1", "C Haynes", "a3", &time(-2), "on my way"));
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(ALREADY_IN_TEAMS));
+        assert_eq!(w.chats.lock().unwrap()[0].messages.len(), 3, "nothing posted");
     }
 }

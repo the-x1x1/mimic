@@ -243,8 +243,8 @@ fn same_ids(connector: &str) -> Option<String> {
 
 /// Connectors besides mail whose messages Mimic sends, under the id the
 /// service gave them (`Db::outgoing_sent_as`), so one it sent on its own is
-/// known when it is read back (Slack, 0.10.0-alpha.66).
-pub const SENDS_CONNECTORS: [&str; 1] = ["slack"];
+/// known when it is read back (Slack, 0.10.0-alpha.66; Teams, .68).
+pub const SENDS_CONNECTORS: [&str; 2] = ["slack", "teams"];
 
 struct ImportState<'a> {
     db: &'a Db,

@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.68] — 2026-10-26
+
+Replying in Teams.
+
+### Added
+
+- **Send a reply into Teams.** A draft for a Teams message has **Send**: it shows the account you send as and the chat it goes into, and goes in as you when you press **Send it**.
+- **Replying by myself works in Teams too**, under the same rules as Slack: tick the account beside your mailboxes, and I answer one-to-one chats — never a group — looking in the chat just before a reply goes, so if you've answered there, or they've written again, it doesn't go.
+
 ## [0.10.0-alpha.67] — 2026-10-26
 
 Teams.

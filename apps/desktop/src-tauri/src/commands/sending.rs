@@ -29,10 +29,22 @@ pub async fn reply_envelope(state: State<'_, SharedState>, draft_id: String) -> 
 /// words, the addresses and the subject stay in the database.
 #[tauri::command]
 pub async fn send_reply(state: State<'_, SharedState>, request: SendRequest) -> CommandResult<OutboxEntry> {
-    // Into Slack, with the workspace's own token (0.10.0-alpha.65).
-    let to_slack =
-        state.db.get_source(&request.source_id)?.is_some_and(|s| s.connector == mimic_core::sources::slack::CONNECTOR);
-    if to_slack {
+    // Into Slack, with the workspace's own token (0.10.0-alpha.65); into
+    // Teams, with the account's own sign-in (0.10.0-alpha.68).
+    let connector = state.db.get_source(&request.source_id)?.map(|s| s.connector);
+    if connector.as_deref() == Some(mimic_core::sources::teams::CONNECTOR) {
+        let (db, access) = (state.db.clone(), state.teams_access.clone());
+        return tauri::async_runtime::spawn_blocking(move || {
+            let token = access.token(&request.source_id).map_err(sending::SendError::Cannot)?;
+            let api = mimic_core::sources::teams::GraphApi::new(&token)
+                .map_err(|e| sending::SendError::Service(e.to_string()))?;
+            sending::teams::send_reply(&db, &api, &request)
+        })
+        .await
+        .map_err(|e| CommandError::new("internal", e.to_string()))?
+        .map_err(CommandError::from);
+    }
+    if connector.as_deref() == Some(mimic_core::sources::slack::CONNECTOR) {
         use mimic_core::providers::SecretStore;
         let token = state
             .secrets
@@ -47,7 +59,7 @@ pub async fn send_reply(state: State<'_, SharedState>, request: SendRequest) -> 
         let db = state.db.clone();
         return tauri::async_runtime::spawn_blocking(move || {
             let api = mimic_core::sources::slack::SlackApi::new(&token)
-                .map_err(|e| sending::SendError::Slack(e.to_string()))?;
+                .map_err(|e| sending::SendError::Service(e.to_string()))?;
             sending::slack::send_reply(&db, &api, &request)
         })
         .await

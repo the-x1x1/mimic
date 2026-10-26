@@ -80,7 +80,9 @@ Done in 0.10.0-alpha.64: Slack — a workspace's direct and group messages, read
 
 Done in 0.10.0-alpha.67: Microsoft Teams — a work or school account's one-to-one and group chats, read through Microsoft Graph (`sources::teams`). Not done: never run against a real tenant; channels and meeting chats; a personal account's Teams, which Graph doesn't offer.
 
-Next: replying in Teams, the reply the user approves and then by itself.
+Done in 0.10.0-alpha.68: replying in Teams — the reply the user approves, and by itself under the same rules as Slack.
+
+Next: other places messages arrive, where a service lets a person's own app read them.
 
 ## Phase 8 — Advanced personalization
 
