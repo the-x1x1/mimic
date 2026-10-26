@@ -213,4 +213,16 @@ describe("which name in a chat is the user's", () => {
     expect(screen.queryByRole("button", { name: "That’s me: C" })).toBeNull();
     expect(native.addUserIdentifier).not.toHaveBeenCalled();
   });
+
+  it("asks about a Telegram export's account as that account", async () => {
+    native.userIdentity.mockResolvedValue(identity());
+    const account = writer("C Haynes", 40, {
+      kind: "account_id",
+      value: "telegram:user7",
+      normalized: "telegram:user7",
+    });
+    renderIt([account], "telegram");
+    expect(await screen.findByText("Is this you?")).toBeInTheDocument();
+    expect(screen.getByText(/This Telegram export is of one account/)).toBeInTheDocument();
+  });
 });

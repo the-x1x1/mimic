@@ -64,7 +64,8 @@ export const WriterName = z.object({
   name: z.string(),
   /**
    * `handle` (`whatsapp:<name>`) or `phone`, for a writer shown as a number;
-   * `account_id` (`discord:<id>`) for a Discord package's account.
+   * `account_id` (`discord:<id>`) for a Discord package's account, or
+   * (`telegram:user<id>`) for a Telegram export's writer.
    */
   kind: z.string(),
   value: z.string(),

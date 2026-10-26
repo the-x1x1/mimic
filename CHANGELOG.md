@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.60] — 2026-10-26
+
+Telegram chats.
+
+### Added
+
+- **Telegram exports.** Export a chat from Telegram Desktop (or all your data, Settings → Advanced → Export Telegram data) as machine-readable JSON, and import the result.json it writes. Both sides of each chat are read, so I learn how you reply, as from WhatsApp; chats between two people and private groups, not Saved Messages, bots, channels or public groups. Telegram's own lines, files and stickers without words, and forwarded messages are left out and counted. A whole-account export says whose account it is, so I ask only whether that's you — and already know, when the phone number on it is one of yours.
+
 ## [0.10.0-alpha.59] — 2026-10-26
 
 Your own registration with Microsoft and Google.

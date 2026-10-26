@@ -25,6 +25,7 @@ pub mod normalize;
 pub mod oauth;
 pub mod outgoing;
 pub mod smtp;
+pub mod telegram;
 pub mod transcript;
 pub mod whatsapp;
 
@@ -258,6 +259,7 @@ pub fn all() -> Vec<Box<dyn CommunicationSource>> {
         Box::new(mbox::MboxSource),
         Box::new(whatsapp::WhatsAppSource),
         Box::new(discord::DiscordSource),
+        Box::new(telegram::TelegramSource),
     ]
 }
 

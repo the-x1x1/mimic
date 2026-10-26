@@ -127,6 +127,19 @@ export function WhoIsYou({
             I&rsquo;ll import it once you say it&rsquo;s yours.
           </p>
         )
+      ) : connector === "telegram" ? (
+        <p id={heading}>
+          <strong>
+            {yours.length > 0
+              ? "This is you."
+              : names.length === 1
+                ? "Is this you?"
+                : "Which of these is you?"}
+          </strong>{" "}
+          {names.length === 1
+            ? "This Telegram export is of one account, and its messages are read as yours once you say it's you."
+            : "Telegram's export of a chat doesn't say whose it is, so say which of these wrote your messages. Until you do, I'll read them as someone else's."}
+        </p>
       ) : (
         <>
           <p id={heading}>
