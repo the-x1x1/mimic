@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.42] — 2026-10-26
+
+Mailboxes in other languages.
+
+### Fixed
+
+- A mail server names folders in its own encoding, so a Sent folder called "Éléments envoyés" or "Gesendete Objekte" under the inbox could go unfound where the server doesn't mark it, leaving me none of your writing to learn from. I now read the names as you would, both to find the Sent folder and to show you what I'll read, and still ask the server for each by its own name.
+
 ## [0.10.0-alpha.41] — 2026-10-26
 
 Replying by myself, one person at a time.
