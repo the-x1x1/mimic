@@ -51,6 +51,7 @@ export const qk = {
   // refreshes the home screen can change who a reply goes to and through what.
   envelope: (draftId: string) => ["dashboard", "envelope", draftId] as const,
   sent: ["sent"] as const,
+  autoReply: ["autoReply"] as const,
   mailboxSending: (sourceId: string) => ["sources", "sending", sourceId] as const,
   draftOutcomes: ["draftOutcomes"] as const,
   providers: ["providers"] as const,

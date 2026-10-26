@@ -1085,4 +1085,17 @@ fn a_reply_sent_from_the_mailbox_answers_the_thread() {
     assert_eq!(db.get_draft(&draft.id).unwrap().unwrap().outcome.as_deref(), Some("sent_unedited"));
     assert_eq!(db.count_threads_awaiting_reply().unwrap(), 0, "Ada has her answer");
     check_fixture("outbox.json", &serde_json::to_value(db.recent_outgoing(10).unwrap()).unwrap());
+
+    // Replying by itself, turned on for this mailbox: off in effect while
+    // replies aren't prepared in advance, and nothing is held.
+    let rules = mimic_core::autoreply::Rules {
+        enabled: true,
+        mailboxes: vec![mailbox.id.clone()],
+        ..mimic_core::autoreply::Rules::default()
+    };
+    mimic_core::autoreply::set_rules(&db, rules).unwrap();
+    let status = mimic_core::autoreply::status(&db).unwrap();
+    assert!(status.rules.enabled && !status.running, "it runs only with replies prepared in advance");
+    assert_eq!(status.last_day, 0);
+    check_fixture("autoreply.json", &serde_json::to_value(&status).unwrap());
 }

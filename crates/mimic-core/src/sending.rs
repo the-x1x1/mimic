@@ -52,6 +52,7 @@ pub const MAILBOX_GONE: &str = "That mailbox isn't connected any more.";
 pub const UNREADABLE: &str = "I can't read this mailbox's settings; remove it and connect it again.";
 pub const DRAFT_GONE: &str = "That draft isn't here any more, so there's nothing to send.";
 pub const EMPTY: &str = "There's nothing to send: the reply is empty.";
+pub const HELD: &str = "I'm holding a reply to this to send by myself. Stop it first if you'd rather send your own.";
 pub const PANICKED: &str =
     "Something went wrong inside Mimic while sending, so it may or may not have gone. Look in your Sent folder before sending it again.";
 
@@ -112,6 +113,9 @@ pub struct ReplyEnvelope {
     pub subject: String,
     /// Why it can't be sent from here at all, when it can't.
     pub why_not: Option<String>,
+    /// A reply to it held to go by itself (`crate::autoreply`), which can be
+    /// stopped or sent now.
+    pub held: Option<OutboxEntry>,
 }
 
 /// What the user approved: sent exactly as given.
@@ -166,6 +170,7 @@ fn is_users(mine: &std::collections::HashSet<String>, address: &str) -> bool {
 pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError> {
     let draft = db.get_draft(draft_id)?.ok_or_else(|| SendError::Cannot(DRAFT_GONE.into()))?;
     let incoming = answered(db, &draft)?;
+    let held = db.held_outgoing_for_draft(&draft.id)?;
     let mut mailboxes = sending_mailboxes(db)?;
     if let Some(m) = &incoming {
         mailboxes.sort_by_key(|b| b.source_id != m.source_id);
@@ -178,6 +183,8 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
         Some(ALREADY_DECIDED.to_string())
     } else if db.unsure_outgoing_for_draft(&draft.id)?.is_some() {
         Some(MAY_HAVE_GONE.to_string())
+    } else if held.is_some() {
+        Some(HELD.to_string())
     } else if draft.channel != "email" {
         Some(NOT_EMAIL.to_string())
     } else if mailboxes.is_empty() {
@@ -190,11 +197,11 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
     } else {
         None
     };
-    Ok(ReplyEnvelope { draft_id: draft.id, mailboxes, mailbox, to, other_addresses, subject, why_not })
+    Ok(ReplyEnvelope { draft_id: draft.id, mailboxes, mailbox, to, other_addresses, subject, why_not, held })
 }
 
 /// The stored message a draft answers, when it answers one.
-fn answered(db: &Db, draft: &Draft) -> Result<Option<Message>, DbError> {
+pub(crate) fn answered(db: &Db, draft: &Draft) -> Result<Option<Message>, DbError> {
     Ok(draft.incoming_message_id.as_deref().map(|id| db.get_message(id)).transpose()?.flatten())
 }
 
@@ -252,7 +259,7 @@ fn addresses_in(metadata: &Value, key: &str) -> Vec<String> {
 
 /// `(In-Reply-To, References)` for a reply to `incoming`: nothing when it has
 /// no Message-ID a mail program wrote.
-fn threading(incoming: Option<&Message>) -> (Option<String>, Vec<String>) {
+pub(crate) fn threading(incoming: Option<&Message>) -> (Option<String>, Vec<String>) {
     let Some(m) = incoming.filter(|m| outgoing::is_message_id(&m.external_id)) else {
         return (None, Vec::new());
     };
@@ -354,10 +361,35 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         // outbox says it went.
         tracing::warn!(target: "sending", error = %e, "a sent reply's draft could not be marked as sent");
     }
-    if let Err(e) = record_in_conversation(db, &req.source_id, &bytes) {
+    if let Err(e) = record_in_conversation(db, &req.source_id, &bytes, false) {
         tracing::warn!(target: "sending", error = %e, "a sent reply could not be put in its conversation");
     }
     Ok(db.outgoing(&entry.id)?.unwrap_or(entry))
+}
+
+/// A recorded reply written out as it goes now: from the address and words
+/// it was recorded with, under the user's name, threaded under the message
+/// it answers, dated now, with the Message-ID it was given when it was
+/// recorded — and, sent on its own, saying so.
+pub(crate) fn written_out(db: &Db, entry: &OutboxEntry, auto_replied: bool) -> Result<Vec<u8>, SendError> {
+    let incoming = entry.answers_message_id.as_deref().map(|id| db.get_message(id)).transpose()?.flatten();
+    let (in_reply_to, references) = threading(incoming.as_ref());
+    let mail = Outgoing {
+        from: Mailbox {
+            name: db.user_identity()?.map(|u| u.display_name).filter(|n| !n.trim().is_empty()),
+            address: entry.from_address.clone(),
+        },
+        to: entry.to.iter().map(|a| Mailbox::bare(a)).collect(),
+        cc: entry.cc.iter().map(|a| Mailbox::bare(a)).collect(),
+        subject: entry.subject.clone(),
+        body: entry.body.clone(),
+        message_id: entry.message_id.clone(),
+        in_reply_to,
+        references,
+        date: chrono::Utc::now(),
+        auto_replied,
+    };
+    Ok(mail.to_bytes()?)
 }
 
 /// Hand a recorded reply to the mail server and record what happened.
@@ -426,9 +458,10 @@ pub fn record_sent_draft(db: &Db, draft: &Draft, text: &str) -> Result<Draft, Db
 /// the mailbox it went out of exactly as the next check reads it from the
 /// Sent folder: joined to the thread by the message it answers, and kept
 /// once, by its Message-ID, when that check comes to it.
-pub(crate) fn record_in_conversation(db: &Db, source_id: &str, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn record_in_conversation(db: &Db, source_id: &str, bytes: &[u8], on_its_own: bool) -> Result<(), String> {
     let mut mail = crate::sources::mbox::parse_raw(bytes).ok_or("the sent message has no words in it")?;
     mail.sent = true;
+    mail.sent_on_its_own = on_its_own;
     let mut importer = crate::import::Importer::begin(db, source_id).map_err(|e| e.to_string())?;
     for convo in crate::sources::mbox::thread(vec![mail]) {
         if let Err(e) = importer.take(convo) {
@@ -615,6 +648,7 @@ mod tests {
             }
             .to_bytes()
             .unwrap(),
+            false,
         )
         .unwrap();
         let copies: i64 =

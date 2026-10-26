@@ -90,11 +90,13 @@ impl Db {
     /// that came straight after it in the same conversation.
     pub fn evaluation_exchanges(&self, limit: usize) -> DbResult<Vec<Exchange>> {
         let automated = super::repo_waiting::automated_of("prev");
+        // A reply Mimic sent on its own is not the user's reply to measure against.
+        let mine = super::repo_messages::written_by_the_user("m");
         let sql = format!(
             "SELECT prev.id, prev.body, m.id, m.body, m.conversation_id, prev.participant_id, m.channel
              FROM messages m
              JOIN messages prev ON prev.id = m.reply_to_message_id AND prev.conversation_id = m.conversation_id
-             WHERE m.direction = 'self' AND prev.direction = 'other' AND ({automated}) IS NULL
+             WHERE m.direction = 'self' AND {mine} AND prev.direction = 'other' AND ({automated}) IS NULL
              ORDER BY m.sent_at DESC, m.id DESC
              LIMIT {limit}"
         );

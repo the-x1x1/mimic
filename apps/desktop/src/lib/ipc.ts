@@ -49,9 +49,11 @@ import {
   VoiceOverview,
   VoicePreference,
   CommandError,
+  AutoReplyState,
   MailboxSending,
   OutboxEntry,
   ReplyEnvelope,
+  type AutoReplyRules,
   type SendRequest,
   type SmtpAccount,
   type Adjustment,
@@ -334,6 +336,13 @@ export const ipc = {
     call("set_mailbox_sending", MailboxSending, { sourceId, sending }),
   resetMailboxSending: (sourceId: string) =>
     call("reset_mailbox_sending", MailboxSending, { sourceId }),
+
+  /** The rules for replies sent by themselves, whether they run, and the last day's count. */
+  autoReply: () => call("get_autoreply", AutoReplyState),
+  /** Turning it on turns on preparing replies in advance; off stops every held reply. */
+  setAutoReply: (rules: AutoReplyRules) => call("set_autoreply", AutoReplyState, { rules }),
+  stopHeldReply: (outboxId: string) => call("stop_held_reply", OutboxEntry, { outboxId }),
+  sendHeldReplyNow: (outboxId: string) => call("send_held_reply_now", OutboxEntry, { outboxId }),
 
   providerState: () => call("get_provider_state", ProviderState),
   setActiveProvider: (providerId: string) => call("set_active_provider", z_void, { providerId }),

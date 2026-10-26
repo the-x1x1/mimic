@@ -72,7 +72,7 @@ Only import communication you own or have permission to process.
 
 ## What Mimic will not do
 
-It will not send a message you haven't approved. A reply goes only when you press Send it, from your own mailbox, to the person shown; replies sent by themselves are being built, and will be off until you turn them on.
+It will not send a message you haven't approved. A reply goes when you press Send it, from your own mailbox, to the person shown — or, if you turn on replying by myself in Settings, by itself, only to the people and through the mailboxes you chose, after a wait in which you can stop it, never to mail that looks automated, and never more than your daily limit.
 
 It will not show you a number it has not measured. A rate that has not been computed says "not measured yet"; a rate of zero means zero. There is no accuracy score. Mimic can measure how close its drafts come to what you actually wrote, on conversations it held back, next to a generic reply and your most common one — and it shows each measure on its own, because adding them up would make a number nobody defined.
 

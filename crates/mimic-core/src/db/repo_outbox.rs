@@ -331,6 +331,99 @@ impl Db {
         Ok(n == 1)
     }
 
+    /// Stop a held reply for a reason the user is shown (`why`): its rules
+    /// no longer allow it, or the user replied first. Only while it is held.
+    pub fn stop_held_outgoing(&self, id: &str, why: &str) -> DbResult<bool> {
+        let n = self.conn().execute(
+            "UPDATE outbox SET status = 'canceled', error = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'held'",
+            params![id, why, now_rfc3339()],
+        )?;
+        Ok(n == 1)
+    }
+
+    /// Stop every held reply: replying by itself was turned off. Returns how
+    /// many.
+    pub fn stop_all_held_outgoing(&self, why: &str) -> DbResult<usize> {
+        Ok(self.conn().execute(
+            "UPDATE outbox SET status = 'canceled', error = ?1, updated_at = ?2 WHERE status = 'held'",
+            params![why, now_rfc3339()],
+        )?)
+    }
+
+    /// Let a held reply go at the next look, rather than when its hold ends.
+    pub fn send_held_now(&self, id: &str, now: &str) -> DbResult<OutboxEntry> {
+        let n = self.conn().execute(
+            "UPDATE outbox SET send_after = ?2, updated_at = ?2 WHERE id = ?1 AND status = 'held'",
+            params![id, now],
+        )?;
+        let entry = self.outgoing(id)?.ok_or_else(|| DbError::NotFound(id.into()))?;
+        if n == 0 {
+            return Err(DbError::Invalid(TOO_LATE.into()));
+        }
+        Ok(entry)
+    }
+
+    /// The reply held for any draft of this draft's set, if one is.
+    pub fn held_outgoing_for_draft(&self, draft_id: &str) -> DbResult<Option<OutboxEntry>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT {} FROM outbox o JOIN drafts d ON d.id = o.draft_id
+                     WHERE o.status = 'held'
+                       AND COALESCE(d.alternative_to, d.id) =
+                           (SELECT COALESCE(alternative_to, id) FROM drafts WHERE id = ?1)
+                     ORDER BY o.created_at DESC LIMIT 1",
+                    COLS.split(", ").map(|c| format!("o.{c}")).collect::<Vec<_>>().join(", ")
+                ),
+                [draft_id],
+                map,
+            )
+            .optional()?)
+    }
+
+    /// Replies sent on their own — held, going, gone or perhaps gone, not
+    /// failed or stopped — created since `since`, everywhere or in one
+    /// conversation, leaving out `except`.
+    pub fn autonomous_since(&self, since: &str, conversation_id: Option<&str>, except: Option<&str>) -> DbResult<i64> {
+        Ok(self.conn().query_row(
+            "SELECT COUNT(*) FROM outbox
+             WHERE how = 'autonomous' AND status IN ('held','sending','sent','unsure') AND created_at >= ?1
+               AND (?2 IS NULL OR conversation_id = ?2) AND (?3 IS NULL OR id <> ?3)",
+            params![since, conversation_id, except],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Whether a message has had a reply sent on its own, or held for it,
+    /// whatever became of it — a message is answered on its own once —
+    /// leaving out `except`.
+    pub fn answered_on_its_own(&self, message_id: &str, except: Option<&str>) -> DbResult<bool> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM outbox WHERE how = 'autonomous' AND answers_message_id = ?1
+                            AND (?2 IS NULL OR id <> ?2))",
+            params![message_id, except],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Which of these Message-IDs are of replies Mimic sent, or held to send,
+    /// on its own: read back from the Sent folder, each is marked as such
+    /// (`import`), however it got there first.
+    pub fn sent_on_its_own_among(&self, message_ids: &[String]) -> DbResult<std::collections::HashSet<String>> {
+        if message_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT message_id FROM outbox
+             WHERE how = 'autonomous' AND message_id IN (SELECT value FROM json_each(?1))",
+        )?;
+        let ids = serde_json::to_string(message_ids)?;
+        let rows = stmt.query_map([ids], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Held replies whose time has come, oldest first.
     pub fn due_outgoing(&self, now: &str) -> DbResult<Vec<OutboxEntry>> {
         let conn = self.conn();

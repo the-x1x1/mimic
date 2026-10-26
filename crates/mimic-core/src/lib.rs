@@ -19,6 +19,7 @@
 //! * credentials live in the OS secure store, never in the database.
 
 pub mod assist;
+pub mod autoreply;
 pub mod dashboard;
 pub mod db;
 pub mod diagnostics;

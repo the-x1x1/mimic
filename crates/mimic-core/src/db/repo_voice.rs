@@ -168,12 +168,13 @@ impl Db {
     /// layer is measured over. However many people there are.
     pub fn people_written_to(&self) -> DbResult<Vec<(String, String, i64)>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT p.id, p.display_name, COUNT(m.id) FROM participants p
              JOIN conversation_participants cp ON cp.participant_id = p.id
-             JOIN messages m ON m.conversation_id = cp.conversation_id AND m.direction = 'self'
+             JOIN messages m ON m.conversation_id = cp.conversation_id AND m.direction = 'self' AND {}
              GROUP BY p.id ORDER BY p.id",
-        )?;
+            super::repo_messages::written_by_the_user("m")
+        ))?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }

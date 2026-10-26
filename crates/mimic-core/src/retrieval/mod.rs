@@ -267,14 +267,17 @@ impl Db {
         // One row per reply, however many people its conversation has: the
         // person it is shown against is the one who wrote what it answered,
         // or else the conversation's first.
-        let mut sql = String::from(
+        // Only what the user wrote: a reply Mimic sent on its own is not an
+        // example of how they reply.
+        let mut sql = format!(
             "SELECT m.id, m.body, prev.body,
                     COALESCE(prev.participant_id, (SELECT MIN(cp.participant_id) FROM conversation_participants cp
                                                    WHERE cp.conversation_id = m.conversation_id)),
                     m.channel, m.sent_at, prev.id
              FROM messages m
              LEFT JOIN messages prev ON prev.id = m.reply_to_message_id
-             WHERE m.direction = 'self'",
+             WHERE m.direction = 'self' AND {}",
+            crate::db::written_by_the_user("m")
         );
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(p) = &filter.participant_id {

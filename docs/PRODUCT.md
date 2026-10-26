@@ -48,7 +48,7 @@ Five screens.
 
 ## Autonomy
 
-Three modes are designed. One is implemented, one is half-built, and the third is being built (0.10.0-alpha.24).
+Three modes are designed. All three are built: MANUAL, ASSISTED in part, and TRUSTED (0.10.0-alpha.24).
 
 **MANUAL** — implemented. Mimic drafts; the user reads, edits and sends. Since 0.10.0-alpha.23 they can send from Mimic: **Send** shows who the reply goes to, which of their mailboxes it goes out of and its subject, and nothing goes until **Send it** — from their own address, through their own provider's server, threaded under the message it answers, to that person only. **Use this** still copies it for them to send in whatever app they use. Either way the learning loop reads what was sent.
 
@@ -56,11 +56,12 @@ Three modes are designed. One is implemented, one is half-built, and the third i
 
 Two things make this safe to have on: it is off until switched on in Settings, because with it on a model sees incoming messages nobody handed it; and it is bounded — ten threads per run, one draft per message, cancellable between threads. With a mailbox connected, each check is followed by a run, so "in advance" means "as mail arrives"; without one it still means "after the next import".
 
-**TRUSTED** — being built (0.10.0-alpha.24). Mimic replies by itself, within rules the user sets. It was held back because a product that sends as you needs an account of what it will not send, how a mistake is caught and what it may answer; the owner decided on 2026-10-25 to build it, and this is that account:
+**TRUSTED** — implemented (0.10.0-alpha.24, `crate::autoreply`). Mimic replies by itself, within rules the user sets. It was held back because a product that sends as you needs an account of what it will not send, how a mistake is caught and what it may answer; the owner decided on 2026-10-25 to build it, and this is that account:
 
 - **Off until the user turns it on**, in Settings, for a mailbox — and, if they want it narrower, only for the people they name. Turning it on says in words what it will do. One switch turns all of it off, and anything waiting to go is stopped with it.
-- **It answers only what the home screen would show as waiting**: never mail that looks automated, never a thread gone quiet or marked as needing no reply, never someone writing from a no-reply address, never a mailing list. It answers a message once, and never twice in a row without a new message from them.
-- **Nothing goes at once.** A reply is held for a while (ten minutes unless changed) on the home screen, where it can be read, changed into one the user sends themselves, or stopped; then it goes.
+- **It answers only what the home screen would show as waiting**: never mail that looks automated, never a thread gone quiet or marked as needing no reply, never someone writing from a no-reply address, never a mailing list — and never a thread the user kept on the list against those readings, which is theirs to answer. Only a draft prepared in advance: not one the user asked for, nor one they are choosing between ways of saying. It answers a message once, whatever became of the reply, and never twice in a row without a new message from them; at most twice in one conversation a day.
+- **Nothing goes at once.** A reply is held for a while (ten minutes unless changed) on the home screen, where it can be read, changed into one the user sends themselves, or stopped; then it goes, once the mailbox has been read again since it was held, so an answer the user sent from elsewhere stops it.
+- **Only to the writer, only mail written to the user, only from now on**: a reply goes to the address the person wrote from, never to a different `Reply-To`; only mail with one of the user's addresses in `To` or `Cc` is answered; and only mail that arrived after it was turned on, so turning it on doesn't answer a backlog.
 - **A daily limit** (ten unless changed) on replies sent by itself, across every mailbox; past it, replies wait for the user.
 - **It says what it is to other programs** (`Auto-Submitted: auto-replied`), so another automatic responder doesn't answer it and start a loop.
 - **Everything it sent is listed**, under Your mail, saying it went by itself.

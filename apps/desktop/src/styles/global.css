@@ -498,6 +498,14 @@ fieldset.message-filing {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
+.thread__held {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-1);
+}
 .thread__send-row {
   display: grid;
   grid-template-columns: 5rem minmax(0, 1fr);

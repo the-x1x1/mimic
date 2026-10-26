@@ -34,6 +34,8 @@ pub struct AppState {
     pub mail_credentials: Arc<mimic_core::sources::imap::Credentials>,
     /// A mailbox sign-in waiting on the browser.
     pub sign_in: MailSignIn,
+    /// A look at the replies Mimic sends by itself is running: one at a time.
+    pub replying: AtomicBool,
 }
 
 /// A mailbox sign-in: one at a time, stoppable, and — between signing in

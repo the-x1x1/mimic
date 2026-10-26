@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { contractFixture, importFixture } from "@mimic/test-fixtures";
 import {
+  AutoReplyState,
+  describeAutoReply,
+  describeHeld,
   OutboxEntry,
   ReplyEnvelope,
   describeOutboxEntry,
@@ -234,6 +237,14 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(sent[0]?.status).toBe("sent");
     expect(sent[0]?.how).toBe("approved");
     expect(sent[0]?.error).toBeNull();
+  });
+
+  it("parses the rules for replying by itself", () => {
+    const state = AutoReplyState.parse(read(contractFixture("autoreply.json")));
+    expect(state.rules.enabled).toBe(true);
+    expect(state.running).toBe(false);
+    expect(state.rules.who).toBe("known");
+    expect(describeAutoReply(state)).toMatch(/aren't being prepared in advance/);
   });
 
   it("rejects a payload that is missing a field the UI reads", () => {
@@ -1329,5 +1340,64 @@ describe("what was sent says where it went and whether it got there", () => {
     expect(sendMayHaveGone("send_unsure")).toBe(true);
     expect(sendMayHaveGone("send_failed")).toBe(false);
     expect(sendMayHaveGone(undefined)).toBe(false);
+  });
+});
+
+describe("replying by itself says what it will do", () => {
+  const rules = {
+    enabled: true,
+    mailboxes: ["s1"],
+    who: "known" as const,
+    people: [],
+    holdMinutes: 10,
+    dailyLimit: 10,
+    enabledAt: "2026-10-26T09:00:00.000Z",
+  };
+
+  it("says when it is off, or on but doing nothing, and what it allows when on", () => {
+    expect(
+      describeAutoReply({ rules: { ...rules, enabled: false }, running: false, lastDay: 0 }),
+    ).toBe("Off. Every reply waits for you.");
+    expect(
+      describeAutoReply({ rules: { ...rules, mailboxes: [] }, running: true, lastDay: 0 }),
+    ).toMatch(/for no mailbox yet/);
+    expect(describeAutoReply({ rules, running: true, lastDay: 0 })).toBe(
+      "On: I answer people you've written to yourself, holding each reply 10 minutes first, 10 a day at most.",
+    );
+    expect(
+      describeAutoReply({
+        rules: { ...rules, who: "listed", people: ["p1"] },
+        running: true,
+        lastDay: 0,
+      }),
+    ).toMatch(/the one person you chose/);
+  });
+
+  it("says when a held reply goes, and to whom", () => {
+    const held: OutboxEntry = {
+      id: "o1",
+      draftId: "d1",
+      sourceId: "s1",
+      conversationId: "c1",
+      answersMessageId: "m1",
+      participantId: "p1",
+      fromAddress: "c@example.com",
+      to: ["ada@example.com"],
+      cc: [],
+      subject: "Re: Lunch",
+      body: "perfect, see you there",
+      messageId: "x@example.com",
+      how: "autonomous",
+      status: "held",
+      sendAfter: "2026-10-26T09:10:00Z",
+      error: null,
+      createdAt: "2026-10-26T09:00:00Z",
+      updatedAt: "2026-10-26T09:00:00Z",
+      sentAt: null,
+    };
+    expect(describeHeld(held, new Date("2026-10-26T09:00:30Z"))).toBe(
+      "I'll send this to ada@example.com by myself in 10 minutes, unless you stop it.",
+    );
+    expect(describeHeld(held, new Date("2026-10-26T09:10:00Z"))).toMatch(/in a moment/);
   });
 });

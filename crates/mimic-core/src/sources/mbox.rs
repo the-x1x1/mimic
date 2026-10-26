@@ -55,6 +55,11 @@ pub(crate) struct Mail {
     /// Who else it was to (`To` and `Cc`), for a reply to everyone.
     pub(crate) to: Vec<String>,
     pub(crate) cc: Vec<String>,
+    /// A reply Mimic sent by itself (`crate::autoreply`), being put in its
+    /// conversation: it answers the thread as the user's reply does, but its
+    /// `Auto-Submitted` header is not read as a machine's mail, and it is
+    /// marked `sentOnItsOwn` so nothing reads it as the user's writing.
+    pub(crate) sent_on_its_own: bool,
 }
 
 impl CommunicationSource for MboxSource {
@@ -248,6 +253,7 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         reply_to: get("reply-to").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
         to: get("to").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
         cc: get("cc").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
+        sent_on_its_own: false,
     })
 }
 
@@ -420,7 +426,9 @@ pub(crate) fn thread(mut mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
                             }
                             // Read by the dashboard to leave the thread out of
                             // what is waiting; absent means a person wrote it.
-                            if let Some(a) = m.automated {
+                            if m.sent_on_its_own {
+                                meta.insert("sentOnItsOwn".into(), json!(true));
+                            } else if let Some(a) = m.automated {
                                 meta.insert("automated".into(), json!(a.as_str()));
                             }
                             serde_json::Value::Object(meta)

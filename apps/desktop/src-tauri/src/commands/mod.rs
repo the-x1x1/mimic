@@ -1,4 +1,5 @@
 pub mod app;
+pub mod autoreply;
 pub mod compose;
 pub mod dashboard;
 pub mod diagnostics;

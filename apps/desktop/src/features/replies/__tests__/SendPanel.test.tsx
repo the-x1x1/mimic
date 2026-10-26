@@ -52,6 +52,7 @@ const envelope = (over: Partial<ReplyEnvelope> = {}): ReplyEnvelope => ({
   otherAddresses: ["ada@example.com"],
   subject: "Re: Friday",
   whyNot: null,
+  held: null,
   ...over,
 });
 

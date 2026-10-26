@@ -138,7 +138,7 @@ fn summary_cte() -> String {
         "WITH seen AS (
            SELECT cp.participant_id AS pid,
                   COUNT(msg.id) AS total,
-                  SUM(CASE WHEN msg.direction = 'self' THEN 1 ELSE 0 END) AS sent_by_user,
+                  SUM(CASE WHEN msg.direction = 'self' AND {mine} THEN 1 ELSE 0 END) AS sent_by_user,
                   COUNT(DISTINCT msg.conversation_id) AS conversations,
                   GROUP_CONCAT(DISTINCT msg.channel) AS channels,
                   MIN(msg.sent_at) AS first_at,
@@ -159,7 +159,8 @@ fn summary_cte() -> String {
            JOIN classified ON classified.pid = p.id
            LEFT JOIN seen ON seen.pid = p.id
          )",
-        classified = classified_cte()
+        classified = classified_cte(),
+        mine = super::repo_messages::written_by_the_user("msg")
     )
 }
 

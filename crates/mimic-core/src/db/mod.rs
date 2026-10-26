@@ -34,6 +34,7 @@ pub use repo_evaluations::{EvaluationCaseRow, EvaluationRow, Exchange, NewEvalua
 pub use repo_identity::{
     AddressAdded, AddressOwner, AddressPreview, Claimed, HeldAddress, Reconciled, SentFolderPerson,
 };
+pub(crate) use repo_messages::written_by_the_user;
 pub use repo_messages::{
     word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
 };
