@@ -75,7 +75,36 @@ describe("replying by myself", () => {
     expect(within(confirm).getByText(/without asking each time/)).toBeInTheDocument();
     fireEvent.click(within(confirm).getByRole("button", { name: "Turn it on" }));
     await waitFor(() =>
-      expect(native.setAutoReply).toHaveBeenCalledWith({ ...off, enabled: true }),
+      expect(native.setAutoReply).toHaveBeenCalledWith({ ...off, enabled: true, rehearse: false }),
+    );
+  });
+
+  it("can be rehearsed first, and says so", async () => {
+    // A mailbox already ticked, so what it would do can be said.
+    const ticked = { ...off, mailboxes: ["s1"] };
+    renderIt(ticked);
+    fireEvent.click(await screen.findByRole("button", { name: "Reply by myself…" }));
+    const confirm = screen.getByRole("group", { name: "Turn on replying by myself" });
+    expect(within(confirm).getByText(/Or rehearse first/)).toBeInTheDocument();
+    fireEvent.click(within(confirm).getByRole("button", { name: "Rehearse first" }));
+    await waitFor(() =>
+      expect(native.setAutoReply).toHaveBeenCalledWith({
+        ...ticked,
+        enabled: true,
+        rehearse: true,
+      }),
+    );
+    expect(await screen.findByText(/^Rehearsing: I'd answer/)).toBeInTheDocument();
+    const rehearse = screen.getByRole("checkbox", { name: /^Rehearse:/ });
+    expect(rehearse).toBeChecked();
+    expect(
+      screen.getByText(/the replies I held while rehearsing wait for you/),
+    ).toBeInTheDocument();
+    fireEvent.click(rehearse);
+    await waitFor(() =>
+      expect(native.setAutoReply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ enabled: true, rehearse: false }),
+      ),
     );
   });
 

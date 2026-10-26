@@ -27,6 +27,11 @@ export const AutoReplyRules = z.object({
   enabledAt: z.string().nullable(),
   /** The hours of the day replies may go by themselves, on this computer's clock (0.10.0-alpha.39). */
   hours: z.object({ from: z.number().int(), to: z.number().int() }).nullable().optional(),
+  /**
+   * Rehearsing (0.10.0-alpha.45): held, shown and checked as for real, but
+   * stopped when it would go. Nothing is sent.
+   */
+  rehearse: z.boolean().optional(),
 });
 export type AutoReplyRules = z.infer<typeof AutoReplyRules>;
 
@@ -47,14 +52,20 @@ export const AutoReplyRun = z.object({
   failed: z.number().int(),
   /** Gone or not, the connection lost as it went (0.10.0-alpha.44). */
   unsure: z.number().int().optional(),
+  /** Stopped when it would have gone, rehearsing (0.10.0-alpha.45). */
+  rehearsed: z.number().int().optional(),
 });
 export type AutoReplyRun = z.infer<typeof AutoReplyRun>;
 
 /** The hold lengths Settings offers, in minutes. */
 export const HOLD_CHOICES = [2, 5, 10, 30, 60] as const;
 
-/** A held reply, as the line under its message says it. */
-export function describeHeld(entry: OutboxEntry, now: Date = new Date()): string {
+/** A held reply, as the line under its message says it — as a rehearsal while rehearsing. */
+export function describeHeld(
+  entry: OutboxEntry,
+  now: Date = new Date(),
+  rehearsing = false,
+): string {
   const at = new Date(entry.sendAfter);
   const minutes = Math.max(0, Math.ceil((at.getTime() - now.getTime()) / 60_000));
   // An hour or more away — the hours allowed haven't started — by the clock.
@@ -69,6 +80,8 @@ export function describeHeld(entry: OutboxEntry, now: Date = new Date()): string
           : at.toDateString() === now.toDateString()
             ? `at ${clock}`
             : `tomorrow at ${clock}`;
+  if (rehearsing)
+    return `Rehearsing: I'd send this to ${listAddresses(entry.to)} by myself ${when}. Nothing will go; then it's yours.`;
   return `I'll send this to ${listAddresses(entry.to)} by myself ${when}, unless you stop it.`;
 }
 
@@ -89,6 +102,8 @@ export function describeAutoReply(state: AutoReplyState): string {
         ? "the one person you chose"
         : `the ${chosen.toLocaleString()} people you chose`;
   const when = r.hours ? `, only between ${hourOf(r.hours.from)} and ${hourOf(r.hours.to)}` : "";
+  if (r.rehearse)
+    return `Rehearsing: I'd answer ${who}, holding each reply ${r.holdMinutes.toLocaleString()} minutes first${when}, ${r.dailyLimit.toLocaleString()} a day at most — and send none of them.`;
   return `On: I answer ${who}, holding each reply ${r.holdMinutes.toLocaleString()} minutes first${when}, ${r.dailyLimit.toLocaleString()} a day at most.`;
 }
 

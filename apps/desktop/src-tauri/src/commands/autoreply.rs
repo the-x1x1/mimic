@@ -87,7 +87,7 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
                 queue_check(state, source_id);
             }
             if run.changed_anything() {
-                tracing::info!(target: "autoreply", held = run.held, sent = run.sent, stopped = run.stopped, failed = run.failed, unsure = run.unsure, "replied by itself");
+                tracing::info!(target: "autoreply", held = run.held, sent = run.sent, stopped = run.stopped, failed = run.failed, unsure = run.unsure, rehearsed = run.rehearsed, "replied by itself");
                 let _ = app.emit("sending://changed", &run);
                 let rules = autoreply::rules(&state.db).unwrap_or_default();
                 for (title, body) in crate::background::replied_by_itself(&run, &rules) {

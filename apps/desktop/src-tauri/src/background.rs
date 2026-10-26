@@ -223,10 +223,20 @@ pub fn replied_by_itself(
             Some(_) => format!("after at least {hold} minutes, within the hours you chose"),
             None => format!("in {hold} minutes"),
         };
-        out.push((
-            "Going by itself soon".to_string(),
-            format!("{body} will go by {them} {when}. You can stop {it} on the home screen."),
-        ));
+        if rules.rehearse {
+            let (is, place) = if run.held == 1 { ("is", "It's") } else { ("are", "They're") };
+            out.push((
+                "Rehearsing".to_string(),
+                format!(
+                    "{body} {is} held as if to go by {them} {when}. Nothing will be sent. {place} on the home screen."
+                ),
+            ));
+        } else {
+            out.push((
+                "Going by itself soon".to_string(),
+                format!("{body} will go by {them} {when}. You can stop {it} on the home screen."),
+            ));
+        }
     }
     if run.sent > 0 {
         out.push((
@@ -240,6 +250,16 @@ pub fn replied_by_itself(
         out.push((
             "A reply didn't go".to_string(),
             format!("{what} didn't go. What I've sent, under Your mail, says why."),
+        ));
+    }
+    if run.rehearsed > 0 {
+        let wait = if run.rehearsed == 1 { "It waits" } else { "They wait" };
+        out.push((
+            "Rehearsing".to_string(),
+            format!(
+                "I'd have sent {} by myself just now; rehearsing, I sent nothing. {wait} for you on the home screen.",
+                replies(run.rehearsed)
+            ),
         ));
     }
     if run.unsure > 0 {
@@ -297,6 +317,19 @@ mod tests {
             "A reply will go by itself after at least 5 minutes, within the hours you chose. You can stop it on the home screen."
         );
         assert!(replied_by_itself(&Run { stopped: 3, ..Default::default() }, &ten).is_empty());
+        let rehearsing = Rules { rehearse: true, ..Rules { hold_minutes: 10, ..Rules::default() } };
+        assert_eq!(
+            replied_by_itself(&Run { held: 1, ..Default::default() }, &rehearsing)[0].1,
+            "A reply is held as if to go by itself in 10 minutes. Nothing will be sent. It's on the home screen."
+        );
+        assert_eq!(
+            replied_by_itself(&Run { rehearsed: 2, ..Default::default() }, &ten)[0].1,
+            "I'd have sent 2 replies by myself just now; rehearsing, I sent nothing. They wait for you on the home screen."
+        );
+        assert_eq!(
+            replied_by_itself(&Run { rehearsed: 1, ..Default::default() }, &ten)[0].1,
+            "I'd have sent a reply by myself just now; rehearsing, I sent nothing. It waits for you on the home screen."
+        );
     }
 
     #[test]

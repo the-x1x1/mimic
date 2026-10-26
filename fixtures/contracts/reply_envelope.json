@@ -1,8 +1,8 @@
 {
-  "draftId": "9e4ff87a-27d3-4eaf-8b6d-1696e2a5e235",
+  "draftId": "977478d8-4495-49e4-8959-96afd73d045a",
   "mailboxes": [
     {
-      "sourceId": "b4db2cf0-efd2-4c8a-b15f-e335b15827dd",
+      "sourceId": "0ee6ae0c-78a8-4be5-a086-32e72b4ffc0e",
       "name": "c@example.com",
       "fromAddress": "c@example.com",
       "server": "127.0.0.1",
@@ -10,7 +10,7 @@
       "signature": null
     }
   ],
-  "mailbox": "b4db2cf0-efd2-4c8a-b15f-e335b15827dd",
+  "mailbox": "0ee6ae0c-78a8-4be5-a086-32e72b4ffc0e",
   "to": ["ada.replies@example.com"],
   "otherAddresses": ["ada@example.com"],
   "othersOnIt": [],

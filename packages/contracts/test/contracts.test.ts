@@ -1426,6 +1426,14 @@ describe("what was sent says where it went and whether it got there", () => {
     ).toBe("Didn't go to ada@example.com: The mail server said no: 550");
     expect(describeOutboxEntry(entry({ status: "held" }))).toMatch(/You can stop it/);
     expect(describeOutboxEntry(entry({ status: "canceled" }))).toMatch(/^Stopped before it went/);
+    expect(
+      describeOutboxEntry(
+        entry({
+          status: "canceled",
+          error: "Rehearsing: I'd have sent this by myself now, and didn't. It waits for you.",
+        }),
+      ),
+    ).toMatch(/^Stopped before it went to .+\. Rehearsing: I'd have sent this/);
     expect(describeOutboxEntry(entry({ status: "unsure" }))).toMatch(/Look in your Sent folder/);
   });
 
@@ -1474,6 +1482,11 @@ describe("replying by itself says what it will do", () => {
     ).toMatch(/for no mailbox yet/);
     expect(describeAutoReply({ rules, running: true, lastDay: 0 })).toBe(
       "On: I answer people you've written to yourself, holding each reply 10 minutes first, 10 a day at most.",
+    );
+    expect(
+      describeAutoReply({ rules: { ...rules, rehearse: true }, running: true, lastDay: 0 }),
+    ).toBe(
+      "Rehearsing: I'd answer people you've written to yourself, holding each reply 10 minutes first, 10 a day at most — and send none of them.",
     );
     expect(
       describeAutoReply({
@@ -1529,6 +1542,9 @@ describe("replying by itself says what it will do", () => {
       "I'll send this to ada@example.com by myself in 10 minutes, unless you stop it.",
     );
     expect(describeHeld(held, new Date("2026-10-26T09:10:00Z"))).toMatch(/in a moment/);
+    expect(describeHeld(held, new Date("2026-10-26T09:00:30Z"), true)).toBe(
+      "Rehearsing: I'd send this to ada@example.com by myself in 10 minutes. Nothing will go; then it's yours.",
+    );
     // Waiting for the hours allowed: said by the clock, not in hundreds of minutes.
     const later = new Date("2026-10-26T09:00:30Z");
     const sameDay = new Date(later.getTime() + 3 * 3600_000);
