@@ -52,6 +52,9 @@ export const qk = {
   // Under "dashboard": a mailbox connected, a draft decided, anything that
   // refreshes the home screen can change who a reply goes to and through what.
   envelope: (draftId: string) => ["dashboard", "envelope", draftId] as const,
+  // Under "dashboard" too: a check, a reply held or stopped, or the rules
+  // saved can each change it.
+  whyNotByItself: (draftId: string) => ["dashboard", "byItself", draftId] as const,
   sent: ["sent"] as const,
   autoReply: ["autoReply"] as const,
   mailboxSending: (sourceId: string) => ["sources", "sending", sourceId] as const,

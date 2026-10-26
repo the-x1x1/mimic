@@ -14,6 +14,7 @@ const native = vi.hoisted(() => ({
   addDraftPreference: vi.fn(),
   autoReply: vi.fn(),
   setAutoReply: vi.fn(),
+  whyNotByItself: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -107,6 +108,7 @@ describe("a reply held to go by itself", () => {
     for (const f of Object.values(native)) f.mockReset();
     native.replyEnvelope.mockResolvedValue(envelope);
     native.autoReply.mockResolvedValue({ rules, running: true, lastDay: 1 });
+    native.whyNotByItself.mockResolvedValue(null);
     native.setAutoReply.mockImplementation(async (r: typeof rules) => ({
       rules: r,
       running: true,

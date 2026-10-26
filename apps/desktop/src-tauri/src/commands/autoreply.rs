@@ -43,6 +43,13 @@ pub async fn set_autoreply(
     read(&state)
 }
 
+/// Why the reply under a message won't go by itself, for the line under it
+/// (0.10.0-alpha.57); nothing while off, while held, or when it may go.
+#[tauri::command]
+pub async fn why_not_by_itself(state: State<'_, SharedState>, draft_id: String) -> CommandResult<Option<String>> {
+    Ok(autoreply::why_not_by_itself_now(&state.db, &draft_id)?)
+}
+
 /// Stop a held reply. Its draft waits for the user, as any draft does.
 #[tauri::command]
 pub async fn stop_held_reply(

@@ -5,7 +5,11 @@ import type { AutoReplyRules } from "@mimic/contracts";
 import { ByMyself } from "../ByMyself";
 
 // The real hooks run; only the native calls are replaced.
-const native = vi.hoisted(() => ({ autoReply: vi.fn(), setAutoReply: vi.fn() }));
+const native = vi.hoisted(() => ({
+  autoReply: vi.fn(),
+  setAutoReply: vi.fn(),
+  whyNotByItself: vi.fn(),
+}));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
 const rules: AutoReplyRules = {
@@ -29,7 +33,7 @@ function renderIt(r: AutoReplyRules, participantId: string | null = "p-ada") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <ByMyself participantId={participantId} />
+      <ByMyself draftId="d1" participantId={participantId} />
     </QueryClientProvider>,
   );
 }
@@ -37,12 +41,26 @@ function renderIt(r: AutoReplyRules, participantId: string | null = "p-ada") {
 describe("replying by myself to one person", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
+    native.whyNotByItself.mockResolvedValue(null);
   });
 
   it("says nothing while replying by myself is off", async () => {
     const { container } = renderIt({ ...rules, enabled: false });
     await waitFor(() => expect(native.autoReply).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
+    expect(native.whyNotByItself).not.toHaveBeenCalled();
+  });
+
+  it("says why this reply won't go by itself, even to no one in particular", async () => {
+    native.whyNotByItself.mockResolvedValue(
+      "It came with an attachment or an invitation, which I can't read, so it waits for you.",
+    );
+    renderIt(rules, null);
+    expect(await screen.findByRole("note", { name: "Why not by myself" })).toHaveTextContent(
+      "Not by myself: It came with an attachment or an invitation, which I can't read, so it waits for you.",
+    );
+    expect(native.whyNotByItself).toHaveBeenCalledWith("d1");
+    expect(screen.queryByRole("group", { name: "Replying by myself to them" })).toBeNull();
   });
 
   it("puts someone on the never list in one click, and takes them off again", async () => {

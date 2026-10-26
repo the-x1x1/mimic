@@ -364,6 +364,7 @@ export const ipc = {
   /** Turning it on turns on preparing replies in advance; off stops every held reply. */
   setAutoReply: (rules: AutoReplyRules) => call("set_autoreply", AutoReplyState, { rules }),
   stopHeldReply: (outboxId: string) => call("stop_held_reply", OutboxEntry, { outboxId }),
+  whyNotByItself: (draftId: string) => call("why_not_by_itself", z_string.nullable(), { draftId }),
   sendHeldReplyNow: (outboxId: string) => call("send_held_reply_now", OutboxEntry, { outboxId }),
 
   providerState: () => call("get_provider_state", ProviderState),
