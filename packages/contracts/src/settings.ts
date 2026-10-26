@@ -33,9 +33,22 @@ export const Settings = z.object({
   "app.keepRunning": z.boolean(),
   /** Windows notifications when there is something to look at. */
   "notify.enabled": z.boolean(),
+  /** The shortcut that opens Write on what the clipboard holds; empty is off. */
+  "anywhere.shortcut": z.string(),
 });
 export type Settings = z.infer<typeof Settings>;
 export type SettingKey = keyof Settings;
+
+/**
+ * The shortcuts offered for answering a message from anywhere: copy it, press
+ * one, and Write opens on it. Three modifiers each, so none is an app's or
+ * Windows' own, and none types an AltGr character.
+ */
+export const ANYWHERE_SHORTCUTS = [
+  "Ctrl+Shift+Alt+M",
+  "Ctrl+Shift+Alt+R",
+  "Ctrl+Shift+Alt+Space",
+] as const;
 
 /** The waiting windows Settings offers, in days; 0 is any age. */
 export const WAITING_WINDOWS = [7, 14, 30, 90, 0] as const;

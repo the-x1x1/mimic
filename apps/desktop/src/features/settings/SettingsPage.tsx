@@ -34,6 +34,7 @@ import { DeleteEverythingDialog } from "./DeleteEverythingDialog";
 import { MeaningSection } from "./MeaningSection";
 import { AutoReplySection } from "./AutoReplySection";
 import { BackgroundSection } from "./BackgroundSection";
+import { AnywhereSection } from "./AnywhereSection";
 import { ModelStep } from "@/features/onboarding/ModelStep";
 
 export function SettingsPage() {
@@ -50,6 +51,7 @@ export function SettingsPage() {
       <MeaningSection />
       <MailSection />
       <BackgroundSection />
+      <AnywhereSection />
       <EngineSection />
       <PrivacySection />
       <UpdatesSection />

@@ -84,4 +84,23 @@ describe("writing something new", () => {
     expect(native.resolveDraft).toHaveBeenCalledWith("d1", "regenerated", null);
     expect(native.resolveDraft).toHaveBeenCalledTimes(1);
   });
+
+  it("opens on a message copied from anywhere, as the message being answered", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter
+          initialEntries={[{ pathname: "/write", state: { pasted: "are we still on for 7?" } }]}
+        >
+          <ComposePanel />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByDisplayValue("are we still on for 7?")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(native.generationContext).toHaveBeenCalledWith(
+        expect.objectContaining({ incomingMessage: "are we still on for 7?" }),
+      ),
+    );
+  });
 });

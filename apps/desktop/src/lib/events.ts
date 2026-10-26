@@ -24,6 +24,19 @@ export const events = {
     on("engine://status", (r) => EngineStatus.safeParse(r).data ?? null, h),
   onReady: (h: Handler<unknown>) => on("app://ready", (r) => r, h),
   /**
+   * The answer-from-anywhere shortcut was pressed: what the clipboard held,
+   * possibly nothing. It goes to Write and nowhere else.
+   */
+  onPasted: (h: Handler<{ text: string }>) =>
+    on(
+      "write://pasted",
+      (r) => {
+        const text = (r as { text?: unknown } | null)?.text;
+        return typeof text === "string" ? { text } : null;
+      },
+      h,
+    ),
+  /**
    * Replies sent by themselves were held, sent, stopped or failed — or their
    * rules changed (then every count is absent, read as 0).
    */

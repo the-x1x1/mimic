@@ -28,6 +28,9 @@ tauri-plugin-single-instance = "2"
 # Windows notifications, and starting with Windows when asked (background.rs).
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
+# Answering from anywhere: a global shortcut, and the clipboard (anywhere.rs).
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-clipboard-manager = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

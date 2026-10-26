@@ -753,6 +753,7 @@ describe("settings and updater contracts", () => {
       "onboarding.completed": false,
       "app.keepRunning": true,
       "notify.enabled": true,
+      "anywhere.shortcut": "",
     };
     expect(() => Settings.parse(defaults)).not.toThrow();
     expect(() => Settings.parse({ ...defaults, "updates.channel": "nightly" })).toThrow();

@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.29] — 2026-10-26
+
+A message from anywhere.
+
+### Added
+
+- **Answer a message from anywhere.** WhatsApp, Discord, Messages on your phone and most other places don't let an app read or send for you, but they all let you copy. Copy a message there, press your shortcut, and I come forward with Write open on it, ready for a reply in your voice to copy back. Choose the shortcut under Settings → Answering a message from anywhere (Ctrl+Shift+Alt with M, R or Space); it's off until you do.
+- I read what you copied only when you press the shortcut, and it goes into Write and nowhere else until you ask for a draft. If another app already has the shortcut, Settings says so and keeps the one you had.
+
 ## [0.10.0-alpha.28] — 2026-10-26
 
 Running in the background.

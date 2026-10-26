@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import { HashRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { Button, EmptyState } from "@mimic/ui";
 import { queryClient } from "./queryClient";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -15,6 +15,7 @@ import { ComposePanel } from "@/features/compose/ComposePanel";
 import { useNativeEventBridge, useOnboardingState, useSettings } from "@/hooks/useSystem";
 import { useUpdater } from "@/features/updater/useUpdater";
 import { isTauri } from "@/lib/tauri";
+import { events } from "@/lib/events";
 
 function ThemeSync() {
   const settings = useSettings();
@@ -32,6 +33,22 @@ function ThemeSync() {
  */
 function NativeEvents() {
   useNativeEventBridge();
+  return null;
+}
+
+/**
+ * The answer-from-anywhere shortcut: Write, opened on what was copied. The
+ * text travels in the route's state, so it is in no address and no history
+ * entry outlives the window.
+ */
+function FromAnywhere() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const off = events.onPasted(({ text }) => navigate("/write", { state: { pasted: text } }));
+    return () => {
+      void off.then((f) => f());
+    };
+  }, [navigate]);
   return null;
 }
 
@@ -106,6 +123,7 @@ export function App() {
         <HashRouter>
           <ThemeSync />
           <NativeEvents />
+          <FromAnywhere />
           <BackgroundUpdater />
           <Gate />
         </HashRouter>

@@ -2,6 +2,7 @@
 //! generation, providers, jobs) into a Tauri 2 application and exposes typed
 //! commands to the React frontend.
 
+mod anywhere;
 mod app_state;
 mod background;
 mod commands;
@@ -39,6 +40,18 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        // Answering from anywhere: a shortcut of the user's choosing, and the
+        // clipboard read when it is pressed (`anywhere`).
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        anywhere::pressed(app);
+                    }
+                })
+                .build(),
+        )
         // Started at sign-in, when the user asks, with no window: only the
         // icon in the notification area (`background`).
         .plugin(tauri_plugin_autostart::init(
@@ -82,6 +95,7 @@ pub fn run() {
                     bring_to_front(&handle);
                 }
             }
+            anywhere::start(&handle, &state);
             startup::spawn_background(handle.clone(), state.clone());
             let _ = handle.emit("app://ready", serde_json::json!({"version": mimic_core::APP_VERSION}));
             Ok(())

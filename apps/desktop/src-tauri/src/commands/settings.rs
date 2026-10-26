@@ -35,6 +35,8 @@ pub fn defaults() -> Map<String, Value> {
     // Windows notifications say when there is something to look at.
     m.insert(crate::background::KEEP_RUNNING.into(), json!(true));
     m.insert(crate::background::NOTIFY.into(), json!(true));
+    // The shortcut that opens Write on what the clipboard holds; empty is off.
+    m.insert(crate::anywhere::SETTING.into(), json!(""));
     m
 }
 
@@ -51,11 +53,21 @@ pub async fn get_settings(state: State<'_, SharedState>) -> CommandResult<Map<St
 
 #[tauri::command]
 pub async fn set_setting(
+    app: tauri::AppHandle,
     state: State<'_, SharedState>,
     key: String,
     value: Value,
 ) -> CommandResult<Map<String, Value>> {
     check(&key, &value)?;
+    // A shortcut is listened for before it is kept: one another app has is
+    // refused, and the one before goes on being listened for.
+    if key == crate::anywhere::SETTING {
+        let before = state.db.get_setting::<String>(&key)?.unwrap_or_default();
+        if let Err(why) = crate::anywhere::listen(&app, value.as_str().unwrap_or_default()) {
+            let _ = crate::anywhere::listen(&app, &before);
+            return Err(CommandError::new("shortcut", why));
+        }
+    }
     state.db.set_setting(&key, &value)?;
     if key == "updates.channel" {
         let mut st = state.db.update_state()?;
@@ -81,6 +93,10 @@ fn check(key: &str, value: &Value) -> CommandResult<()> {
     );
     if !same_kind {
         return Err(CommandError::new("invalid_setting", format!("{key} expects a {}", kind(default))));
+    }
+    if key == crate::anywhere::SETTING {
+        crate::anywhere::accelerator(value.as_str().unwrap_or_default())
+            .map_err(|why| CommandError::new("invalid_setting", why))?;
     }
     if key == "updates.channel" && !matches!(value.as_str(), Some("stable") | Some("beta")) {
         return Err(CommandError::new("invalid_setting", "updates.channel must be stable or beta"));
