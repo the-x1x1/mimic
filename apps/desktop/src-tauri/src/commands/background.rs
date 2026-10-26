@@ -20,6 +20,19 @@ pub async fn step_aside(app: tauri::AppHandle) -> CommandResult<bool> {
         .map_err(|e| CommandError::new("window", format!("I couldn't step aside: {e}")))
 }
 
+/// Put a reply in the window the message came from (0.10.0-alpha.46,
+/// `anywhere::paste_back`): none when it was pasted; otherwise why it was
+/// only copied. Nothing is sent: the user sends it there.
+#[tauri::command]
+pub async fn paste_back(app: tauri::AppHandle, text: String) -> CommandResult<Option<String>> {
+    let pasting = app.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::anywhere::paste_back(&pasting, &text))
+        .await
+        .map_err(|e| CommandError::new("window", format!("I couldn't put it there: {e}")))?
+        .map(|why| why.map(str::to_string))
+        .map_err(|e| CommandError::new("window", format!("I couldn't put it there: {e}")))
+}
+
 /// Whether Windows starts Mimic when the user signs in.
 #[tauri::command]
 pub async fn get_start_with_windows(app: tauri::AppHandle) -> CommandResult<bool> {

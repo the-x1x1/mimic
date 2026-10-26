@@ -201,6 +201,8 @@ export const ipc = {
   setStartWithWindows: (on: boolean) => call("set_start_with_windows", z_bool, { on }),
   /** Get out of the way so what was copied can be pasted: true when hidden, false when minimised. */
   stepAside: () => call("step_aside", z_bool),
+  /** Paste a reply where the message came from: null when pasted, else why it is only copied. */
+  pasteBack: (text: string) => call("paste_back", z_string.nullable(), { text }),
 
   connectors: () => call("list_connectors", ConnectorInfo.array()),
   sources: () => call("list_sources", Source.array()),

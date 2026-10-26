@@ -17,6 +17,7 @@ const native = vi.hoisted(() => ({
   generateDraft: vi.fn(),
   resolveDraft: vi.fn(),
   stepAside: vi.fn(),
+  pasteBack: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -192,6 +193,24 @@ describe("writing something new", () => {
         expect(native.resolveDraft).toHaveBeenCalledWith("d1", "sent_edited", "yes! see you at 7"),
       );
       await waitFor(() => expect(screen.queryByText("The reply you copied")).toBeNull());
+    });
+
+    it("pastes the reply into the window the message came from, then asks whether it went", async () => {
+      native.pasteBack.mockResolvedValue(null);
+      await draftFromAnywhere();
+      fireEvent.click(screen.getByRole("button", { name: "Paste it there" }));
+      await waitFor(() => expect(native.pasteBack).toHaveBeenCalledWith("yes, see you at 7"));
+      expect(native.stepAside).not.toHaveBeenCalled();
+      expect(native.resolveDraft).not.toHaveBeenCalled();
+      expect(await screen.findByText("The reply you copied")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "It went as I copied it" }));
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith(
+          "d1",
+          "sent_unedited",
+          "yes, see you at 7",
+        ),
+      );
     });
 
     it("records a reply that didn't go, and nothing for one changed after copying", async () => {
