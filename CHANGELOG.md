@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.53] — 2026-10-26
+
+Not without reading the attachment.
+
+### Changed
+
+- I don't reply by myself to a message that came with an attachment or an invitation — a contract to sign, a photo, a meeting request — since my reply couldn't have read it — including a PDF or photo Apple's Mail sends inline and a forwarded message, though not a logo in someone's signature or the signature of signed mail. It waits for you, and says why. Mail I read before this version waits for you too, since I can't tell.
+
 ## [0.10.0-alpha.52] — 2026-10-26
 
 Who it's from, from the window.

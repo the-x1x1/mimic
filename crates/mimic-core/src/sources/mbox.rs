@@ -64,6 +64,9 @@ pub(crate) struct Mail {
     /// goes to the list, however it is addressed, so nothing answers it by
     /// itself (0.10.0-alpha.44, RFC 3834 §2).
     pub(crate) list: bool,
+    /// It carries an attachment or an invitation (0.10.0-alpha.53,
+    /// `mime::has_attachments`): `metadata.attachments`.
+    pub(crate) attachments: bool,
 }
 
 impl CommunicationSource for MboxSource {
@@ -259,6 +262,7 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         cc: get("cc").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
         sent_on_its_own: false,
         list: get("list-id").is_some() || get("list-post").is_some(),
+        attachments: super::mime::has_attachments(&headers, &raw_body),
     })
 }
 
@@ -434,6 +438,11 @@ pub(crate) fn thread(mut mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
                             if m.list {
                                 meta.insert("list".into(), json!(true));
                             }
+                            // Something besides the words a reply by itself
+                            // couldn't answer (`autoreply::ATTACHED`); said
+                            // either way, so mail read before this was looked
+                            // for is told apart from mail without any.
+                            meta.insert("attachments".into(), json!(m.attachments));
                             // Read by the dashboard to leave the thread out of
                             // what is waiting; absent means a person wrote it.
                             if m.sent_on_its_own {
@@ -741,6 +750,45 @@ mod tests {
         assert_eq!(list.metadata["list"], serde_json::json!(true));
         assert!(list.metadata.get("automated").is_none(), "somewhere to post: a person on a list wrote it");
         assert!(person.metadata.get("list").is_none());
+    }
+
+    #[test]
+    fn mail_with_an_attachment_says_so() {
+        let mbox = concat!(
+            "From ada@example.com Mon Feb 02 08:00:00 2026\n",
+            "From: Ada <ada@example.com>\n",
+            "Subject: the contract\n",
+            "Date: Mon, 2 Feb 2026 08:00:00 +0000\n",
+            "Message-ID: <a1@example.com>\n",
+            "Content-Type: multipart/mixed; boundary=b\n",
+            "\n",
+            "--b\n",
+            "Content-Type: text/plain\n",
+            "\n",
+            "signed copy attached, can you countersign?\n",
+            "--b\n",
+            "Content-Type: application/pdf; name=contract.pdf\n",
+            "Content-Disposition: attachment; filename=contract.pdf\n",
+            "\n",
+            "JVBERi0xLjQK\n",
+            "--b--\n",
+            "\n",
+            "From ada@example.com Mon Feb 02 09:00:00 2026\n",
+            "From: Ada <ada@example.com>\n",
+            "Subject: lunch\n",
+            "Date: Mon, 2 Feb 2026 09:00:00 +0000\n",
+            "Message-ID: <p1@example.com>\n",
+            "\n",
+            "lunch on thursday?\n",
+        );
+        let (_dir, path) = write(mbox);
+        let convos = import(&path);
+        let all: Vec<_> = convos.iter().flat_map(|c| &c.messages).collect();
+        let attached = all.iter().find(|m| m.external_id == "a1@example.com").unwrap();
+        let plain = all.iter().find(|m| m.external_id == "p1@example.com").unwrap();
+        assert_eq!(attached.metadata["attachments"], serde_json::json!(true));
+        assert_eq!(attached.body.trim(), "signed copy attached, can you countersign?");
+        assert_eq!(plain.metadata["attachments"], serde_json::json!(false), "looked for, and none");
     }
 
     #[test]

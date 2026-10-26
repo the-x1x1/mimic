@@ -135,6 +135,50 @@ fn body_text_at(headers: &Headers, body: &[u8], depth: usize) -> Option<String> 
     Some(if mime == "text/html" { html_to_text(&text) } else { text })
 }
 
+/// Whether a message carries something besides its words that a reply might
+/// have to answer (0.10.0-alpha.53): a file — sent as an attachment, or
+/// inline the way Apple's Mail sends a PDF or a photo — a forwarded message,
+/// or an invitation (`text/calendar`). Not a picture the HTML shows, which
+/// is how a logo in a signature comes (inside `multipart/related`, or with a
+/// `Content-ID`), and not the signature of a signed message (S/MIME, PGP).
+/// Nested as `body_text` reads them.
+pub fn has_attachments(headers: &Headers, body: &[u8]) -> bool {
+    has_attachments_at(headers, body, 0, false)
+}
+
+/// The signatures of signed mail, sent as attachments but not anything sent.
+const SIGNATURES: [&str; 3] =
+    ["application/pkcs7-signature", "application/x-pkcs7-signature", "application/pgp-signature"];
+
+fn has_attachments_at(headers: &Headers, body: &[u8], depth: usize, related: bool) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    let (mime, params) = parse_content_type(header(headers, "content-type").unwrap_or("text/plain"));
+    let disposition = header(headers, "content-disposition").unwrap_or("").to_lowercase();
+    if mime.starts_with("multipart/") {
+        let Some(boundary) = param(&params, "boundary") else { return false };
+        let related = related || mime == "multipart/related";
+        return split_multipart(body, &boundary).iter().any(|part| {
+            let (h, b) = split_message(part);
+            has_attachments_at(&h, &b, depth + 1, related)
+        });
+    }
+    if SIGNATURES.contains(&mime.as_str()) {
+        return false;
+    }
+    if mime == "text/calendar" || mime == "message/rfc822" {
+        return true;
+    }
+    // A picture the message's HTML shows, not a file sent.
+    let shown = (related || header(headers, "content-id").is_some()) && !disposition.starts_with("attachment");
+    if shown {
+        return false;
+    }
+    let named = param(&params, "name").is_some() || disposition.contains("filename");
+    disposition.starts_with("attachment") || (named && !mime.starts_with("text/"))
+}
+
 /// `text/plain; charset="utf-8"` → (`text/plain`, [("charset", "utf-8")]).
 pub fn parse_content_type(value: &str) -> (String, Vec<(String, String)>) {
     let mut pieces = split_params(value).into_iter();
@@ -496,6 +540,39 @@ mod tests {
     fn windows_1252_punctuation_survives() {
         let raw = "Content-Type: text/plain; charset=windows-1252\nContent-Transfer-Encoding: quoted-printable\n\nthat=92s fine =96 see you=85\n";
         assert_eq!(text_of(raw).unwrap().trim(), "that’s fine – see you…");
+    }
+
+    #[test]
+    fn attachments_and_invitations_are_noticed_and_a_signature_logo_is_not() {
+        let with = |parts: &str| {
+            let raw = format!(
+                "Content-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: text/plain\n\nsee attached\n{parts}--b--\n"
+            );
+            let (h, b) = split_message(raw.as_bytes());
+            has_attachments(&h, &b)
+        };
+        assert!(!with(""), "words alone");
+        assert!(with("--b\nContent-Type: application/pdf; name=contract.pdf\nContent-Disposition: attachment; filename=contract.pdf\n\nJVBER\n"));
+        assert!(with("--b\nContent-Type: text/calendar; method=REQUEST\n\nBEGIN:VCALENDAR\n"), "an invitation");
+        assert!(with("--b\nContent-Type: image/jpeg; name=photo.jpg\n\n/9j/\n"), "a named file");
+        assert!(
+            with("--b\nContent-Type: application/pdf; name=contract.pdf\nContent-Disposition: inline; filename=contract.pdf\n\nJVBER\n"),
+            "a file inline, as Apple's Mail sends one"
+        );
+        assert!(with("--b\nContent-Type: message/rfc822\n\nFrom: x\n\nforwarded\n"), "a forwarded message");
+        assert!(
+            !with("--b\nContent-Type: image/png; name=logo.png\nContent-Disposition: inline; filename=logo.png\nContent-ID: <logo>\n\niVBOR\n"),
+            "a logo shown in the signature"
+        );
+        assert!(
+            !with("--b\nContent-Type: application/pkcs7-signature; name=smime.p7s\nContent-Disposition: attachment; filename=smime.p7s\n\nMIAG\n"),
+            "the signature of signed mail"
+        );
+        let related = "Content-Type: multipart/related; boundary=r\n\n--r\nContent-Type: text/html\n\n<img src=cid:logo>\n--r\nContent-Type: image/png; name=logo.png\n\niVBOR\n--r--\n";
+        let (h, b) = split_message(related.as_bytes());
+        assert!(!has_attachments(&h, &b), "a picture the HTML shows");
+        let (h, b) = split_message(b"Content-Type: text/plain\n\nplain words\n");
+        assert!(!has_attachments(&h, &b));
     }
 
     #[test]
