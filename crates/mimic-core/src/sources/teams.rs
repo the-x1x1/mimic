@@ -130,8 +130,27 @@ pub struct Chat {
     pub topic: Option<String>,
     /// `oneOnOne`, `group` or `meeting`.
     pub kind: String,
-    /// Each member's account id, name and email.
+    /// Each member's account id, name and email, when the list gave them;
+    /// otherwise asked for when the chat is read (`GraphApi::members`).
     pub members: Vec<(String, String, Option<String>)>,
+    /// When its newest message was made, as the list says
+    /// (`lastMessagePreview`, 0.10.0-alpha.70): a chat with nothing after
+    /// its mark isn't read.
+    pub last: Option<String>,
+}
+
+/// A chat's members, as Graph lists them.
+fn members_in(list: Option<&Value>) -> Vec<(String, String, Option<String>)> {
+    list.and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let user = m.get("userId").and_then(Value::as_str)?.to_string();
+            let name = m.get("displayName").and_then(Value::as_str).unwrap_or(&user).to_string();
+            let email = m.get("email").and_then(Value::as_str).filter(|e| e.contains('@')).map(str::to_string);
+            Some((user, name, email))
+        })
+        .collect()
 }
 
 /// Graph with one access token.
@@ -156,17 +175,28 @@ impl GraphApi {
     }
 
     fn get(&self, url: &str) -> Result<Value, TeamsError> {
-        let response = self
-            .client
-            .get(url)
-            .bearer_auth(&self.token)
-            .header(reqwest::header::ACCEPT, "application/json")
-            .send()
-            .map_err(|e| TeamsError::Network(one_line(&e.to_string())))?;
+        let mut waits = 0;
+        let response = loop {
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&self.token)
+                .header(reqwest::header::ACCEPT, "application/json")
+                .send()
+                .map_err(|e| TeamsError::Network(one_line(&e.to_string())))?;
+            if response.status().as_u16() != 429 {
+                break response;
+            }
+            // Asked to wait a moment: as long as asked, then again (alpha.70).
+            match super::slack::asked_to_wait(&response) {
+                Some(wait) if waits < 4 => {
+                    waits += 1;
+                    std::thread::sleep(wait);
+                }
+                _ => return Err(TeamsError::RateLimited),
+            }
+        };
         let status = response.status().as_u16();
-        if status == 429 {
-            return Err(TeamsError::RateLimited);
-        }
         let value: Value = response.json().unwrap_or(Value::Null);
         if (200..300).contains(&status) {
             return Ok(value);
@@ -195,38 +225,36 @@ impl GraphApi {
         Ok((me, chats))
     }
 
-    /// The user's chats, with their members.
+    /// The user's chats, each with when its newest message was made.
     pub fn chats(&self) -> Result<Vec<Chat>, TeamsError> {
         let mut out = Vec::new();
-        let mut next = Some(format!("{}/me/chats?$expand=members&$top={PAGE}", self.base));
+        let mut next = Some(format!("{}/me/chats?$expand=lastMessagePreview&$top={PAGE}", self.base));
         for _ in 0..MAX_PAGES {
             let Some(url) = next.take() else { break };
             let v = self.get(&url)?;
             for c in v.get("value").and_then(Value::as_array).into_iter().flatten() {
                 let Some(id) = c.get("id").and_then(Value::as_str) else { continue };
-                let members = c
-                    .get("members")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|m| {
-                        let user = m.get("userId").and_then(Value::as_str)?.to_string();
-                        let name = m.get("displayName").and_then(Value::as_str).unwrap_or(&user).to_string();
-                        let email =
-                            m.get("email").and_then(Value::as_str).filter(|e| e.contains('@')).map(str::to_string);
-                        Some((user, name, email))
-                    })
-                    .collect();
                 out.push(Chat {
                     id: id.to_string(),
                     topic: c.get("topic").and_then(Value::as_str).filter(|t| !t.trim().is_empty()).map(str::to_string),
                     kind: c.get("chatType").and_then(Value::as_str).unwrap_or("").to_string(),
-                    members,
+                    members: members_in(c.get("members")),
+                    last: c
+                        .get("lastMessagePreview")
+                        .and_then(|p| p.get("createdDateTime"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                 });
             }
             next = v.get("@odata.nextLink").and_then(Value::as_str).map(str::to_string);
         }
         Ok(out)
+    }
+
+    /// A chat's members (0.10.0-alpha.70).
+    pub fn members(&self, chat: &str) -> Result<Vec<(String, String, Option<String>)>, TeamsError> {
+        let v = self.get(&format!("{}/chats/{}/members", self.base, encode(chat)))?;
+        Ok(members_in(v.get("value")))
     }
 
     /// A chat's messages created after `after` (all when none), newest
@@ -492,6 +520,10 @@ pub struct TeamsSummary {
     pub partial: bool,
     /// Chats Teams wouldn't give: passed over, the rest read.
     pub unreadable: usize,
+    /// Chats with nothing new since they were last read, by the list's
+    /// account of their newest message: not asked for (0.10.0-alpha.70).
+    #[serde(default)]
+    pub unchanged: usize,
 }
 
 /// Check an account: read what is new in each chat, import it, and move
@@ -577,6 +609,13 @@ fn sync_inner(
             continue;
         }
         let mark = config.marks.get(&chat.id).cloned();
+        // Nothing after the mark, by the list's account: not asked.
+        if let (Some(last), Some(mark)) = (chat.last.as_deref(), mark.as_deref()) {
+            if !later(last, mark) {
+                summary.unchanged += 1;
+                continue;
+            }
+        }
         let most = if mark.is_some() { MOST_NEW } else { FIRST_READ };
         let raw = match api.messages(&chat.id, mark.as_deref(), most) {
             Ok((raw, complete)) => {
@@ -612,10 +651,28 @@ fn sync_inner(
         };
         let newest = newest.to_string();
         summary.fetched += raw.len();
+        // Who is in it, when the list didn't say: their addresses, and the
+        // chat's name. Without them, by name alone.
+        let members = if chat.members.is_empty() {
+            match api.members(&chat.id) {
+                Ok(m) => m,
+                Err(TeamsError::RateLimited) => {
+                    summary.partial = true;
+                    break;
+                }
+                Err(e @ (TeamsError::SignIn(_) | TeamsError::Network(_))) => {
+                    importer.abandon();
+                    return Err(e);
+                }
+                Err(_) => Vec::new(),
+            }
+        } else {
+            chat.members.clone()
+        };
         let emails: HashMap<&str, &str> =
-            chat.members.iter().filter_map(|(id, _, e)| e.as_deref().map(|e| (id.as_str(), e))).collect();
+            members.iter().filter_map(|(id, _, e)| e.as_deref().map(|e| (id.as_str(), e))).collect();
         let others: Vec<&(String, String, Option<String>)> =
-            chat.members.iter().filter(|(id, _, _)| *id != config.user_id).collect();
+            members.iter().filter(|(id, _, _)| *id != config.user_id).collect();
         let mut messages: Vec<(String, RawMessage)> = Vec::new();
         for m in &raw {
             let user = m.get("from").and_then(|f| f.get("user"));
@@ -878,9 +935,14 @@ pub(crate) mod fake {
                 if status == 0 {
                     continue;
                 }
+                // "wait:N|…" answers with `Retry-After: N`.
+                let (extra, body) = match body.strip_prefix("wait:").and_then(|b| b.split_once('|')) {
+                    Some((n, rest)) => (format!("Retry-After: {n}\r\n"), rest.to_string()),
+                    None => (String::new(), body),
+                };
                 let mut w = stream;
                 let reply = format!(
-                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = w.write_all(reply.as_bytes());
@@ -1101,6 +1163,51 @@ mod tests {
             )
             .unwrap();
         assert!(metadata.contains(r#""attachments":true"#), "{metadata}");
+    }
+
+    #[test]
+    fn only_a_chat_with_something_new_is_read_and_waiting_when_asked() {
+        let asked = Arc::new(AtomicUsize::new(0));
+        let count = asked.clone();
+        let (base, seen) = fake::graph(Box::new(move |path, _| {
+            match path {
+            "/me" => (200, ME.into()),
+            "/me/chats" => (
+                200,
+                r#"{"value":[
+                    {"id":"19:a1b2@unq.gbl.spaces","chatType":"oneOnOne","lastMessagePreview":{"createdDateTime":"2026-10-26T09:05:00Z"}},
+                    {"id":"19:quiet@unq.gbl.spaces","chatType":"oneOnOne","lastMessagePreview":{"createdDateTime":"2026-10-26T07:00:00Z"}}]}"#
+                    .into(),
+            ),
+            p if p.ends_with("/members") => (
+                200,
+                r#"{"value":[{"userId":"u1","displayName":"C Haynes"},{"userId":"u2","displayName":"Ada Lovelace","email":"ada@formicaria.example"}]}"#.into(),
+            ),
+            p if p.contains("a1b2") && count.fetch_add(1, Ordering::SeqCst) == 0 => {
+                (429, r#"wait:1|{"error":{"code":"TooManyRequests","message":"slow down"}}"#.into())
+            }
+            p if p.contains("a1b2") => (
+                200,
+                r#"{"value":[{"id":"m4","messageType":"message","createdDateTime":"2026-10-26T09:05:00Z",
+                    "from":{"user":{"id":"u2","displayName":"Ada Lovelace"}},"body":{"contentType":"text","content":"thanks!"},"attachments":[]}]}"#
+                    .into(),
+            ),
+            _ => (500, r#"{"error":{"code":"Unexpected","message":"read a quiet chat"}}"#.into()),
+        }
+        }));
+        let db = Db::open_in_memory().unwrap();
+        let source = account(&db);
+        let mut config: TeamsSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        config.marks.insert("19:a1b2@unq.gbl.spaces".into(), "2026-10-26T08:50:00Z".into());
+        config.marks.insert("19:quiet@unq.gbl.spaces".into(), "2026-10-26T07:00:00Z".into());
+        db.set_source_config(&source, &serde_json::to_value(&config).unwrap()).unwrap();
+        let summary = sync(&db, &source, &GraphApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
+        assert_eq!((summary.inserted, summary.unchanged, summary.partial), (1, 1, false), "{summary:?}");
+        assert!(!seen.lock().unwrap().iter().any(|r| r.contains("quiet@unq.gbl.spaces/messages")), "not asked");
+        let ada = db.list_participants(10).unwrap().into_iter().find(|p| p.participant.display_name == "Ada Lovelace");
+        let ada = db.get_participant(&ada.expect("Ada").participant.id).unwrap().unwrap();
+        assert!(ada.identifiers.iter().any(|i| i.value == "ada@formicaria.example"), "her address, from the members");
     }
 
     #[test]

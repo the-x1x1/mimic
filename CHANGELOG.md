@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.70] — 2026-10-26
+
+Many chats, checked politely.
+
+### Changed
+
+- When Slack or Teams asks me to slow down for a moment, I wait as asked and carry on, so a workspace with hundreds of conversations is read through in one check instead of a bit at a time. In Teams I only open the chats with something new since I last read them.
+
 ## [0.10.0-alpha.69] — 2026-10-26
 
 Slack and Teams in Replying for you.
