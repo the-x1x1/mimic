@@ -73,6 +73,7 @@ const envelope: ReplyEnvelope = {
   mailbox: "s1",
   to: ["ada@example.com"],
   otherAddresses: [],
+  othersOnIt: [],
   subject: "Re: Lunch",
   whyNot:
     "I'm holding a reply to this to send by myself. Stop it first if you'd rather send your own.",

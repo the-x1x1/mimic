@@ -50,13 +50,14 @@ const envelope = (over: Partial<ReplyEnvelope> = {}): ReplyEnvelope => ({
   mailbox: "s1",
   to: ["ada@work.example"],
   otherAddresses: ["ada@example.com"],
+  othersOnIt: [],
   subject: "Re: Friday",
   whyNot: null,
   held: null,
   ...over,
 });
 
-const sent = (to: string[]): OutboxEntry => ({
+const sent = (to: string[], cc: string[] = []): OutboxEntry => ({
   id: "o1",
   draftId: "d1",
   sourceId: "s1",
@@ -65,7 +66,7 @@ const sent = (to: string[]): OutboxEntry => ({
   participantId: "p1",
   fromAddress: "c@example.com",
   to,
-  cc: [],
+  cc,
   subject: "Re: Friday",
   body: "yes, friday works",
   messageId: "x@example.com",
@@ -122,9 +123,44 @@ describe("sending a reply from Mimic", () => {
       text: "yes, friday works",
       sourceId: "s1",
       to: ["ada@example.com"],
+      cc: [],
       subject: "Re: Friday (and Saturday)",
     });
     expect(native.resolveDraft).not.toHaveBeenCalled();
+  });
+
+  it("copies in only the others on their message that are ticked", async () => {
+    native.replyEnvelope.mockResolvedValue(
+      envelope({ othersOnIt: ["bob@example.com", "cy@example.com", "di@example.com"] }),
+    );
+    native.sendReply.mockImplementation(async (r: { to: string[]; cc: string[] }) =>
+      sent(r.to, r.cc),
+    );
+    renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    const copy = within(panel).getByRole("group", { name: "Copy in" });
+    const boxes = within(copy).getAllByRole("checkbox");
+    expect(boxes.map((b) => (b as HTMLInputElement).checked)).toEqual([false, false, false, false]);
+    expect(
+      within(panel).getByText(/not to anyone else on the thread unless you copy them in/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(copy).getByRole("checkbox", { name: "Everyone else on their message" }));
+    expect(
+      within(panel).getByText(/copying in bob@example.com, cy@example.com and di@example.com/),
+    ).toBeInTheDocument();
+    fireEvent.click(within(copy).getByRole("checkbox", { name: "cy@example.com" }));
+    expect(
+      within(copy).getByRole("checkbox", { name: "Everyone else on their message" }),
+    ).not.toBeChecked();
+    fireEvent.click(within(panel).getByRole("button", { name: "Send it" }));
+
+    await waitFor(() => expect(native.sendReply).toHaveBeenCalled());
+    expect(native.sendReply.mock.calls[0]?.[0]).toMatchObject({
+      to: ["ada@work.example"],
+      cc: ["bob@example.com", "di@example.com"],
+    });
   });
 
   it("sends the words as changed on screen", async () => {

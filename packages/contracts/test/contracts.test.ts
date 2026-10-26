@@ -237,6 +237,7 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     const envelope = ReplyEnvelope.parse(read(contractFixture("reply_envelope.json")));
     expect(envelope.whyNot).toBeNull();
     expect(envelope.to).toEqual(["ada.replies@example.com"]);
+    expect(envelope.othersOnIt).toEqual([]);
     expect(envelope.mailboxes[0]?.fromAddress).toBe("c@example.com");
     const sent = OutboxEntry.array().parse(read(contractFixture("outbox.json")));
     expect(sent).toHaveLength(1);
@@ -1362,6 +1363,15 @@ describe("what was sent says where it went and whether it got there", () => {
     expect(describeOutboxEntry(entry({ status: "held" }))).toMatch(/You can stop it/);
     expect(describeOutboxEntry(entry({ status: "canceled" }))).toMatch(/^Stopped before it went/);
     expect(describeOutboxEntry(entry({ status: "unsure" }))).toMatch(/Look in your Sent folder/);
+  });
+
+  it("names who else a reply was copied to", () => {
+    expect(describeOutboxEntry(entry({ cc: ["bob@example.com"] }))).toBe(
+      "Sent to ada@example.com, copying in bob@example.com.",
+    );
+    expect(describeOutboxEntry(entry({ status: "held", cc: ["b@x.io", "c@x.io"] }))).toBe(
+      "Waiting to go to ada@example.com, copying in b@x.io and c@x.io. You can stop it until then.",
+    );
   });
 
   it("says when a reply went but its copy in the Sent folder couldn't be made", () => {
