@@ -9,7 +9,9 @@
 //! a message says: Windows keeps notifications where anyone at the computer
 //! can read them.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager};
 
@@ -111,6 +113,48 @@ pub fn tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Mailboxes whose last check failed and the user has been told so, this
+/// run. Told once when one starts failing, and again only after it has
+/// worked in between.
+static FAILING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// A mailbox check ended: if it failed and hadn't been failing, say so —
+/// replying by itself, reading mail as it arrives and everything else wait
+/// on it working, and nobody may be looking at the screen that says it.
+pub fn mailbox_checked(app: &AppHandle, job_id: &str, failed: bool) {
+    let Some(state) = app.try_state::<SharedState>() else { return };
+    let Some(job) = state.db.get_job(job_id).ok().flatten() else { return };
+    let Some(source_id) = job.payload["sourceId"].as_str().map(str::to_string) else { return };
+    let newly = {
+        let mut failing = FAILING.lock().unwrap_or_else(|p| p.into_inner());
+        let failing = failing.get_or_insert_with(HashSet::new);
+        if failed {
+            failing.insert(source_id.clone())
+        } else {
+            failing.remove(&source_id);
+            false
+        }
+    };
+    if !newly {
+        return;
+    }
+    let Some(source) = state.db.get_source(&source_id).ok().flatten() else { return };
+    let why = source.last_error.as_ref().and_then(|e| e["message"].as_str()).unwrap_or_default();
+    let (title, body) = mailbox_failing(&source.name, why);
+    tell(app, &title, &body);
+}
+
+/// What a mailbox that stopped working is said as: its own address (the
+/// user's, not anyone else's) and why, on one short line.
+pub fn mailbox_failing(address: &str, why: &str) -> (String, String) {
+    let why: String = why.lines().next().unwrap_or_default().trim().chars().take(200).collect();
+    let why = if why.is_empty() { "the check didn't work.".to_string() } else { why };
+    (
+        "I can't check your mail".to_string(),
+        format!("{address}: {why} Your mail, in Mimic, says what to do. Nothing goes out from it until it works."),
+    )
+}
+
 fn replies(n: usize) -> String {
     if n == 1 {
         "a reply".to_string()
@@ -187,5 +231,17 @@ mod tests {
         let held = replied_by_itself(&mimic_core::autoreply::Run { held: 2, ..Default::default() }, 5);
         assert_eq!(held[0].1, "2 replies will go by themselves in 5 minutes. You can stop them on the home screen.");
         assert!(replied_by_itself(&mimic_core::autoreply::Run { stopped: 3, ..Default::default() }, 10).is_empty());
+    }
+
+    #[test]
+    fn a_mailbox_that_stops_working_is_named_with_why_on_one_line() {
+        let (title, body) = mailbox_failing("c@example.com", "Microsoft wants you to sign in again.\nTrace: 123");
+        assert_eq!(title, "I can't check your mail");
+        assert_eq!(
+            body,
+            "c@example.com: Microsoft wants you to sign in again. Your mail, in Mimic, says what to do. Nothing goes out from it until it works."
+        );
+        assert!(mailbox_failing("c@example.com", "").1.contains("the check didn't work."));
+        assert!(mailbox_failing("c@example.com", &"x".repeat(500)).1.len() < 320);
     }
 }
