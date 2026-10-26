@@ -27,6 +27,12 @@
 //!   conversation as the user's own, as the next check would read it from
 //!   the Sent folder — which then skips it by its Message-ID — so the thread
 //!   is answered at once.
+//! * **It is signed as the mailbox signs** (0.10.0-alpha.36): the mailbox's
+//!   signature, when the user set one, goes under the words after the
+//!   conventional `-- ` line (`signed`), shown in the Send panel before it
+//!   goes; it is part of what is recorded and sent, and not of what the
+//!   draft is decided with, so it is never learned from as the user's
+//!   words.
 //! * **It goes to who wrote, and to the others on their message only when
 //!   the user ticks them** (0.10.0-alpha.33). `envelope_for` lists who else
 //!   the message was to or copied to, without the user's own addresses
@@ -99,6 +105,8 @@ pub struct SendingMailbox {
     pub server: Option<String>,
     /// Why it can't send, when it can't.
     pub why_not: Option<String>,
+    /// What goes under a reply sent through it (0.10.0-alpha.36).
+    pub signature: Option<String>,
 }
 
 /// Everything the Send panel shows before anything goes.
@@ -149,8 +157,10 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
     let mine = db.user_identifier_set()?;
     let mut out = Vec::new();
     for s in db.list_sources()?.into_iter().filter(|s| s.connector == imap::CONNECTOR) {
-        let account = serde_json::from_value::<ImapSourceConfig>(s.config.clone())
-            .map_err(|_| UNREADABLE)
+        let config = serde_json::from_value::<ImapSourceConfig>(s.config.clone()).ok();
+        let signature = config.as_ref().and_then(|c| c.signature()).map(str::to_string);
+        let account = config
+            .ok_or(UNREADABLE)
             .and_then(|c| c.sending_account().ok_or(NOT_SET_UP))
             .and_then(|a| if outgoing::is_address(&a.from_address) { Ok(a) } else { Err(NO_FROM) })
             .and_then(|a| if is_users(&mine, &a.from_address) { Ok(a) } else { Err(NOT_YOURS) });
@@ -161,6 +171,7 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
                 from_address: Some(a.from_address),
                 server: Some(a.host),
                 why_not: None,
+                signature,
             },
             Err(why) => SendingMailbox {
                 source_id: s.id,
@@ -168,6 +179,7 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
                 from_address: None,
                 server: None,
                 why_not: Some(why.to_string()),
+                signature,
             },
         });
     }
@@ -363,6 +375,7 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
     let (config, account) = sending_from(db, &req.source_id)?;
     let incoming = answered(db, &draft)?;
     let cc = copied_in(db, incoming.as_ref(), &to, &req.cc)?;
+    let body = signed(&req.text, config.signature());
     let (in_reply_to, references) = threading(incoming.as_ref());
     let subject = match req.subject.trim() {
         "" => outgoing::reply_subject(None),
@@ -376,7 +389,7 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         to: to.iter().map(|a| Mailbox::bare(a)).collect(),
         cc: cc.iter().map(|a| Mailbox::bare(a)).collect(),
         subject,
-        body: req.text.clone(),
+        body: body.clone(),
         message_id: outgoing::new_message_id(&account.from_address),
         in_reply_to,
         references,
@@ -396,7 +409,7 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         to,
         cc,
         subject: mail.subject.clone(),
-        body: req.text.clone(),
+        body,
         message_id: mail.message_id.clone(),
         how: SendHow::Approved,
         send_after: None,
@@ -412,6 +425,17 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         tracing::warn!(target: "sending", error = %e, "a sent reply could not be put in its conversation");
     }
     Ok(db.outgoing(&entry.id)?.unwrap_or(entry))
+}
+
+/// The words of a reply as they go: what the user approved or Mimic wrote,
+/// then the mailbox's signature under the conventional `-- ` line, which
+/// mail programs — and Mimic's own reading of mail
+/// (`normalize::strip_signature`) — know is not part of the message.
+pub fn signed(text: &str, signature: Option<&str>) -> String {
+    match signature {
+        Some(sig) => format!("{}\n\n-- \n{sig}", text.trim_end()),
+        None => text.to_string(),
+    }
 }
 
 /// The addresses to copy in, as asked: each one of the others on the
@@ -622,6 +646,7 @@ mod tests {
                 from_address: "c@example.com".into(),
                 copy_to_sent: Some(false),
             }),
+            signature: None,
         };
         let mailbox = db
             .create_source(&NewSource {
@@ -799,6 +824,38 @@ mod tests {
         assert_eq!(t.commands.iter().filter(|c| c.starts_with("RCPT")).count(), 2, "{:?}", t.commands);
         let data = String::from_utf8(t.data).unwrap();
         assert!(data.contains("\r\nTo: ada@work.example\r\nCc: bob@example.com\r\n"), "{data}");
+    }
+
+    #[test]
+    fn a_reply_goes_signed_as_its_mailbox_signs_and_its_draft_keeps_only_the_words() {
+        let (port, seen) = serve(Behaviour::default());
+        let w = world(port);
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
+        config.signature = Some("  C Haynes\nFormicaria  \n".into());
+        w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
+
+        let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+        assert_eq!(envelope.mailboxes[0].signature.as_deref(), Some("C Haynes\nFormicaria"), "shown before it goes");
+        let sent = send_reply(&w.db, &credentials(), &approved(&w, &envelope, "Yes, I'll be there.")).unwrap();
+        assert_eq!(sent.body, "Yes, I'll be there.\n\n-- \nC Haynes\nFormicaria", "recorded as it went");
+
+        let data = String::from_utf8(seen.recv().unwrap().data).unwrap();
+        assert!(data.contains("Yes, I'll be there.\r\n\r\n--=20\r\nC Haynes\r\nFormicaria\r\n"), "{data}");
+
+        let draft = w.db.get_draft(&w.draft.id).unwrap().unwrap();
+        assert_eq!(draft.final_text.as_deref(), Some("Yes, I'll be there."), "the signature isn't the user's words");
+        assert_eq!(draft.outcome.as_deref(), Some("sent_unedited"));
+        let own: String =
+            w.db.conn()
+                .query_row(
+                    "SELECT body FROM messages WHERE conversation_id = ?1 AND direction = 'self'",
+                    [&w.conversation],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert_eq!(own, "Yes, I'll be there.", "read back as mail is read, without its signature");
+        assert_eq!(signed("Hi", None), "Hi");
     }
 
     #[test]

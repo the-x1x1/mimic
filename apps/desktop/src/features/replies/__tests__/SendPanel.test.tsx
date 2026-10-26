@@ -163,6 +163,28 @@ describe("sending a reply from Mimic", () => {
     });
   });
 
+  it("shows the signature the reply goes with", async () => {
+    native.replyEnvelope.mockResolvedValue(
+      envelope({
+        mailboxes: [
+          {
+            sourceId: "s1",
+            name: "c@example.com",
+            fromAddress: "c@example.com",
+            server: "smtp.gmail.com",
+            whyNot: null,
+            signature: "C Haynes\nFormicaria",
+          },
+        ],
+      }),
+    );
+    renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    expect(within(panel).getByText("Signed")).toBeInTheDocument();
+    expect(within(panel).getByText(/C Haynes\s+Formicaria/)).toBeInTheDocument();
+  });
+
   it("sends the words as changed on screen", async () => {
     native.replyEnvelope.mockResolvedValue(envelope({ otherAddresses: [] }));
     native.sendReply.mockImplementation(async (r: { to: string[] }) => sent(r.to));

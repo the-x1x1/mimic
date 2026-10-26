@@ -16,7 +16,7 @@
     {
       "habit": "greeting",
       "direction": "less",
-      "participantId": "cea61c28-0d66-42cd-859d-39f1e58ead81",
+      "participantId": "41495882-49dc-4d99-8050-e51e69604df5",
       "participantName": "Ada Lovelace",
       "agreeing": 3,
       "observations": 3,
@@ -29,11 +29,11 @@
   "minAgreeing": 3,
   "notes": [
     {
-      "id": "c05937c1-a5e8-4c60-ab32-2ea89225cdaf",
+      "id": "2a597dd5-a08e-43e8-b284-4e4f3c23194f",
       "text": "keep it to one line",
-      "participantId": "cea61c28-0d66-42cd-859d-39f1e58ead81",
+      "participantId": "41495882-49dc-4d99-8050-e51e69604df5",
       "participantName": "Ada Lovelace",
-      "updatedAt": "2026-10-26T12:13:38.351Z"
+      "updatedAt": "2026-10-26T12:17:06.403Z"
     }
   ]
 }

@@ -58,14 +58,27 @@ pub struct MailboxSending {
     /// Its provider puts what is sent in the Sent folder itself, so no copy
     /// is made unless the user asks (`smtp::keeps_sent`).
     pub keeps_sent: bool,
+    /// What goes under each reply sent from it (0.10.0-alpha.36).
+    pub signature: Option<String>,
 }
 
 impl MailboxSending {
-    fn of(sending: Option<SmtpAccount>, set_by_user: bool) -> Self {
+    /// How `config`'s mailbox sends, as it is stored.
+    fn of(config: &ImapSourceConfig) -> Self {
+        let sending = config.sending_account();
         let keeps_sent = sending.as_ref().is_some_and(|s| smtp::keeps_sent(&s.host));
-        MailboxSending { sending, set_by_user, keeps_sent }
+        MailboxSending {
+            sending,
+            set_by_user: config.sending.is_some(),
+            keeps_sent,
+            signature: config.signature().map(str::to_string),
+        }
     }
 }
+
+/// The longest signature kept: a few lines of name, role and number, not a
+/// letter.
+const SIGNATURE_MOST: usize = 1000;
 
 fn mailbox_config(state: &crate::AppState, source_id: &str) -> CommandResult<ImapSourceConfig> {
     let source = state
@@ -79,7 +92,7 @@ fn mailbox_config(state: &crate::AppState, source_id: &str) -> CommandResult<Ima
 #[tauri::command]
 pub async fn get_mailbox_sending(state: State<'_, SharedState>, source_id: String) -> CommandResult<MailboxSending> {
     let config = mailbox_config(&state, &source_id)?;
-    Ok(MailboxSending::of(config.sending_account(), config.sending.is_some()))
+    Ok(MailboxSending::of(&config))
 }
 
 /// Send through `sending` from now on: checked first — connected to and
@@ -123,7 +136,28 @@ pub async fn set_mailbox_sending(
     let mut latest = mailbox_config(&state, &source_id)?;
     latest.sending = Some(sending);
     state.db.set_source_config(&source_id, &serde_json::to_value(&latest)?)?;
-    Ok(MailboxSending::of(latest.sending, true))
+    Ok(MailboxSending::of(&latest))
+}
+
+/// What goes under each reply sent from a mailbox, or nothing (empty).
+/// Kept as given, trimmed; nothing is tried, since nothing is sent.
+#[tauri::command]
+pub async fn set_mailbox_signature(
+    state: State<'_, SharedState>,
+    source_id: String,
+    signature: String,
+) -> CommandResult<MailboxSending> {
+    let signature = signature.trim().replace("\r\n", "\n");
+    if signature.chars().count() > SIGNATURE_MOST {
+        return Err(CommandError::new(
+            "invalid",
+            format!("That's longer than a signature ({SIGNATURE_MOST} characters at most)."),
+        ));
+    }
+    let mut config = mailbox_config(&state, &source_id)?;
+    config.signature = (!signature.is_empty()).then_some(signature);
+    state.db.set_source_config(&source_id, &serde_json::to_value(&config)?)?;
+    Ok(MailboxSending::of(&config))
 }
 
 /// Sign in to the server a mailbox's replies go out through — its provider's
@@ -158,5 +192,5 @@ pub async fn reset_mailbox_sending(state: State<'_, SharedState>, source_id: Str
     let mut config = mailbox_config(&state, &source_id)?;
     config.sending = None;
     state.db.set_source_config(&source_id, &serde_json::to_value(&config)?)?;
-    Ok(MailboxSending::of(config.sending_account(), false))
+    Ok(MailboxSending::of(&config))
 }

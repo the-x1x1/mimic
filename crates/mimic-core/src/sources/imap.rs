@@ -170,9 +170,19 @@ pub struct ImapSourceConfig {
     /// `sending_account` falls back to its provider's known server.
     #[serde(default)]
     pub sending: Option<super::smtp::SmtpAccount>,
+    /// What goes under each reply sent from this mailbox, after the
+    /// conventional `-- ` line (0.10.0-alpha.36); none until the user sets
+    /// one.
+    #[serde(default)]
+    pub signature: Option<String>,
 }
 
 impl ImapSourceConfig {
+    /// The signature as it goes under a reply: trimmed, and none when blank.
+    pub fn signature(&self) -> Option<&str> {
+        self.signature.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
+
     /// Where replies through this mailbox go out: as the user set it, or the
     /// server its provider is known to send from. `None` when neither.
     pub fn sending_account(&self) -> Option<super::smtp::SmtpAccount> {
@@ -1093,13 +1103,14 @@ pub fn sync(
     // Every attempt is recorded, successful or not, so the schedule waits a
     // whole interval before the next one rather than retrying every minute.
     config.last_checked_at = Some(crate::ids::now_rfc3339());
-    // How replies go out may have been changed while this check ran; that is
-    // the user's, and is kept rather than written over with what was read at
-    // the start.
+    // How replies go out, and what they are signed with, may have been
+    // changed while this check ran; that is the user's, and is kept rather
+    // than written over with what was read at the start.
     if let Some(latest) =
         db.get_source(source_id)?.and_then(|s| serde_json::from_value::<ImapSourceConfig>(s.config).ok())
     {
         config.sending = latest.sending;
+        config.signature = latest.signature;
     }
     db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
     match &result {
@@ -1852,6 +1863,7 @@ mod tests {
             marks: BTreeMap::new(),
             last_checked_at: None,
             sending: None,
+            signature: None,
         };
         let source = db
             .create_source(&crate::db::NewSource {
@@ -2776,6 +2788,7 @@ mod tests {
             marks: BTreeMap::new(),
             last_checked_at: None,
             sending: None,
+            signature: None,
         };
         let second = db
             .create_source(&crate::db::NewSource {
@@ -2862,6 +2875,7 @@ mod tests {
             marks: BTreeMap::new(),
             last_checked_at: None,
             sending: None,
+            signature: None,
         };
         let reply = b"From: c@example.com\r\nTo: ada@example.com\r\nSubject: Re: Lunch\r\n\r\nsee you there\r\n";
         copy_to_sent(&config, &pw("pw"), reply).unwrap();

@@ -351,6 +351,9 @@ export const ipc = {
     call("set_mailbox_sending", MailboxSending, { sourceId, sending }),
   resetMailboxSending: (sourceId: string) =>
     call("reset_mailbox_sending", MailboxSending, { sourceId }),
+  /** What goes under each reply sent from a mailbox; empty for nothing. */
+  setMailboxSignature: (sourceId: string, signature: string) =>
+    call("set_mailbox_signature", MailboxSending, { sourceId, signature }),
 
   /** The rules for replies sent by themselves, whether they run, and the last day's count. */
   autoReply: () => call("get_autoreply", AutoReplyState),

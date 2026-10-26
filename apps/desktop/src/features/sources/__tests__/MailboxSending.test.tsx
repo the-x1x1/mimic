@@ -9,6 +9,7 @@ const native = vi.hoisted(() => ({
   setMailboxSending: vi.fn(),
   resetMailboxSending: vi.fn(),
   testMailboxSending: vi.fn(),
+  setMailboxSignature: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -106,5 +107,33 @@ describe("how a mailbox sends", () => {
     expect(
       await screen.findByText("The mail server turned down the sign-in for sending (535)."),
     ).toBeInTheDocument();
+  });
+
+  it("keeps a signature for replies from the mailbox, and can drop it", async () => {
+    native.mailboxSending.mockResolvedValue({ sending: gmail, setByUser: false, keepsSent: true });
+    native.setMailboxSignature.mockImplementation(async (_id: string, signature: string) => ({
+      sending: gmail,
+      setByUser: false,
+      keepsSent: true,
+      signature: signature.trim() || null,
+    }));
+    renderIt();
+    expect(await screen.findByText(/Replies go without a signature/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add a signature" }));
+    fireEvent.change(screen.getByLabelText("Signature"), {
+      target: { value: "C Haynes\nFormicaria" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    await waitFor(() =>
+      expect(native.setMailboxSignature).toHaveBeenCalledWith("src-1", "C Haynes\nFormicaria"),
+    );
+    expect(await screen.findByText("Replies from me@example.org are signed:")).toBeInTheDocument();
+    expect(native.setMailboxSending).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Change the signature" }));
+    expect(screen.getByLabelText("Signature")).toHaveValue("C Haynes\nFormicaria");
+    fireEvent.click(screen.getByRole("button", { name: "No signature" }));
+    await waitFor(() => expect(native.setMailboxSignature).toHaveBeenLastCalledWith("src-1", ""));
+    expect(await screen.findByText(/Replies go without a signature/)).toBeInTheDocument();
   });
 });

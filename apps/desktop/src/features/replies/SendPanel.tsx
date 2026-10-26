@@ -146,6 +146,12 @@ export function SendPanel({
           </div>
         </div>
       ) : null}
+      {from?.signature ? (
+        <div className="thread__send-row thread__send-row--top">
+          <span className="muted small">Signed</span>
+          <p className="letter signature-preview">{from.signature}</p>
+        </div>
+      ) : null}
       <div className="thread__send-row">
         <label htmlFor={`${id}-subject`} className="muted small">
           Subject

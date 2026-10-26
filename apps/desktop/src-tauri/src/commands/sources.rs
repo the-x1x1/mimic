@@ -187,6 +187,7 @@ fn add_mailbox(
         // Nothing set by hand: its provider's usual server, when there is
         // one (`sending_account`), until the user sets another.
         sending: None,
+        signature: None,
     };
     let source = state.db.create_source(&mimic_core::db::NewSource {
         connector: imap::CONNECTOR.into(),

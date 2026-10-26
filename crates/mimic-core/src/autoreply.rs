@@ -337,7 +337,7 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
         let Some(incoming) = sending::answered(db, &draft)? else { continue };
         // Through the mailbox the message came in to, as the user's own
         // address there, or not at all.
-        let Ok((_, account)) = sending::sending_from(db, &incoming.source_id) else { continue };
+        let Ok((config, account)) = sending::sending_from(db, &incoming.source_id) else { continue };
         let envelope = sending::envelope_for(db, &draft.id)?;
         if envelope.why_not.is_some() || draft.generated_text.trim().is_empty() {
             continue;
@@ -355,7 +355,7 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
             to: envelope.to.clone(),
             cc: Vec::new(),
             subject: envelope.subject.clone(),
-            body: draft.generated_text.clone(),
+            body: sending::signed(&draft.generated_text, config.signature()),
             message_id: outgoing::new_message_id(&account.from_address),
             how: SendHow::Autonomous,
             send_after: Some(fmt_rfc3339(now + Duration::minutes(rules.hold_minutes))),
@@ -428,7 +428,11 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
                 // Marked first: a draft decided as sent but not marked would
                 // be learned from as the user's.
                 if let Err(e) =
-                    db.mark_sent_on_its_own(&draft.id).and_then(|_| sending::record_sent_draft(db, &draft, &entry.body))
+                    // As written: the signature under it is the mailbox's,
+                    // not words of the draft.
+                    db
+                        .mark_sent_on_its_own(&draft.id)
+                        .and_then(|_| sending::record_sent_draft(db, &draft, &draft.generated_text))
                 {
                     tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be recorded on its draft");
                 }
@@ -549,6 +553,7 @@ mod tests {
                 from_address: "c@example.com".into(),
                 copy_to_sent: Some(false),
             }),
+            signature: None,
         };
         let mailbox = db
             .create_source(&NewSource {
@@ -868,6 +873,24 @@ mod tests {
         checked(&w);
         w.db.send_held_now(&held.id, &fmt_rfc3339(at(1))).unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(1)).unwrap().sent, 1);
+    }
+
+    #[test]
+    fn a_reply_by_itself_goes_signed_and_its_draft_is_decided_as_written() {
+        let w = world(Behaviour::default());
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
+        config.signature = Some("C\n".into());
+        w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        let held = only_entry(&w.db);
+        assert_eq!(held.body, "yes, the river place. 12:30?\n\n-- \nC", "held as it will go");
+        checked(&w);
+        w.db.send_held_now(&held.id, &fmt_rfc3339(at(1))).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(1)).unwrap().sent, 1);
+        let draft = w.db.get_draft(&w.draft.id).unwrap().unwrap();
+        assert_eq!(draft.outcome.as_deref(), Some("sent_unedited"), "the signature is the mailbox's, not an edit");
+        assert_eq!(draft.final_text.as_deref(), Some("yes, the river place. 12:30?"));
     }
 
     #[test]

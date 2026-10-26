@@ -69,6 +69,19 @@ export function useSetMailboxSending(sourceId: string) {
   });
 }
 
+/** What goes under each reply sent from a mailbox; empty for nothing. */
+export function useSetMailboxSignature(sourceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (signature: string) => ipc.setMailboxSignature(sourceId, signature),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.mailboxSending(sourceId), data);
+      // The Send panel shows it, and replies held to go carry the old one.
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+    },
+  });
+}
+
 /** The rules for replies sent by themselves, whether they run, and the last day's count. */
 export function useAutoReply() {
   return useQuery({ queryKey: qk.autoReply, queryFn: ipc.autoReply });
