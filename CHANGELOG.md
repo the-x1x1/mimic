@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.64] — 2026-10-26
+
+Slack.
+
+### Added
+
+- **Your Slack direct messages.** Under Your mail, **Connect Slack** walks you through making a small Slack app of your own from a manifest I give you, installing it to your workspace, and pasting the token it shows. I read your direct messages and group messages in that workspace — both sides, so I learn how you reply there — and check for new ones as often as I check your mail. Channels aren't read, bots and notices are left out, and nothing in Slack changes. The token is kept sealed with your other saved sign-ins, and **New token** gives me another for the same account without losing what I've read.
+
 ## [0.10.0-alpha.63] — 2026-10-26
 
 Straight to a draft.

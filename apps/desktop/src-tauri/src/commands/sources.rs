@@ -101,6 +101,9 @@ pub async fn start_source_import(
     if source.connector == mimic_core::sources::imap::CONNECTOR {
         return Ok(state.jobs.enqueue(mimic_core::sources::imap::JOB_KIND, json!({ "sourceId": source_id }))?);
     }
+    if source.connector == mimic_core::sources::slack::CONNECTOR {
+        return Ok(state.jobs.enqueue(mimic_core::sources::slack::JOB_KIND, json!({ "sourceId": source_id }))?);
+    }
     Ok(state.jobs.enqueue(mimic_core::import::JOB_KIND, json!({ "sourceId": source_id }))?)
 }
 
@@ -156,7 +159,7 @@ pub async fn connect_mailbox(
     add_mailbox(&state, account, probe, is_mine, &password)
 }
 
-fn refuse_without_identity(state: &crate::AppState) -> CommandResult<()> {
+pub(crate) fn refuse_without_identity(state: &crate::AppState) -> CommandResult<()> {
     if state.db.user_identifier_set()?.is_empty() {
         return Err(CommandError::new(
             "no_identity",
@@ -528,7 +531,16 @@ pub async fn delete_source(
     source_id: String,
 ) -> CommandResult<mimic_core::privacy::DeletionReport> {
     crate::commands::voice::stop_measuring(&state);
+    let was_slack =
+        state.db.get_source(&source_id)?.is_some_and(|s| s.connector == mimic_core::sources::slack::CONNECTOR);
     let report = state.db.delete_source_and_contents(&source_id)?;
+    // A workspace's token goes with it.
+    if was_slack {
+        if let Err(e) = state.secrets.remove(&mimic_core::sources::slack::secret_key(&source_id)) {
+            tracing::warn!(target: "secrets", error = %e, "a removed workspace's token could not be removed");
+        }
+        return Ok(report);
+    }
     // A disconnected mailbox's password, or sign-in, goes with it — after any
     // check still trading that sign-in for a token has saved what it was
     // handed, so nothing is left behind. The mail is already gone, so a

@@ -67,6 +67,33 @@ export function useSetMailboxPassword() {
   });
 }
 
+/** Connect a Slack workspace; a check follows by itself (0.10.0-alpha.64). */
+export function useConnectSlack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => ipc.connectSlack(token),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.onboarding, qk.dashboard, qk.settings]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
+/** A connected workspace's new token; a check follows by itself. */
+export function useSetSlackToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, token }: { sourceId: string; token: string }) =>
+      ipc.setSlackToken(sourceId, token),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.dashboard]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
 /**
  * Which providers this copy of Mimic can sign in to a mailbox with. It
  * changes only when the user saves or forgets their own registration

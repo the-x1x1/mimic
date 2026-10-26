@@ -252,6 +252,14 @@ export const ipc = {
   cancelMailSignIn: () => call("cancel_mail_sign_in", z_void),
   /** Sign a connected Microsoft or Google mailbox in again, keeping everything read from it. */
   signInMailboxAgain: (sourceId: string) => call("sign_in_mailbox_again", Source, { sourceId }),
+  /**
+   * Connect a Slack workspace's direct messages with the user's own token.
+   * The token is tried first; nothing is kept if it doesn't work.
+   */
+  connectSlack: (token: string) => call("connect_slack", Source, { token }),
+  /** A connected workspace's token, given again for the same account. */
+  setSlackToken: (sourceId: string, token: string) =>
+    call("set_slack_token", Source, { sourceId, token }),
   deleteSource: (sourceId: string) => call("delete_source", DeletionReport, { sourceId }),
   pickSourceFile: (title: string, extensions: string[]) =>
     call("pick_source_file", z_string.nullable(), { title, extensions }),
