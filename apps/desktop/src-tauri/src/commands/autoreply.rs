@@ -82,8 +82,17 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
     if state.replying.swap(true, Ordering::SeqCst) {
         return;
     }
-    let (db, credentials) = (state.db.clone(), state.mail_credentials.clone());
-    let ran = tauri::async_runtime::spawn_blocking(move || autoreply::tick_now(&db, &credentials)).await;
+    let (db, credentials, secrets) = (state.db.clone(), state.mail_credentials.clone(), state.secrets.clone());
+    let ran = tauri::async_runtime::spawn_blocking(move || {
+        // Each Slack workspace with its own token (0.10.0-alpha.66).
+        let slack = |source_id: &str| {
+            use mimic_core::providers::SecretStore;
+            let token = secrets.get(&mimic_core::sources::slack::secret_key(source_id)).filter(|t| !t.is_empty())?;
+            mimic_core::sources::slack::SlackApi::new(&token).ok()
+        };
+        autoreply::tick_now(&db, &credentials, &slack)
+    })
+    .await;
     state.replying.store(false, Ordering::SeqCst);
     match ran {
         Ok(Ok(run)) => {
@@ -112,17 +121,21 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
 /// mailbox is failing (that waits for the user). One running doesn't stop
 /// it: mail that arrived after that check began isn't in what it reads.
 pub(crate) fn queue_check(state: &SharedState, source_id: &str) {
-    use mimic_core::sources::imap;
-    let failing = state.db.get_source(source_id).ok().flatten().is_none_or(|s| s.status == "failed");
+    let source = state.db.get_source(source_id).ok().flatten();
+    let failing = source.as_ref().is_none_or(|s| s.status == "failed");
+    // A Slack workspace is checked by its own job (0.10.0-alpha.66).
+    let kind = if source.is_some_and(|s| s.connector == mimic_core::sources::slack::CONNECTOR) {
+        mimic_core::sources::slack::JOB_KIND
+    } else {
+        mimic_core::sources::imap::JOB_KIND
+    };
     let queued = state.db.list_jobs(500, true).map(|jobs| {
-        jobs.iter().any(|j| {
-            j.kind == imap::JOB_KIND && j.status == "queued" && j.payload["sourceId"].as_str() == Some(source_id)
-        })
+        jobs.iter().any(|j| j.kind == kind && j.status == "queued" && j.payload["sourceId"].as_str() == Some(source_id))
     });
     if failing || !matches!(queued, Ok(false)) {
         return;
     }
-    if let Err(e) = state.jobs.enqueue(imap::JOB_KIND, serde_json::json!({ "sourceId": source_id })) {
+    if let Err(e) = state.jobs.enqueue(kind, serde_json::json!({ "sourceId": source_id })) {
         tracing::warn!(target: "autoreply", error = %e, "could not ask for a mailbox check");
     }
 }

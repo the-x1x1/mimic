@@ -295,6 +295,20 @@ impl SlackApi {
         Err(PostError::NotSent(refusal(&value, "send as you")))
     }
 
+    /// One message of a conversation, by its `ts` (0.10.0-alpha.66): with
+    /// `reply_count` and `reply_users` when its thread has replies.
+    pub fn message(&self, channel: &str, ts: &str) -> Result<Option<Value>, SlackError> {
+        let v = self.call(
+            "conversations.history",
+            &[("channel", channel), ("latest", ts), ("inclusive", "true"), ("limit", "1")],
+            "read your direct messages",
+        )?;
+        Ok(v.get("messages")
+            .and_then(Value::as_array)
+            .and_then(|m| m.iter().find(|m| m.get("ts").and_then(Value::as_str) == Some(ts)))
+            .cloned())
+    }
+
     pub fn user(&self, id: &str) -> Result<Person, SlackError> {
         let v = self.call("users.info", &[("user", id)], "say who people are")?;
         let user = v.get("user").cloned().unwrap_or(Value::Null);
@@ -643,7 +657,19 @@ fn sync_inner(
                     author: AuthorRef { display_name: name_of(user), identifiers },
                     sent_at: ts_time(ts),
                     body,
-                    metadata: json!({ "slackChannel": conversation.id }),
+                    // Whether it is a direct message, which alone is
+                    // answered by itself, and whether it came with a file
+                    // a reply by itself would answer without reading
+                    // (0.10.0-alpha.66).
+                    metadata: json!({
+                        "slackChannel": conversation.id,
+                        "slackDirect": conversation.other.is_some(),
+                        // Files, and what Slack attaches: a shared or
+                        // forwarded message, whose words aren't in the text.
+                        "attachments": m.get("files").and_then(Value::as_array).is_some_and(|f| !f.is_empty())
+                            || m.get("attachments").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+                            || subtype == Some("file_share"),
+                    }),
                 },
             ));
         }
@@ -905,6 +931,88 @@ pub(crate) mod fake {
                 _ => r#"{"ok":false,"error":"unknown_method"}"#.to_string(),
             };
             (200, body)
+        })
+    }
+
+    /// A conversation in `live`: a direct message (with `other`) or a group.
+    pub(crate) struct Room {
+        pub id: String,
+        pub other: Option<String>,
+        /// Oldest first, as `{ "user", "text", "ts" }`.
+        pub messages: Vec<serde_json::Value>,
+    }
+
+    pub(crate) type Rooms = Arc<Mutex<Vec<Room>>>;
+
+    fn param(query: &str, key: &str) -> Option<String> {
+        query.split('&').find_map(|kv| kv.strip_prefix(&format!("{key}="))).map(str::to_string)
+    }
+
+    fn ts_of(m: &serde_json::Value) -> f64 {
+        m["ts"].as_str().and_then(|t| t.parse().ok()).unwrap_or(0.0)
+    }
+
+    /// A Slack that keeps what it is told: Acme's people, `rooms` as they
+    /// stand, history after `oldest`, newest first, and a post added to its
+    /// room as the user's, a second after its last message.
+    pub(crate) fn live(rooms: Rooms) -> Answer {
+        Box::new(move |method, query| {
+            let mut rooms = rooms.lock().unwrap();
+            let body = match method {
+                "auth.test" => {
+                    serde_json::json!({ "ok": true, "team_id": "T1", "team": "Acme", "user_id": "U1", "user": "c" })
+                }
+                "users.conversations" => serde_json::json!({
+                    "ok": true,
+                    "channels": rooms.iter().map(|r| match &r.other {
+                        Some(u) => serde_json::json!({ "id": r.id, "is_im": true, "user": u }),
+                        None => serde_json::json!({ "id": r.id, "is_mpim": true }),
+                    }).collect::<Vec<_>>(),
+                }),
+                "users.info" => {
+                    let id = param(query, "user").unwrap_or_default();
+                    let name = match id.as_str() {
+                        "U1" => "C",
+                        "U2" => "Ada Lovelace",
+                        _ => "Bob",
+                    };
+                    serde_json::json!({ "ok": true, "user": { "id": id, "profile": { "display_name": name } } })
+                }
+                "conversations.history" => {
+                    let channel = param(query, "channel").unwrap_or_default();
+                    let oldest: f64 = param(query, "oldest").and_then(|t| t.parse().ok()).unwrap_or(0.0);
+                    let latest: f64 = param(query, "latest").and_then(|t| t.parse().ok()).unwrap_or(f64::MAX);
+                    let inclusive = param(query, "inclusive").as_deref() == Some("true");
+                    let mut found: Vec<serde_json::Value> = rooms
+                        .iter()
+                        .filter(|r| r.id == channel)
+                        .flat_map(|r| {
+                            r.messages
+                                .iter()
+                                .filter(|m| {
+                                    ts_of(m) > oldest && (ts_of(m) < latest || (inclusive && ts_of(m) == latest))
+                                })
+                                .cloned()
+                        })
+                        .collect();
+                    found.reverse();
+                    serde_json::json!({ "ok": true, "has_more": false, "messages": found })
+                }
+                "chat.postMessage" => {
+                    let sent: serde_json::Value = serde_json::from_str(query).unwrap();
+                    let channel = sent["channel"].as_str().unwrap_or_default().to_string();
+                    let Some(room) = rooms.iter_mut().find(|r| r.id == channel) else {
+                        return (200, r#"{"ok":false,"error":"channel_not_found"}"#.into());
+                    };
+                    let last = room.messages.last().map(ts_of).unwrap_or(0.0);
+                    let ts = format!("{:.0}.000100", last.floor() + 1.0);
+                    room.messages
+                        .push(serde_json::json!({ "type": "message", "user": "U1", "text": sent["text"], "ts": ts }));
+                    serde_json::json!({ "ok": true, "channel": channel, "ts": ts })
+                }
+                _ => serde_json::json!({ "ok": false, "error": "unknown_method" }),
+            };
+            (200, body.to_string())
         })
     }
 

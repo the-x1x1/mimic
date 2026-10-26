@@ -257,6 +257,19 @@ impl Db {
         Ok(())
     }
 
+    /// It went, as the message the service named (0.10.0-alpha.66): a reply
+    /// in Slack is known by the `ts` Slack gives it, so the check that reads
+    /// it back knows it (`sent_on_its_own_among`).
+    pub fn outgoing_sent_as(&self, id: &str, message_id: &str) -> DbResult<()> {
+        let now = now_rfc3339();
+        self.conn().execute(
+            "UPDATE outbox SET status = 'sent', sent_at = ?2, updated_at = ?2, error = NULL, message_id = ?3
+             WHERE id = ?1 AND status = 'sending'",
+            params![id, now, message_id],
+        )?;
+        Ok(())
+    }
+
     /// Something worth saying about a reply that went — its copy in the
     /// Sent folder couldn't be made — kept where a failure's reason is.
     pub fn outgoing_note(&self, id: &str, note: &str) -> DbResult<()> {
@@ -452,6 +465,19 @@ impl Db {
     /// Which of these Message-IDs are of replies Mimic sent, or held to send,
     /// on its own: read back from the Sent folder, each is marked as such
     /// (`import`), however it got there first.
+    /// The words of replies Mimic sent by itself into `conversation` that may
+    /// have gone without its knowing their id (`sending` or `unsure`): one
+    /// read back is matched by its words (0.10.0-alpha.66, `import`).
+    pub fn own_sends_in_doubt(&self, conversation: &str) -> DbResult<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT body FROM outbox
+             WHERE how = 'autonomous' AND status IN ('sending','unsure') AND conversation_id = ?1",
+        )?;
+        let rows = stmt.query_map([conversation], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub fn sent_on_its_own_among(&self, message_ids: &[String]) -> DbResult<std::collections::HashSet<String>> {
         if message_ids.is_empty() {
             return Ok(Default::default());

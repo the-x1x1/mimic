@@ -100,6 +100,7 @@ pub fn import_source(
         default_channel: source.channel.clone(),
         joins_by_message_id: joins_by_message_id(&source.connector),
         same_ids: same_ids(&source.connector),
+        sends: SENDS_CONNECTORS.contains(&source.connector.as_str()),
         user_ids,
         participants: HashMap::new(),
         summary: ImportSummary::default(),
@@ -165,6 +166,7 @@ impl<'a> Importer<'a> {
                 default_channel: source.channel.clone(),
                 joins_by_message_id: joins_by_message_id(&source.connector),
                 same_ids: same_ids(&source.connector),
+                sends: SENDS_CONNECTORS.contains(&source.connector.as_str()),
                 user_ids,
                 participants: HashMap::new(),
                 summary: ImportSummary::default(),
@@ -239,6 +241,11 @@ fn same_ids(connector: &str) -> Option<String> {
     SAME_IDS_CONNECTORS.contains(&connector).then(|| connector.to_string())
 }
 
+/// Connectors besides mail whose messages Mimic sends, under the id the
+/// service gave them (`Db::outgoing_sent_as`), so one it sent on its own is
+/// known when it is read back (Slack, 0.10.0-alpha.66).
+pub const SENDS_CONNECTORS: [&str; 1] = ["slack"];
+
 struct ImportState<'a> {
     db: &'a Db,
     source_id: String,
@@ -246,6 +253,8 @@ struct ImportState<'a> {
     joins_by_message_id: bool,
     /// The connector, when its ids are the same across its sources.
     same_ids: Option<String>,
+    /// Mimic sends through it, so what it sent on its own is looked for.
+    sends: bool,
     user_ids: HashSet<String>,
     /// Author identity key -> participant id (or `None` for the user).
     participants: HashMap<String, Option<String>>,
@@ -310,7 +319,11 @@ impl ImportState<'_> {
         // before it was put in its conversation: marked as such, never as a
         // machine's mail by its `Auto-Submitted`, and never as the user's
         // writing (`crate::autoreply`).
-        let its_own = if is_email { self.db.sent_on_its_own_among(&ids)? } else { HashSet::new() };
+        let its_own = if is_email || self.sends { self.db.sent_on_its_own_among(&ids)? } else { HashSet::new() };
+        // And one Mimic sent by itself whose answer was lost, before it knew
+        // the id it went under: known by its words.
+        let in_doubt = if self.sends { self.db.own_sends_in_doubt(&conversation_id)? } else { Vec::new() };
+        let same_words = |a: &str, b: &str| a.split_whitespace().eq(b.split_whitespace());
         // A conversation already here that is not joined by Message-ID — a
         // later export of the same chat — gets its new messages after the
         // ones it has: numbered from zero, they would sit among the old ones,
@@ -368,6 +381,7 @@ impl ImportState<'_> {
                 // reply has no mark, and stays automated, so it hides nothing.
                 metadata: if its_own.contains(&raw.external_id)
                     || (direction == Direction::Self_ && sources::outgoing::is_sent_on_its_own(&raw.external_id))
+                    || (direction == Direction::Self_ && in_doubt.iter().any(|w| same_words(w, &raw.body)))
                 {
                     let mut m = raw.metadata.clone();
                     if let Some(map) = m.as_object_mut() {

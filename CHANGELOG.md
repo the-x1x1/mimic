@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.66] — 2026-10-26
+
+Replying in Slack by myself.
+
+### Added
+
+- **Replying by myself works in Slack too.** Tick a workspace beside your mailboxes under Replying by myself, and I answer direct messages there under the same rules as mail — held first, only people you allow, a few a day, rehearsable. I never answer a group conversation by myself. Just before a reply goes I look in the conversation: if you've answered there, or they've written again, it doesn't go. What I send by myself in Slack isn't taken as your writing, even when I read it back first.
+
 ## [0.10.0-alpha.65] — 2026-10-26
 
 Replying in Slack.

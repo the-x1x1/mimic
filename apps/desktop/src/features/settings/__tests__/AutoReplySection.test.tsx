@@ -38,14 +38,19 @@ const mailbox = {
   lastError: null,
 };
 
-function renderIt(rules: AutoReplyRules, running = false, people: unknown[] = []) {
+function renderIt(
+  rules: AutoReplyRules,
+  running = false,
+  people: unknown[] = [],
+  sources: unknown[] = [mailbox],
+) {
   native.autoReply.mockResolvedValue({ rules, running, lastDay: 0 } satisfies AutoReplyState);
   native.setAutoReply.mockImplementation(async (r: AutoReplyRules) => ({
     rules: r,
     running: r.enabled,
     lastDay: 0,
   }));
-  native.sources.mockResolvedValue([mailbox]);
+  native.sources.mockResolvedValue(sources);
   native.people.mockResolvedValue({
     people,
     peopleTotal: people.length,
@@ -64,6 +69,21 @@ function renderIt(rules: AutoReplyRules, running = false, people: unknown[] = []
 describe("replying by myself", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
+  });
+
+  it("offers a Slack workspace beside the mailboxes, for direct messages only", async () => {
+    renderIt(
+      off,
+      false,
+      [],
+      [
+        mailbox,
+        { ...mailbox, id: "s2", connector: "slack", name: "Acme (Slack)", channel: "chat" },
+      ],
+    );
+    expect(await screen.findByText("Through these mailboxes and workspaces")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Acme (Slack)" })).toBeInTheDocument();
+    expect(screen.getByText(/In Slack I answer a direct message only/)).toBeInTheDocument();
   });
 
   it("is off until turned on, and turning it on says what it does first", async () => {
