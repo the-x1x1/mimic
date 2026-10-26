@@ -356,6 +356,7 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         send_after: None,
     })?;
     deliver(db, credentials, &config, &account, &entry, &bytes)?;
+    file_a_copy(db, credentials, &config, &account, &entry, &bytes);
     if let Err(e) = record_sent_draft(db, &draft, &req.text) {
         // It went; what is recorded about the draft is secondary, and the
         // outbox says it went.
@@ -432,6 +433,33 @@ pub(crate) fn deliver(
         Err(_) => {
             db.outgoing_unsure(&entry.id, PANICKED)?;
             Err(SendError::Cannot(PANICKED.into()))
+        }
+    }
+}
+
+/// Put a copy of a reply that went in the mailbox's Sent folder, when its
+/// provider keeps none (`SmtpAccount::copies_to_sent`). A copy that can't be
+/// made costs the copy, not the reply: it is noted on the reply's record
+/// (`Db::outgoing_note`), which still says it went.
+pub(crate) fn file_a_copy(
+    db: &Db,
+    credentials: &Credentials,
+    config: &ImapSourceConfig,
+    account: &SmtpAccount,
+    entry: &OutboxEntry,
+    bytes: &[u8],
+) {
+    if !account.copies_to_sent() {
+        return;
+    }
+    let copied = credentials
+        .credential(config.account.auth, &entry.source_id)
+        .and_then(|c| imap::copy_to_sent(config, &c, bytes).map_err(|e| e.to_string()));
+    if let Err(why) = copied {
+        tracing::warn!(target: "sending", "a sent reply could not be copied to the Sent folder");
+        let note = format!("It went, but I couldn't put a copy in your Sent folder: {why}");
+        if let Err(e) = db.outgoing_note(&entry.id, &note) {
+            tracing::warn!(target: "sending", error = %e, "could not note that the copy failed");
         }
     }
 }
@@ -524,6 +552,7 @@ mod tests {
                 security: SmtpSecurity::Plain,
                 username: "c@example.com".into(),
                 from_address: "c@example.com".into(),
+                copy_to_sent: Some(false),
             }),
         };
         let mailbox = db

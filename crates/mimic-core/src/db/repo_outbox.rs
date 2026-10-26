@@ -252,6 +252,16 @@ impl Db {
         Ok(())
     }
 
+    /// Something worth saying about a reply that went — its copy in the
+    /// Sent folder couldn't be made — kept where a failure's reason is.
+    pub fn outgoing_note(&self, id: &str, note: &str) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE outbox SET error = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'sent'",
+            params![id, note, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
     /// It didn't go, or may not have: `why` is what the user is told.
     pub fn outgoing_failed(&self, id: &str, why: &str) -> DbResult<()> {
         self.conn().execute(

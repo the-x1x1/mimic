@@ -18,6 +18,8 @@ export const SmtpAccount = z.object({
   username: z.string(),
   /** The address replies go out from. */
   fromAddress: z.string(),
+  /** A copy of each reply in the Sent folder: null for what the provider needs. */
+  copyToSent: z.boolean().nullable().optional(),
 });
 export type SmtpAccount = z.infer<typeof SmtpAccount>;
 
@@ -25,6 +27,8 @@ export type SmtpAccount = z.infer<typeof SmtpAccount>;
 export const MailboxSending = z.object({
   sending: SmtpAccount.nullable(),
   setByUser: z.boolean(),
+  /** Its provider keeps what is sent in the Sent folder itself. */
+  keepsSent: z.boolean(),
 });
 export type MailboxSending = z.infer<typeof MailboxSending>;
 
@@ -108,8 +112,11 @@ export function listAddresses(addresses: readonly string[]): string {
 export function describeOutboxEntry(e: OutboxEntry): string {
   const to = listAddresses(e.to);
   switch (e.status) {
-    case "sent":
-      return e.how === "autonomous" ? `I sent this to ${to} by myself.` : `Sent to ${to}.`;
+    case "sent": {
+      const said = e.how === "autonomous" ? `I sent this to ${to} by myself.` : `Sent to ${to}.`;
+      // A note on a reply that went: its copy in the Sent folder couldn't be made.
+      return e.error ? `${said} ${e.error}` : said;
+    }
     case "sending":
       return `Sending to ${to}…`;
     case "held":

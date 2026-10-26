@@ -55,6 +55,16 @@ pub async fn reply_did_not_go(state: State<'_, SharedState>, outbox_id: String) 
 pub struct MailboxSending {
     pub sending: Option<SmtpAccount>,
     pub set_by_user: bool,
+    /// Its provider puts what is sent in the Sent folder itself, so no copy
+    /// is made unless the user asks (`smtp::keeps_sent`).
+    pub keeps_sent: bool,
+}
+
+impl MailboxSending {
+    fn of(sending: Option<SmtpAccount>, set_by_user: bool) -> Self {
+        let keeps_sent = sending.as_ref().is_some_and(|s| smtp::keeps_sent(&s.host));
+        MailboxSending { sending, set_by_user, keeps_sent }
+    }
 }
 
 fn mailbox_config(state: &crate::AppState, source_id: &str) -> CommandResult<ImapSourceConfig> {
@@ -69,7 +79,7 @@ fn mailbox_config(state: &crate::AppState, source_id: &str) -> CommandResult<Ima
 #[tauri::command]
 pub async fn get_mailbox_sending(state: State<'_, SharedState>, source_id: String) -> CommandResult<MailboxSending> {
     let config = mailbox_config(&state, &source_id)?;
-    Ok(MailboxSending { set_by_user: config.sending.is_some(), sending: config.sending_account() })
+    Ok(MailboxSending::of(config.sending_account(), config.sending.is_some()))
 }
 
 /// Send through `sending` from now on: checked first — connected to and
@@ -113,7 +123,7 @@ pub async fn set_mailbox_sending(
     let mut latest = mailbox_config(&state, &source_id)?;
     latest.sending = Some(sending);
     state.db.set_source_config(&source_id, &serde_json::to_value(&latest)?)?;
-    Ok(MailboxSending { sending: latest.sending, set_by_user: true })
+    Ok(MailboxSending::of(latest.sending, true))
 }
 
 /// Forget how the user set a mailbox to send, and use its provider's known
@@ -123,5 +133,5 @@ pub async fn reset_mailbox_sending(state: State<'_, SharedState>, source_id: Str
     let mut config = mailbox_config(&state, &source_id)?;
     config.sending = None;
     state.db.set_source_config(&source_id, &serde_json::to_value(&config)?)?;
-    Ok(MailboxSending { sending: config.sending_account(), set_by_user: false })
+    Ok(MailboxSending::of(config.sending_account(), false))
 }

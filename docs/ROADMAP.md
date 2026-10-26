@@ -72,7 +72,9 @@ Done in 0.10.0-alpha.23: replies the user approves are sent from their own mailb
 
 Done in 0.10.0-alpha.24: Trusted mode (`crate::autoreply`) — replies sent by themselves under the rules in `docs/PRODUCT.md`: off by default, per mailbox and per person, held before they go and checked again when they go, a daily limit and two a conversation a day, nothing automated, quiet, asked for or already answered, `Auto-Submitted`, one switch to stop it all, and none of it read as the user's writing. Not done: never run against a real mail server.
 
-Next: signing in with Google, a Sent copy where the provider keeps none, mail arriving within a minute, and other places messages arrive (Slack, Telegram, Teams).
+Done in 0.10.0-alpha.25: a copy of each reply in the Sent folder where the provider keeps none; mail checked every 2 minutes at most, and at once when a held reply is waiting on a check.
+
+Next: signing in with Google, and other places messages arrive (Slack, Telegram, Teams).
 
 ## Phase 8 — Advanced personalization
 
