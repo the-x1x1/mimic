@@ -2350,6 +2350,21 @@ mod slack_tests {
                 .unwrap();
         let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
         assert_eq!(metadata["sentOnItsOwn"], true);
+        // Found, it went: not offered again, nor matched again.
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert_eq!((entry.status, entry.message_id.as_str()), (SendStatus::Sent, posted.as_str()));
+        // The same words from the user later are theirs.
+        w.rooms.lock().unwrap()[0].messages.push(said("U1", "yes, the river place. 12:30?", 5));
+        sync(&w.db, &w.source, &w.api, &|| false).unwrap();
+        let theirs: String =
+            w.db.conn()
+                .query_row(
+                    "SELECT metadata_json FROM messages WHERE external_id = ?1",
+                    [&format!("slack:T1:D1:{}", ts(5))],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert!(!theirs.contains("sentOnItsOwn"), "{theirs}");
     }
 
     #[test]

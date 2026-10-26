@@ -129,6 +129,15 @@ pub struct NewOutgoing {
     pub send_after: Option<String>,
 }
 
+/// A reply sent by itself whose id isn't known (`Db::own_sends_in_doubt`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InDoubt {
+    pub id: String,
+    pub body: String,
+    /// When the message it answers was sent: a reply comes after it.
+    pub since: String,
+}
+
 const COLS: &str = "id, draft_id, source_id, conversation_id, answers_message_id, participant_id, from_address, to_json, cc_json, subject, body, message_id, how, status, send_after, error, created_at, updated_at, sent_at";
 
 fn list(raw: String) -> Vec<String> {
@@ -462,22 +471,40 @@ impl Db {
         )?)
     }
 
-    /// Which of these Message-IDs are of replies Mimic sent, or held to send,
-    /// on its own: read back from the Sent folder, each is marked as such
-    /// (`import`), however it got there first.
-    /// The words of replies Mimic sent by itself into `conversation` that may
-    /// have gone without its knowing their id (`sending` or `unsure`): one
-    /// read back is matched by its words (0.10.0-alpha.66, `import`).
-    pub fn own_sends_in_doubt(&self, conversation: &str) -> DbResult<Vec<String>> {
+    /// Replies Mimic sent by itself into `conversation` that may have gone
+    /// without its knowing the id they went under (`sending` or `unsure`):
+    /// one read back is matched by its words, once (0.10.0-alpha.66, .72,
+    /// `import`), and is then `outgoing_found_as`.
+    pub fn own_sends_in_doubt(&self, conversation: &str) -> DbResult<Vec<InDoubt>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT body FROM outbox
-             WHERE how = 'autonomous' AND status IN ('sending','unsure') AND conversation_id = ?1",
+            "SELECT o.id, o.body, COALESCE(m.sent_at, o.created_at) FROM outbox o
+             LEFT JOIN messages m ON m.id = o.answers_message_id
+             WHERE o.how = 'autonomous' AND o.status IN ('sending','unsure') AND o.conversation_id = ?1
+             ORDER BY o.created_at",
         )?;
-        let rows = stmt.query_map([conversation], |r| r.get::<_, String>(0))?;
+        let rows =
+            stmt.query_map([conversation], |r| Ok(InDoubt { id: r.get(0)?, body: r.get(1)?, since: r.get(2)? }))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// It went after all, as `message_id`: a reply that may have gone, read
+    /// back (0.10.0-alpha.72). Sent, so it is neither offered again nor
+    /// matched again.
+    pub fn outgoing_found_as(&self, id: &str, message_id: &str) -> DbResult<()> {
+        let now = now_rfc3339();
+        self.conn().execute(
+            "UPDATE outbox SET status = 'sent', message_id = ?2, sent_at = COALESCE(sent_at, ?3), updated_at = ?3,
+                               error = NULL
+             WHERE id = ?1 AND status IN ('sending','unsure')",
+            params![id, message_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Which of these Message-IDs are of replies Mimic sent, or held to send,
+    /// on its own: read back from the Sent folder, each is marked as such
+    /// (`import`), however it got there first.
     pub fn sent_on_its_own_among(&self, message_ids: &[String]) -> DbResult<std::collections::HashSet<String>> {
         if message_ids.is_empty() {
             return Ok(Default::default());

@@ -90,7 +90,13 @@ describe("replying for you, set up in one place", () => {
     native.settings.mockResolvedValue({ "assist.autoDraft": true });
     native.sources.mockResolvedValue([
       { ...mailbox("s7", "Acme (Slack)"), connector: "slack", channel: "chat" },
-      { ...mailbox("s8", "c@formicaria.example (Teams)"), connector: "teams", channel: "chat" },
+      {
+        ...mailbox("s8", "c@formicaria.example (Teams)"),
+        connector: "teams",
+        channel: "chat",
+        status: "failed",
+        lastError: { message: "Microsoft wants you to sign in to Teams again." },
+      },
     ]);
     native.autoReply.mockResolvedValue(rules(false));
     native.testSlack.mockResolvedValue("Read your direct messages in Acme as c. Nothing was sent.");
@@ -101,6 +107,11 @@ describe("replying for you, set up in one place", () => {
     expect(await within(list).findByText("No mailbox is connected.")).toBeInTheDocument();
     expect(
       within(list).getByText("Acme (Slack) is connected: replies to it go in as you, from here."),
+    ).toBeInTheDocument();
+    expect(
+      within(list).getByText(
+        "c@formicaria.example (Teams) isn't working: Microsoft wants you to sign in to Teams again.",
+      ),
     ).toBeInTheDocument();
     const check = await screen.findByRole("button", { name: "Check it all now (sends nothing)" });
     await waitFor(() => expect(check).toBeEnabled());

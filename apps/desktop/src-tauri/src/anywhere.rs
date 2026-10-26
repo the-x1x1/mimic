@@ -130,13 +130,33 @@ fn take(app: &AppHandle, copy: bool) {
     *CAME_FROM_TITLE.lock().unwrap_or_else(|p| p.into_inner()) = whole.clone();
     let title: String = whole.trim().chars().take(MOST_TITLE).collect();
     // Only in another app's window, and only when it is still in front.
-    if copy && from != 0 {
-        copy_selection(from);
+    let asked = copy && from != 0;
+    let copied = asked && copy_selection(from);
+    let mut text = if clipboard_is_the_message(asked, copied) {
+        app.clipboard().read_text().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    // The app that copied may still be writing to the clipboard: read again,
+    // a moment apart, while it is busy or empty (0.10.0-alpha.72).
+    if copied {
+        let until = Instant::now() + COPIED_WITHIN;
+        while text.trim().is_empty() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
+            text = app.clipboard().read_text().unwrap_or_default();
+        }
     }
-    let text = app.clipboard().read_text().unwrap_or_default();
     let text: String = text.trim().chars().take(MOST).collect();
     crate::bring_to_front(app);
     let _ = app.emit("write://pasted", serde_json::json!({ "text": text, "title": title }));
+}
+
+/// Whether the clipboard holds the message (0.10.0-alpha.72): unless copying
+/// it was asked for and nothing came of it — the keys never let go, another
+/// window came forward, or nothing was selected — when what is there is from
+/// before, perhaps something private, and goes nowhere: Write opens empty.
+fn clipboard_is_the_message(asked: bool, copied: bool) -> bool {
+    !asked || copied
 }
 
 /// Why a reply was copied rather than pasted.
@@ -173,26 +193,32 @@ const COPIED_WITHIN: Duration = Duration::from_millis(500);
 
 /// Copy what is selected in `from`: once the shortcut's keys are up, and
 /// only while `from` is in front — else nothing is pressed, and the
-/// clipboard is read as it is. Waits for the clipboard to change, briefly.
-fn copy_selection(from: isize) {
+/// clipboard is read as it is. Waits for the clipboard to change, briefly,
+/// then a moment more for the app to finish writing it. Whether it changed.
+fn copy_selection(from: isize) -> bool {
     let until = Instant::now() + LET_GO;
     while window::any_down(&HELD) {
         if Instant::now() >= until {
-            return;
+            return false;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
     if !may_paste(from, window::front()) {
-        return;
+        return false;
     }
     let before = window::clipboard_count();
     if !window::press(&COPY) {
-        return;
+        return false;
     }
     let until = Instant::now() + COPIED_WITHIN;
-    while window::clipboard_count() == before && Instant::now() < until {
+    while window::clipboard_count() == before {
+        if Instant::now() >= until {
+            return false;
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
+    std::thread::sleep(Duration::from_millis(80));
+    true
 }
 
 /// Only into the window the message came from, once it is the one in front.
@@ -432,13 +458,17 @@ mod tests {
 
     #[test]
     fn copying_for_the_user_presses_ctrl_insert_and_lets_every_key_go() {
-        const VK_C: u16 = 0x43;
-        assert!(COPY.iter().any(|&(k, _)| k == VK_INSERT));
-        assert!(!COPY.iter().any(|&(k, _)| k == VK_C), "never Ctrl+C, an interrupt in a terminal");
-        for &(key, _) in &COPY {
-            assert!(COPY.contains(&(key, true)), "{key:#x} let go");
-        }
+        // Ctrl down, Insert down and up, Ctrl up: never C, an interrupt in a
+        // terminal, and nothing left held.
+        assert_eq!(COPY, [(0x11, false), (0x2D, false), (0x2D, true), (0x11, true)]);
         assert!(HELD.contains(&VK_SHIFT) && HELD.contains(&VK_CONTROL) && HELD.contains(&VK_MENU));
+    }
+
+    #[test]
+    fn a_copy_that_brought_nothing_never_sends_what_was_there_before() {
+        assert!(clipboard_is_the_message(false, false), "not asked: the clipboard, as before");
+        assert!(clipboard_is_the_message(true, true));
+        assert!(!clipboard_is_the_message(true, false), "asked, and nothing came: empty");
     }
 
     #[test]

@@ -598,6 +598,8 @@ fn sync_inner(
     }
     let chats = api.chats()?;
     let mut summary = TeamsSummary::default();
+    let mut tried = 0usize;
+    let mut last_refusal = TeamsError::Refused("no chat could be read".into());
     let mut importer = Importer::begin(db, source_id)?;
     for chat in chats {
         if should_stop() {
@@ -617,6 +619,7 @@ fn sync_inner(
             }
         }
         let most = if mark.is_some() { MOST_NEW } else { FIRST_READ };
+        tried += 1;
         let raw = match api.messages(&chat.id, mark.as_deref(), most) {
             Ok((raw, complete)) => {
                 if mark.is_some() && !complete {
@@ -637,6 +640,7 @@ fn sync_inner(
             // over, the rest read.
             Err(e) => {
                 tracing::warn!(target: "teams", error = %e, "a chat couldn't be read");
+                last_refusal = e;
                 summary.unreadable += 1;
                 continue;
             }
@@ -753,6 +757,14 @@ fn sync_inner(
             summary.chats += 1;
         }
         config.marks.insert(chat.id.clone(), newest);
+    }
+    // Not one would Teams give, and none was passed over for having nothing
+    // new: that is the account — a permission, say — not a chat
+    // (0.10.0-alpha.72). One chat always refused beside quiet ones is that
+    // chat, and the account works.
+    if tried > 0 && summary.unreadable == tried && summary.unchanged == 0 {
+        importer.abandon();
+        return Err(last_refusal);
     }
     let imported = importer.finish()?;
     summary.inserted = imported.inserted;
@@ -1126,6 +1138,43 @@ mod tests {
         assert!(matches!(err, TeamsError::Forbidden(_)), "{err:?}");
         assert!(err.to_string().contains("personal Microsoft account"), "{err}");
         assert_eq!(db.get_source(&source).unwrap().unwrap().status, "failed");
+    }
+
+    #[test]
+    fn an_account_whose_every_chat_is_refused_fails_the_check() {
+        let (base, _) = fake::graph(Box::new(|path, _| match path {
+            "/me" => (200, ME.into()),
+            "/me/chats" => (200, r#"{"value":[{"id":"19:a@x","chatType":"oneOnOne","members":[]}]}"#.into()),
+            _ => (403, r#"{"error":{"code":"Forbidden","message":"Missing role permissions on the request."}}"#.into()),
+        }));
+        let db = Db::open_in_memory().unwrap();
+        let source = account(&db);
+        let err = sync(&db, &source, &GraphApi::at(&base, TOKEN).unwrap(), &|| false).unwrap_err();
+        assert!(matches!(err, TeamsError::Forbidden(_)), "{err:?}");
+        assert_eq!(db.get_source(&source).unwrap().unwrap().status, "failed");
+
+        // Beside a chat with nothing new, the one refused is only that chat.
+        let (base, _) = fake::graph(Box::new(|path, _| {
+            match path {
+            "/me" => (200, ME.into()),
+            "/me/chats" => (
+                200,
+                r#"{"value":[{"id":"19:a@x","chatType":"oneOnOne","members":[]},
+                    {"id":"19:quiet@x","chatType":"oneOnOne","lastMessagePreview":{"createdDateTime":"2026-10-26T07:00:00Z"}}]}"#
+                    .into(),
+            ),
+            _ => (403, r#"{"error":{"code":"Forbidden","message":"Missing role permissions on the request."}}"#.into()),
+        }
+        }));
+        let db = Db::open_in_memory().unwrap();
+        let source = account(&db);
+        let mut config: TeamsSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        config.marks.insert("19:quiet@x".into(), "2026-10-26T07:00:00Z".into());
+        db.set_source_config(&source, &serde_json::to_value(&config).unwrap()).unwrap();
+        let summary = sync(&db, &source, &GraphApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
+        assert_eq!((summary.unreadable, summary.unchanged), (1, 1), "{summary:?}");
+        assert_ne!(db.get_source(&source).unwrap().unwrap().status, "failed");
     }
 
     #[test]
