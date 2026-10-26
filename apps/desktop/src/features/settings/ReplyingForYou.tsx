@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Button, Card } from "@mimic/ui";
+import { hourOf } from "@mimic/contracts";
 import { useSettings } from "@/hooks/useSystem";
 import { useSources } from "@/hooks/useSources";
 import { useAutoReply, useMailboxSending } from "@/hooks/useSending";
@@ -36,6 +37,7 @@ function Step({
 function MailboxCanSend({ sourceId, name }: { sourceId: string; name: string }) {
   const sending = useMailboxSending(sourceId);
   const can = sending.data ? sending.data.sending !== null : null;
+  const signed = Boolean(sending.data?.signature);
   return (
     <Step
       done={can}
@@ -49,7 +51,9 @@ function MailboxCanSend({ sourceId, name }: { sourceId: string; name: string }) 
     >
       {can === false
         ? `Replies can't be sent from ${name} yet.`
-        : `Replies can be sent from ${name}.`}
+        : signed
+          ? `Replies can be sent from ${name}, with your signature.`
+          : `Replies can be sent from ${name}.`}
     </Step>
   );
 }
@@ -70,6 +74,9 @@ export function ReplyingForYou() {
   const keepRunning = settings.data?.["app.keepRunning"];
   const notify = settings.data?.["notify.enabled"];
   const byItself = autoReply.data?.rules.enabled;
+  const hours = autoReply.data?.rules.hours;
+  const never = autoReply.data?.rules.never.length ?? 0;
+  const wait = settings.data?.["send.undoSeconds"];
 
   return (
     <Card title="Replying for you">
@@ -120,9 +127,23 @@ export function ReplyingForYou() {
           }
         >
           {byItself
-            ? `I send some by myself, after holding each for ${autoReply.data?.rules.holdMinutes ?? 10} minutes.`
+            ? `I send some by myself, after holding each for ${autoReply.data?.rules.holdMinutes ?? 10} minutes${hours ? `, only between ${hourOf(hours.from)} and ${hourOf(hours.to)}` : ""}${never > 0 ? `, never to the ${never === 1 ? "one person" : `${never} people`} you named` : ""}.`
             : "Every reply waits for you to send it."}
         </Step>
+        {typeof wait === "number" ? (
+          <Step
+            done={wait > 0}
+            action={
+              <Button size="sm" variant="ghost" onClick={() => goTo("mail")}>
+                Change it below
+              </Button>
+            }
+          >
+            {wait > 0
+              ? `When you press Send it, I wait ${wait} seconds, so you can take it back.`
+              : "Send it sends at once, with no moment to take it back."}
+          </Step>
+        ) : null}
         <Step
           done={keepRunning ?? null}
           action={

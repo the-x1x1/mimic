@@ -613,7 +613,7 @@ function MailSection() {
   if (boxes.length === 0) return null;
   const every = settings.data?.["mail.checkEveryMinutes"] ?? 15;
   return (
-    <Card title="Checking your mail">
+    <Card title="Checking your mail" id="mail">
       <p className="neutral">
         I look for new mail in {boxes.length === 1 ? "your mailbox" : "your mailboxes"} on a
         schedule, and as it arrives where your mail server can tell me, read-only: nothing is marked

@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.43] — 2026-10-26
+
+Replying for you, brought up to date.
+
+### Changed
+
+- **Replying for you**, first in Settings, now also says whether each mailbox's replies carry your signature, the hours and the people left out when I reply by myself, and how long Send it waits so you can take a reply back — each with where to change it.
+
 ## [0.10.0-alpha.42] — 2026-10-26
 
 Mailboxes in other languages.
