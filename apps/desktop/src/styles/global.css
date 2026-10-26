@@ -516,6 +516,10 @@ fieldset.message-filing {
 .thread__send-row--top {
   align-items: start;
 }
+.signature-preview {
+  white-space: pre-line;
+  margin: 0;
+}
 .thread__actions {
   display: flex;
   align-items: center;

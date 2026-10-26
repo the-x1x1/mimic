@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.36] — 2026-10-26
+
+Your signature.
+
+### Added
+
+- **A signature for each mailbox**, under Your mail: what goes under each reply I send from it — your name, your role, a number — after a "--" line, the way mail programs sign. The Send panel shows it before anything goes, and replies I send by myself carry it too.
+- It's never taken as your writing: what I learn from is the words above it.
+
 ## [0.10.0-alpha.35] — 2026-10-26
 
 Back where you were.

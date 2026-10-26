@@ -29,6 +29,8 @@ export const MailboxSending = z.object({
   setByUser: z.boolean(),
   /** Its provider keeps what is sent in the Sent folder itself. */
   keepsSent: z.boolean(),
+  /** What goes under each reply sent from it (0.10.0-alpha.36). */
+  signature: z.string().nullable().optional(),
 });
 export type MailboxSending = z.infer<typeof MailboxSending>;
 
@@ -39,6 +41,8 @@ export const SendingMailbox = z.object({
   fromAddress: z.string().nullable(),
   server: z.string().nullable(),
   whyNot: z.string().nullable(),
+  /** What goes under a reply sent through it, after a `-- ` line (0.10.0-alpha.36). */
+  signature: z.string().nullable().optional(),
 });
 export type SendingMailbox = z.infer<typeof SendingMailbox>;
 

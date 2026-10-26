@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { Button, InlineError } from "@mimic/ui";
 import { SmtpSecurity, type SmtpAccount } from "@mimic/contracts";
-import { useMailboxSending, useSetMailboxSending, useTestMailboxSending } from "@/hooks/useSending";
+import {
+  useMailboxSending,
+  useSetMailboxSending,
+  useSetMailboxSignature,
+  useTestMailboxSending,
+} from "@/hooks/useSending";
 import { toast } from "@/state/toast";
 
 const SECURITY_LABELS: Record<SmtpSecurity, string> = {
@@ -15,12 +20,19 @@ const SECURITY_LABELS: Record<SmtpSecurity, string> = {
  * server, or one the user set. Changing it is checked before it is kept —
  * Mimic signs in to the server with the mailbox's own password or sign-in,
  * and sends nothing — so a setting that can't work is never saved.
+ *
+ * Its signature (0.10.0-alpha.36) is kept as given, with nothing tried:
+ * it goes under each reply sent from the mailbox, after a `-- ` line.
  */
 export function MailboxSending({ sourceId, name }: { sourceId: string; name: string }) {
   const current = useMailboxSending(sourceId);
   const save = useSetMailboxSending(sourceId);
   const test = useTestMailboxSending(sourceId);
+  const signing = useSetMailboxSignature(sourceId);
   const [open, setOpen] = useState(false);
+  const [signatureOpen, setSignatureOpen] = useState(false);
+  const [signatureText, setSignatureText] = useState("");
+  const signature = current.data?.signature ?? null;
   const sending = current.data?.sending ?? null;
   const [form, setForm] = useState<SmtpAccount | null>(null);
 
@@ -70,6 +82,77 @@ export function MailboxSending({ sourceId, name }: { sourceId: string; name: str
           </p>
         ) : null}
         {test.isError ? <InlineError>{(test.error as Error).message}</InlineError> : null}
+        {!sending ? null : signatureOpen ? (
+          <form
+            className="stack gap-1"
+            aria-label={`Signature for ${name}`}
+            onSubmit={(e) => {
+              e.preventDefault();
+              signing.mutate(signatureText, { onSuccess: () => setSignatureOpen(false) });
+            }}
+          >
+            <label className="stack gap-1">
+              <span className="muted small">Signature</span>
+              <textarea
+                rows={4}
+                maxLength={1000}
+                value={signatureText}
+                onChange={(e) => {
+                  signing.reset();
+                  setSignatureText(e.target.value);
+                }}
+              />
+            </label>
+            <p className="muted small">
+              It goes under each reply I send from {name}, after a &ldquo;--&rdquo; line, the way
+              mail programs sign. It isn&rsquo;t part of what I learn from.
+            </p>
+            {signing.error ? <InlineError>{signing.error.message}</InlineError> : null}
+            <div className="row gap-1">
+              <Button size="sm" type="submit" disabled={signing.isPending}>
+                {signing.isPending ? "Keeping…" : "Keep it"}
+              </Button>
+              {signature ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  type="button"
+                  disabled={signing.isPending}
+                  onClick={() => signing.mutate("", { onSuccess: () => setSignatureOpen(false) })}
+                >
+                  No signature
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                onClick={() => setSignatureOpen(false)}
+              >
+                Never mind
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="stack gap-1">
+            {signature ? <p className="muted small">Replies from {name} are signed:</p> : null}
+            {signature ? <p className="letter signature-preview">{signature}</p> : null}
+            <p className="muted small">
+              {signature ? null : "Replies go without a signature. "}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => {
+                  setSignatureText(signature ?? "");
+                  signing.reset();
+                  setSignatureOpen(true);
+                }}
+              >
+                {signature ? "Change the signature" : "Add a signature"}
+              </button>
+            </p>
+          </div>
+        )}
       </div>
     );
   }
