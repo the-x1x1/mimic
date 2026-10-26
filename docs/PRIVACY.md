@@ -76,6 +76,6 @@ It will not send a message the user has not approved, except under replying by i
 
 **The clipboard.** With a shortcut chosen under Settings → Answering a message from anywhere, pressing it reads the clipboard's text — then, never otherwise — and puts it in Write as the message being answered. It goes nowhere else: not to a log, and not to the database until a draft is asked for, when it is stored with the draft as any pasted message is.
 
-**Notifications.** Windows notifications (on unless turned off in Settings) say how many replies are ready, held, sent or didn't go, and where to look — never who wrote or a word of what anyone said, because Windows keeps them where anyone at the computer can read them.
+**Notifications.** Windows notifications (on unless turned off in Settings) say how many replies are ready, held, sent or didn't go, and where to look, and name a mailbox of the user's own that stopped working, with why — never who wrote or a word of what anyone said, because Windows keeps them where anyone at the computer can read them.
 
 It will not write to a mailbox, except to put a copy of a reply it sent in that mailbox's Sent folder, marked read, where the provider doesn't keep one itself (Gmail, Outlook.com, Microsoft 365, Yahoo and AOL do; for any other, the user can turn the copy off under Your mail). Reading is `EXAMINE` and `BODY.PEEK[]`, and changes nothing.

@@ -339,6 +339,13 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                             crate::commands::people::reconcile_identity(&st.db, &st.jobs, "after_job");
                         }
                         let _ = app2.emit("jobs://event", &ev);
+                        // A mailbox that stops working is said, once, when the
+                        // user isn't looking: everything else waits on it.
+                        if ev.kind == mimic_core::sources::imap::JOB_KIND
+                            && matches!(ev.status.as_str(), "completed" | "failed")
+                        {
+                            crate::background::mailbox_checked(&app2, &ev.job_id, ev.status == "failed");
+                        }
                         // Replies prepared in advance: said, when the user
                         // isn't looking at Mimic, so they can look them over.
                         if ev.status == "completed" && ev.kind == mimic_core::assist::JOB_KIND {

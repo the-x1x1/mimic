@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.31] — 2026-10-26
+
+When a mailbox stops working.
+
+### Added
+
+- **A notification when I can't check a mailbox** — a password changed, a sign-in that ran out, a server that turned me away. It names the mailbox and says why, once; you hear again only if it works and then stops again. Until it works, nothing is read from it and nothing goes out from it, so you'd otherwise only find out by opening me.
+
 ## [0.10.0-alpha.30] — 2026-10-26
 
 What the home screen says about your mail.
