@@ -56,7 +56,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SIGN_IN_WINDOW: Duration = Duration::from_secs(5 * 60);
 
 /// A provider Mimic can sign in to, and where its mail is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Provider {
     /// Stored in a mailbox's settings (`ImapAccount.auth`).
     pub key: &'static str,
@@ -76,8 +76,21 @@ pub struct Provider {
     /// Whether the token requests name the scope again: Microsoft's want it,
     /// Google's have no use for it.
     pub scope_in_token_requests: bool,
-    /// Sent with every token request when there is one (Google's).
-    pub client_secret: Option<&'static str>,
+    /// Sent with every token request when there is one (Google's): this
+    /// build's, or the one the user saved with their own registration
+    /// (0.10.0-alpha.59).
+    pub client_secret: Option<String>,
+}
+
+/// Everything but the secret, which may be the user's own (0.10.0-alpha.59).
+impl std::fmt::Debug for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Provider")
+            .field("key", &self.key)
+            .field("token_url", &self.token_url)
+            .field("client_secret", &self.client_secret.as_ref().map(|_| "[set]"))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Provider {
@@ -119,7 +132,7 @@ impl Provider {
             redirect_host: "127.0.0.1",
             authorize_extra: &[("access_type", "offline"), ("prompt", "consent")],
             scope_in_token_requests: false,
-            client_secret: google_client_secret(),
+            client_secret: google_client_secret().map(str::to_string),
         }
     }
 }
@@ -144,9 +157,32 @@ fn google_client_secret() -> Option<&'static str> {
     compiled_in(option_env!("MIMIC_GOOGLE_CLIENT_SECRET"))
 }
 
+/// Whether `id` reads as a Microsoft application (client) id: a GUID, as
+/// the Azure portal shows it (0.10.0-alpha.59).
+pub fn is_microsoft_client_id(id: &str) -> bool {
+    let parts: Vec<&str> = id.split('-').collect();
+    parts.len() == 5
+        && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Whether `id` reads as a Google OAuth client id: the part before
+/// `.apps.googleusercontent.com`, as Google Cloud shows it, letters, digits
+/// and dashes.
+pub fn is_google_client_id(id: &str) -> bool {
+    id.strip_suffix(".apps.googleusercontent.com")
+        .is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+}
+
+/// Whether `secret` could be a Google client secret: one line of printable
+/// ASCII without spaces, at most 200 characters. Google's start `GOCSPX-`,
+/// but older ones don't.
+pub fn is_client_secret(secret: &str) -> bool {
+    !secret.is_empty() && secret.len() <= 200 && secret.bytes().all(|b| b.is_ascii_graphic())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OAuthError {
-    #[error("This copy of Mimic isn't set up to sign in with {0}.")]
+    #[error("This copy of Mimic isn't set up to sign in with {0} yet. Settings, under Signing in with Microsoft and Google, says how.")]
     NotConfigured(&'static str),
     #[error("Signing in was stopped.")]
     Canceled,
@@ -519,9 +555,10 @@ fn token_request<'a>(provider: &'a Provider, mut form: Vec<(&'a str, &'a str)>) 
     if provider.scope_in_token_requests {
         form.push(("scope", provider.scope));
     }
-    if let Some(secret) = provider.client_secret {
+    if let Some(secret) = provider.client_secret.as_deref() {
         form.push(("client_secret", secret));
     }
+    let refreshing = form.iter().any(|&(k, v)| k == "grant_type" && v == "refresh_token");
     let network = |e: reqwest::Error| OAuthError::Network(provider.name, one_line(&e.to_string()));
     let client = reqwest::blocking::Client::builder().timeout(TOKEN_TIMEOUT).build().map_err(network)?;
     let response = client
@@ -548,6 +585,11 @@ fn token_request<'a>(provider: &'a Provider, mut form: Vec<(&'a str, &'a str)>) 
         Some("invalid_grant") | Some("interaction_required") | Some("consent_required") => {
             Err(OAuthError::SignInAgain(provider.name))
         }
+        // A refresh token issued to another client id — Mimic's registration
+        // with the provider changed since the mailbox signed in
+        // (0.10.0-alpha.59) — is Google's `unauthorized_client`: a new
+        // sign-in, under the registration in use now, mends it.
+        Some("unauthorized_client") if refreshing => Err(OAuthError::SignInAgain(provider.name)),
         other => {
             let why = parsed.error_description.as_deref().filter(|d| !d.trim().is_empty()).or(other);
             Err(OAuthError::Refused(provider.name, one_line(why.unwrap_or(status.as_str()))))
@@ -929,7 +971,7 @@ mod tests {
             (200, r#"{"access_token":"at-2","expires_in":3599}"#.into()),
             (400, r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#.into()),
         ]);
-        let google = Provider { token_url, client_secret: Some("shh"), ..Provider::google() };
+        let google = Provider { token_url, client_secret: Some("shh".into()), ..Provider::google() };
         let opened = std::sync::Mutex::new(String::new());
         let open = |address: &str| {
             *opened.lock().unwrap() = address.to_string();
@@ -953,6 +995,43 @@ mod tests {
         let form = parse_query(&forms.recv().unwrap());
         assert_eq!((form["refresh_token"].as_str(), form["client_secret"].as_str()), ("rt-1", "shh"));
         assert!(matches!(refresh(&google, "g-1", "rt-1"), Err(OAuthError::SignInAgain("Google"))));
+    }
+
+    #[test]
+    fn a_provider_printed_never_shows_its_secret() {
+        let google = Provider { client_secret: Some("GOCSPX-mine".into()), ..Provider::google() };
+        let shown = format!("{google:?}");
+        assert!(!shown.contains("GOCSPX-mine") && shown.contains("[set]"), "{shown}");
+    }
+
+    #[test]
+    fn a_sign_in_made_under_another_registration_asks_for_a_new_one() {
+        let (token_url, _forms) = fake::token_endpoint(vec![
+            (401, r#"{"error":"unauthorized_client","error_description":"Unauthorized"}"#.into()),
+            (401, r#"{"error":"unauthorized_client","error_description":"Unauthorized"}"#.into()),
+        ]);
+        let google = Provider { token_url, client_secret: Some("new".into()), ..Provider::google() };
+        assert!(matches!(refresh(&google, "g-2", "rt-from-g-1"), Err(OAuthError::SignInAgain("Google"))));
+        // Signing in itself, refused so, says what the provider said.
+        let refused = exchange_code(&google, "g-2", "code", "http://127.0.0.1:1", &Pkce::new()).unwrap_err();
+        assert!(matches!(refused, OAuthError::Refused("Google", _)), "{refused:?}");
+    }
+
+    #[test]
+    fn a_registration_pasted_in_is_read_as_what_each_provider_shows() {
+        assert!(is_microsoft_client_id("0f5c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"));
+        assert!(is_microsoft_client_id("0F5C1A2B-3C4D-4E5F-8A9B-0C1D2E3F4A5B"));
+        assert!(!is_microsoft_client_id("0f5c1a2b3c4d4e5f8a9b0c1d2e3f4a5b"), "no dashes");
+        assert!(!is_microsoft_client_id("0f5c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5"), "one short");
+        assert!(!is_microsoft_client_id("zf5c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"));
+        assert!(is_google_client_id("123456789012-abc123def456.apps.googleusercontent.com"));
+        assert!(!is_google_client_id(".apps.googleusercontent.com"));
+        assert!(!is_google_client_id("123 456.apps.googleusercontent.com"));
+        assert!(!is_google_client_id("123456789012-abc123def456"), "the whole of it");
+        assert!(is_client_secret("GOCSPX-abcDEF_123"));
+        assert!(!is_client_secret(""));
+        assert!(!is_client_secret("two words"));
+        assert!(!is_client_secret(&"x".repeat(201)));
     }
 
     #[test]

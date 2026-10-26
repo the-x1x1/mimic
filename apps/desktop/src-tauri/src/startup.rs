@@ -91,6 +91,14 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     // A mailbox's password, or its Microsoft or Google sign-in, is read from
     // the secret store per run, so one changed or removed since the check was
     // queued is honoured; a refresh token the provider replaces is saved back.
+    // As the user registered Mimic with each provider (0.10.0-alpha.59), or
+    // as this build was.
+    let registered = |auth| {
+        crate::commands::sign_in_setup::registered(&*secrets, auth)
+            .unwrap_or_else(|| (mimic_core::sources::oauth::Provider::microsoft(), None))
+    };
+    let microsoft = registered(mimic_core::sources::imap::Auth::Microsoft);
+    let google = registered(mimic_core::sources::imap::Auth::Google);
     let mail_credentials = std::sync::Arc::new(
         mimic_core::sources::imap::Credentials::new(
             {
@@ -104,14 +112,10 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
                 let secrets = secrets.clone();
                 std::sync::Arc::new(move |key: &str, value: &str| secrets.set(key, value).map_err(|e| e.to_string()))
             },
-            mimic_core::sources::oauth::Provider::microsoft(),
-            mimic_core::sources::oauth::microsoft_client_id().map(str::to_string),
+            microsoft.0,
+            microsoft.1,
         )
-        .signing_in_with(
-            mimic_core::sources::imap::Auth::Google,
-            mimic_core::sources::oauth::Provider::google(),
-            mimic_core::sources::oauth::google_client_id().map(str::to_string),
-        ),
+        .signing_in_with(mimic_core::sources::imap::Auth::Google, google.0, google.1),
     );
     // Reading what the user's messages are doing sends every one of them to
     // the model, so it is only ever handed one on this computer.

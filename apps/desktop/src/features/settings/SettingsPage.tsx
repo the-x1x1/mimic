@@ -36,6 +36,7 @@ import { MeaningSection } from "./MeaningSection";
 import { AutoReplySection } from "./AutoReplySection";
 import { BackgroundSection } from "./BackgroundSection";
 import { AnywhereSection } from "./AnywhereSection";
+import { SignInSetupSection } from "./SignInSetupSection";
 import { ReplyingForYou } from "./ReplyingForYou";
 import { ModelStep } from "@/features/onboarding/ModelStep";
 
@@ -53,6 +54,7 @@ export function SettingsPage() {
       <AutoReplySection />
       <MeaningSection />
       <MailSection />
+      <SignInSetupSection />
       <BackgroundSection />
       <AnywhereSection />
       <EngineSection />

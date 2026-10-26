@@ -113,15 +113,6 @@ impl Auth {
             Auth::Google => Some(super::oauth::Provider::google()),
         }
     }
-
-    /// This build's client id with that provider, when it was made with one.
-    pub fn client_id(self) -> Option<&'static str> {
-        match self {
-            Auth::Password => None,
-            Auth::Microsoft => super::oauth::microsoft_client_id(),
-            Auth::Google => super::oauth::google_client_id(),
-        }
-    }
 }
 
 /// What one connection signs in with. Never printed.
@@ -1646,9 +1637,10 @@ pub type SaveSecret = Arc<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync
 pub struct Credentials {
     password_for: PasswordFor,
     save: SaveSecret,
-    /// Each provider a mailbox may sign in with, and this build's client id
-    /// with it (none: it can't).
-    sign_ins: Vec<(Auth, super::oauth::Provider, Option<String>)>,
+    /// Each provider a mailbox may sign in with, and the client id it signs
+    /// in as (none: it can't) — this build's, or the user's own registration
+    /// saved since (0.10.0-alpha.59, `register`).
+    sign_ins: std::sync::RwLock<Vec<(Auth, super::oauth::Provider, Option<String>)>>,
     /// Access tokens still good, per mailbox, and when to stop trusting
     /// each: a check every few minutes needn't ask for a new one every time.
     kept: std::sync::Mutex<HashMap<String, (String, std::time::Instant)>>,
@@ -1664,17 +1656,33 @@ impl Credentials {
         Credentials {
             password_for,
             save,
-            sign_ins: vec![(Auth::Microsoft, microsoft, microsoft_client)],
+            sign_ins: std::sync::RwLock::new(vec![(Auth::Microsoft, microsoft, microsoft_client)]),
             kept: Default::default(),
         }
     }
 
     /// Mailboxes that sign in with `auth` do it with `provider`, and this
     /// client id (none: this build can't).
-    pub fn signing_in_with(mut self, auth: Auth, provider: super::oauth::Provider, client: Option<String>) -> Self {
-        self.sign_ins.retain(|(a, _, _)| *a != auth);
-        self.sign_ins.push((auth, provider, client));
+    pub fn signing_in_with(self, auth: Auth, provider: super::oauth::Provider, client: Option<String>) -> Self {
+        self.register(auth, provider, client);
         self
+    }
+
+    /// From now on, mailboxes that sign in with `auth` do it with `provider`
+    /// and this client id (none: they can't). A sign-in made with another
+    /// client id can't be renewed with this one: the provider asks for a new
+    /// sign-in, which the mailbox says.
+    pub fn register(&self, auth: Auth, provider: super::oauth::Provider, client: Option<String>) {
+        let mut sign_ins = self.sign_ins.write().unwrap_or_else(|p| p.into_inner());
+        sign_ins.retain(|(a, _, _)| *a != auth);
+        sign_ins.push((auth, provider, client));
+    }
+
+    /// The provider and client id a new sign-in with `auth` uses, when there
+    /// is one.
+    pub fn sign_in_with(&self, auth: Auth) -> Option<(super::oauth::Provider, String)> {
+        let sign_ins = self.sign_ins.read().unwrap_or_else(|p| p.into_inner());
+        sign_ins.iter().find(|(a, _, _)| *a == auth).and_then(|(_, p, c)| Some((p.clone(), c.clone()?)))
     }
 
     /// What a mailbox signs in with now: its password; or, for one signed in
@@ -1696,19 +1704,25 @@ impl Credentials {
                         return Ok(Credential::AccessToken(token.clone()));
                     }
                 }
-                let Some((_, provider, client)) = self.sign_ins.iter().find(|(a, _, _)| *a == auth) else {
+                let found = {
+                    let sign_ins = self.sign_ins.read().unwrap_or_else(|p| p.into_inner());
+                    sign_ins.iter().find(|(a, _, _)| *a == auth).map(|(_, p, c)| (p.clone(), c.clone()))
+                };
+                let Some((provider, client)) = found else {
                     return Err("This copy of Mimic can't sign in to this mailbox, so I can't reach it.".into());
                 };
                 let name = provider.name;
                 let Some(client) = client.as_deref() else {
-                    return Err(format!("This copy of Mimic can't sign in with {name}, so I can't reach this mailbox."));
+                    return Err(format!(
+                        "This copy of Mimic can't sign in with {name}, so I can't reach this mailbox. Settings, under Signing in with Microsoft and Google, says how to set that up."
+                    ));
                 };
                 let Some(refresh) = (self.password_for)(&key) else {
                     return Err(format!(
                         "I don't have a {name} sign-in I can use for this mailbox. Sign in again under Your mail."
                     ));
                 };
-                let tokens = super::oauth::refresh(provider, client, &refresh).map_err(|e| match e {
+                let tokens = super::oauth::refresh(&provider, client, &refresh).map_err(|e| match e {
                     super::oauth::OAuthError::SignInAgain(who) => {
                         format!("{who} wants you to sign in again for this mailbox. Do it under Your mail.")
                     }
@@ -2328,7 +2342,7 @@ mod tests {
             Auth::Google,
             super::super::oauth::Provider {
                 token_url: url.clone(),
-                client_secret: Some("g-secret"),
+                client_secret: Some("g-secret".into()),
                 ..super::super::oauth::Provider::google()
             },
             Some("g-client".into()),
@@ -2351,7 +2365,7 @@ mod tests {
                 .signing_in_with(Auth::Google, super::super::oauth::Provider::google(), None)
                 .credential(Auth::Google, "s1")
                 .unwrap_err(),
-            "This copy of Mimic can't sign in with Google, so I can't reach this mailbox."
+            "This copy of Mimic can't sign in with Google, so I can't reach this mailbox. Settings, under Signing in with Microsoft and Google, says how to set that up."
         );
         let (unregistered, _) = credentials(vec![(secret_key("s1"), "g-rt".into())], &url, Some("ms-client"));
         assert!(unregistered.credential(Auth::Google, "s1").unwrap_err().contains("can't sign in to this mailbox"));

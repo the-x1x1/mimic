@@ -1,0 +1,12 @@
+{
+  "microsoft": {
+    "clientId": "0f5c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b",
+    "own": true,
+    "builtIn": false
+  },
+  "google": {
+    "clientId": null,
+    "own": false,
+    "builtIn": false
+  }
+}

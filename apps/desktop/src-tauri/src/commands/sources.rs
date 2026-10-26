@@ -220,7 +220,8 @@ fn add_mailbox(
 }
 
 /// Which providers this copy of Mimic can sign in to a mailbox with: each
-/// needs Mimic's client id with that provider, compiled in.
+/// needs a client id with that provider — this build's, or the user's own
+/// (0.10.0-alpha.59, `sign_in_setup`).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MailSignIns {
@@ -231,8 +232,9 @@ pub struct MailSignIns {
 }
 
 #[tauri::command]
-pub async fn mail_sign_in_available() -> CommandResult<MailSignIns> {
-    Ok(MailSignIns { microsoft: Auth::Microsoft.client_id().is_some(), google: Auth::Google.client_id().is_some() })
+pub async fn mail_sign_in_available(state: State<'_, SharedState>) -> CommandResult<MailSignIns> {
+    let can = |auth| state.mail_credentials.sign_in_with(auth).is_some();
+    Ok(MailSignIns { microsoft: can(Auth::Microsoft), google: can(Auth::Google) })
 }
 
 /// Who handles mail for a domain no provider is known for: its mail
@@ -296,11 +298,15 @@ fn sign_in_error(e: OAuthError) -> CommandError {
     }
 }
 
-/// Mimic's client id with the provider, or the refusal that says this copy
-/// can't sign in with it.
-fn client_for(auth: Auth, provider: &oauth::Provider) -> CommandResult<&'static str> {
-    auth.client_id()
-        .ok_or_else(|| CommandError::new("not_configured", OAuthError::NotConfigured(provider.name).to_string()))
+/// The provider and client id a new sign-in uses — this build's, or the
+/// user's own registration — or the refusal that says this copy can't sign
+/// in with it yet.
+fn client_for(state: &crate::AppState, auth: Auth) -> CommandResult<(oauth::Provider, String)> {
+    let name = provider_of(auth)?.name;
+    state
+        .mail_credentials
+        .sign_in_with(auth)
+        .ok_or_else(|| CommandError::new("not_configured", OAuthError::NotConfigured(name).to_string()))
 }
 
 /// Sign in with the provider in the user's browser: stoppable with
@@ -309,7 +315,7 @@ async fn browser_sign_in(
     app: &tauri::AppHandle,
     signing_in: &std::sync::Arc<SigningIn>,
     provider: oauth::Provider,
-    client: &'static str,
+    client: String,
     email: &str,
 ) -> CommandResult<oauth::Tokens> {
     let (app, waiting, hint) = (app.clone(), signing_in.clone(), email.to_string());
@@ -319,7 +325,7 @@ async fn browser_sign_in(
             app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
         };
         let stop = || waiting.stopped();
-        oauth::sign_in(&provider, client, Some(&hint), &open, &stop)
+        oauth::sign_in(&provider, &client, Some(&hint), &open, &stop)
     })
     .await
     .map_err(|e| CommandError::new("internal", e.to_string()))?
@@ -377,8 +383,7 @@ pub async fn sign_in_to_mailbox(
     if !email.contains('@') {
         return Err(CommandError::new("invalid", "That doesn't look like an email address."));
     }
-    let provider = provider_of(with)?;
-    let client = client_for(with, &provider)?;
+    let (provider, client) = client_for(&state, with)?;
     let signing_in = SigningIn::begin(state.inner())?;
     *state.sign_in.pending.lock().unwrap_or_else(|p| p.into_inner()) = None;
     let tokens = browser_sign_in(&app, &signing_in, provider.clone(), client, &email).await?;
@@ -444,10 +449,10 @@ pub async fn sign_in_mailbox_again(
         CommandError::new("mailbox", "I can't read this mailbox's settings; remove it and connect it again.")
     })?;
     let auth = config.account.auth;
-    let Some(provider) = auth.provider() else {
+    if auth.provider().is_none() {
         return Err(CommandError::new("mailbox", "This mailbox uses a password. Give it a new one instead."));
-    };
-    let client = client_for(auth, &provider)?;
+    }
+    let (provider, client) = client_for(&state, auth)?;
     let signing_in = SigningIn::begin(state.inner())?;
     let tokens = browser_sign_in(&app, &signing_in, provider.clone(), client, &config.account.username).await?;
     let refresh_token = tokens.refresh_token.clone().ok_or_else(|| no_refresh_token(&provider))?;

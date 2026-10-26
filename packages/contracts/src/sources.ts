@@ -171,6 +171,22 @@ export const SIGN_IN_NAMES: Record<SignInWith, string> = {
 export const MailSignIns = z.object({ microsoft: z.boolean(), google: z.boolean() });
 export type MailSignIns = z.infer<typeof MailSignIns>;
 
+/**
+ * One provider's registration (0.10.0-alpha.59): the client id signed in as
+ * now — the user's own, saved here, or this build's — and whether this build
+ * has one to go back to. Google's secret is never sent to the screen.
+ */
+export const ProviderSetup = z.object({
+  clientId: z.string().nullable(),
+  own: z.boolean(),
+  builtIn: z.boolean(),
+});
+export type ProviderSetup = z.infer<typeof ProviderSetup>;
+
+/** What each provider signs mailboxes in as. */
+export const SignInSetup = z.object({ microsoft: ProviderSetup, google: ProviderSetup });
+export type SignInSetup = z.infer<typeof SignInSetup>;
+
 /** How to reach a mailbox. The password is sent separately and never stored here. */
 export const ImapAccount = z.object({
   host: z.string(),
@@ -223,7 +239,7 @@ const OUTLOOK: KnownMailHost = {
 
 /** Said when this copy of Mimic can't sign in with Microsoft. */
 export const MICROSOFT_UNAVAILABLE =
-  "Outlook.com and Hotmail no longer let apps like this sign in with a password, and this copy of Mimic isn't set up to sign in with Microsoft. For now, bring your mail in as an .mbox file: add the account to Thunderbird, then export the inbox and sent folders as mbox.";
+  "Outlook.com and Hotmail no longer let apps like this sign in with a password, and this copy of Mimic isn't set up to sign in with Microsoft yet. Settings, under Signing in with Microsoft and Google, says how to set it up. Or bring your mail in as an .mbox file: add the account to Thunderbird, then export the inbox and sent folders as mbox.";
 
 export interface KnownMailHost {
   host: string;

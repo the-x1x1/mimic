@@ -42,6 +42,8 @@ Registering, once, in the Microsoft Entra admin center (entra.microsoft.com, sig
 
 For a local build, set `MIMIC_MICROSOFT_CLIENT_ID` in the environment before `pnpm tauri dev` or `.\scripts\build.ps1`; cargo rebuilds when it changes.
 
+Since 0.10.0-alpha.59 a build without one, or a user who would rather use their own, can paste the client id into Settings → **Signing in with Microsoft and Google** instead (`commands::sign_in_setup`): it is kept in the secret store, used from the next sign-in on, and forgotten there to go back to the build's. A mailbox signed in under one client id must be signed in again under another.
+
 Work and school tenants decide whether their users may approve an app themselves; many allow it only for apps from a verified publisher. Until Mimic's publisher is verified (a Microsoft Partner Network ID on the registration), someone in such a tenant needs their admin to approve Mimic — Microsoft says so on its own page, and the connect dialog tells the user to expect it. Personal accounts are not affected.
 
 ## Mimic's registration with Google
@@ -57,7 +59,7 @@ Registering, once, in the Google Cloud console (console.cloud.google.com, signed
 5. **Clients → Create client:** application type _Desktop app_, name `Mimic`. Copy the client id and the client secret. A desktop client takes the browser back to `http://127.0.0.1` on any port, which the sign-in needs; nothing else is registered.
 6. Set them: `gh variable set MIMIC_GOOGLE_CLIENT_ID --repo the-x1x1/mimic --body <client id>` and `gh secret set MIMIC_GOOGLE_CLIENT_SECRET --repo the-x1x1/mimic --body <client secret>`.
 
-For a local build, set both in the environment before `pnpm tauri dev` or `.\scripts\build.ps1`.
+For a local build, set both in the environment before `pnpm tauri dev` or `.\scripts\build.ps1`. Or, since 0.10.0-alpha.59, paste both into Settings → **Signing in with Microsoft and Google**, as for Microsoft; the secret is kept in the secret store and never shown again.
 
 Google Workspace admins can block apps that aren't on their list (Security → API controls); a Workspace user then sees that from Google when signing in, and an app password, if the admin allows those, still works.
 
