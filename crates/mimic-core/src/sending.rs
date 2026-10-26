@@ -63,7 +63,9 @@ pub const MAILBOX_GONE: &str = "That mailbox isn't connected any more.";
 pub const UNREADABLE: &str = "I can't read this mailbox's settings; remove it and connect it again.";
 pub const DRAFT_GONE: &str = "That draft isn't here any more, so there's nothing to send.";
 pub const EMPTY: &str = "There's nothing to send: the reply is empty.";
-pub const HELD: &str = "I'm holding a reply to this to send by myself. Stop it first if you'd rather send your own.";
+pub const HELD: &str = crate::db::HELD_BY_ITSELF;
+pub const NOT_OFFERED: &str =
+    "I only send a reply to the addresses the Send panel offered for it, and that isn't one of them.";
 pub const NOT_ON_IT: &str = "I only copy in people who were on the message you're answering, and that address wasn't.";
 pub const PANICKED: &str =
     "Something went wrong inside Mimic while sending, so it may or may not have gone. Look in your Sent folder before sending it again.";
@@ -374,6 +376,12 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
     }
     let (config, account) = sending_from(db, &req.source_id)?;
     let incoming = answered(db, &draft)?;
+    // Only to what the panel offers for this draft (0.10.0-alpha.44): a
+    // panel left open on another draft's envelope can't send this one there.
+    let (offered, others) = addresses_for(db, &draft, incoming.as_ref())?;
+    if !to.iter().all(|a| offered.iter().chain(&others).any(|o| o.eq_ignore_ascii_case(a))) {
+        return Err(SendError::Cannot(NOT_OFFERED.into()));
+    }
     let cc = copied_in(db, incoming.as_ref(), &to, &req.cc)?;
     let body = signed(&req.text, config.signature());
     let (in_reply_to, references) = threading(incoming.as_ref());
@@ -651,6 +659,7 @@ mod tests {
             sent_folder: None,
             marks: Default::default(),
             last_checked_at: None,
+            last_read_at: None,
             sending: Some(SmtpAccount {
                 host: "127.0.0.1".into(),
                 port,
@@ -942,6 +951,22 @@ mod tests {
         // The user looked in their Sent folder: it didn't go.
         w.db.outgoing_did_not_go(&entry.id).unwrap();
         assert_eq!(envelope_for(&w.db, &w.draft.id).unwrap().why_not, None);
+    }
+
+    #[test]
+    fn a_reply_goes_only_to_an_address_offered_for_its_draft() {
+        let (port, _seen) = serve(Behaviour::default());
+        let w = world(port);
+        let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+        for to in ["bob@example.com", "someone@else.example"] {
+            let req = SendRequest { to: vec![to.into()], ..approved(&w, &envelope, "Yes.") };
+            let e = send_reply(&w.db, &credentials(), &req).unwrap_err();
+            assert!(matches!(e, SendError::Cannot(ref m) if m == NOT_OFFERED), "{to}: {e}");
+        }
+        assert!(w.db.recent_outgoing(10).unwrap().is_empty(), "nothing was recorded, nothing was said");
+        // Either address the panel offers, in any case.
+        let req = SendRequest { to: vec!["ADA@example.com".into()], ..approved(&w, &envelope, "Yes.") };
+        assert_eq!(send_reply(&w.db, &credentials(), &req).unwrap().status, SendStatus::Sent);
     }
 
     #[test]

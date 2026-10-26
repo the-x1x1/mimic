@@ -39,8 +39,8 @@ pub use repo_messages::{
     word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
 };
 pub use repo_outbox::{
-    NewOutgoing, OutboxEntry, SendHow, SendStatus, ALREADY_SENDING, DID_NOT_GO, INTERRUPTED, MAY_HAVE_GONE, NOT_UNSURE,
-    TOO_LATE,
+    NewOutgoing, OutboxEntry, SendHow, SendStatus, ALREADY_SENDING, DID_NOT_GO, HELD_BY_ITSELF, INTERRUPTED,
+    MAY_HAVE_GONE, NOT_UNSURE, TOO_LATE,
 };
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
 pub use repo_search::{search_query, FoundMessage, SearchPage, SearchWho, SnippetPiece, COUNT_CAP as SEARCH_COUNT_CAP};
@@ -134,7 +134,18 @@ impl Db {
     pub fn schema_version(&self) -> DbResult<i64> {
         Ok(migrations::current_version(&self.conn())?)
     }
+}
 
+/// Write one setting's JSON.
+fn put_setting(conn: &rusqlite::Connection, key: &str, json: &str) -> rusqlite::Result<usize> {
+    conn.execute(
+        "INSERT INTO app_settings(key, value_json, updated_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+        params![key, json, now_rfc3339()],
+    )
+}
+
+impl Db {
     /// Run a closure inside a transaction.
     pub fn transaction<T>(&self, f: impl FnOnce(&rusqlite::Transaction<'_>) -> DbResult<T>) -> DbResult<T> {
         let mut guard = self.conn();
@@ -158,12 +169,20 @@ impl Db {
 
     pub fn set_setting<T: Serialize>(&self, key: &str, value: &T) -> DbResult<()> {
         let json = serde_json::to_string(value)?;
-        self.conn().execute(
-            "INSERT INTO app_settings(key, value_json, updated_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
-            params![key, json, now_rfc3339()],
-        )?;
+        put_setting(&self.conn(), key, &json)?;
         Ok(())
+    }
+
+    /// Save a setting and stop every held reply with `why`, in one
+    /// transaction (0.10.0-alpha.44): whatever reads the setting after finds
+    /// nothing still held under the one before. Returns how many stopped.
+    pub fn set_setting_stopping_held<T: Serialize>(&self, key: &str, value: &T, why: &str) -> DbResult<usize> {
+        let json = serde_json::to_string(value)?;
+        self.transaction(|tx| {
+            let stopped = repo_outbox::stop_all_held_in(tx, why)?;
+            put_setting(tx, key, &json)?;
+            Ok(stopped)
+        })
     }
 
     pub fn all_settings(&self) -> DbResult<serde_json::Map<String, serde_json::Value>> {

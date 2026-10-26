@@ -74,11 +74,23 @@ pub const LOOPING: &str = "I've already replied by myself twice in this conversa
 pub const NOT_EMAIL: &str = "This isn't an email, so it can't be sent from here.";
 pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
+pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
+pub const LIST: &str = "It came through a mailing list, where a reply goes to everyone on it, so it waits for you.";
+/// Mail Mimic read longer ago than this is not answered by itself, however
+/// it came to be allowed since (0.10.0-alpha.44): turned back on, a mailbox
+/// or a person added, someone taken off the never list.
+const READ_WITHIN_HOURS: i64 = 24;
+/// Nor mail that reached Mimic longer than this after it says it was sent:
+/// a mailbox catching up after failing for days.
+const LATE_DAYS: i64 = 3;
 pub const NOT_TO_YOU: &str =
     "It wasn't sent to you directly — a list, a copy you were hidden on, or I can't tell — so I don't answer it by myself.";
 pub const SENT_FOLDER: &str = "It was in your Sent folder, so it may be yours; I don't answer it by myself.";
 pub const NOT_THEIRS: &str =
     "A reply would go somewhere other than the address of the person who wrote, so I don't send it by myself.";
+/// The mailbox's sending address changed while a reply was held: it would
+/// go from an address the user didn't have when it was held.
+pub const FROM_CHANGED: &str = "The address it would go from changed while I held it, so it waits for you.";
 
 /// Who Mimic may answer by itself.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,9 +212,12 @@ pub fn set_rules(db: &Db, rules: Rules) -> Result<Rules, DbError> {
         (true, true) => before.enabled_at.or_else(|| Some(crate::ids::now_rfc3339())),
         (false, true) => Some(crate::ids::now_rfc3339()),
     };
-    db.set_setting(SETTING, &rules)?;
-    if !rules.enabled {
-        db.stop_all_held_outgoing(TURNED_OFF)?;
+    if rules.enabled {
+        db.set_setting(SETTING, &rules)?;
+    } else {
+        // Saved and stopped together: a look that reads the rules after
+        // finds nothing held under the ones before.
+        db.set_setting_stopping_held(SETTING, &rules, TURNED_OFF)?;
     }
     Ok(rules)
 }
@@ -221,8 +236,11 @@ pub struct Run {
     pub sent: usize,
     /// Held replies the rules no longer allowed.
     pub stopped: usize,
-    /// Held replies that didn't go, or may not have.
+    /// Held replies that didn't go.
     pub failed: usize,
+    /// Held replies that may or may not have gone (0.10.0-alpha.44): never
+    /// sent again until the user says they didn't.
+    pub unsure: usize,
     /// Mailboxes with a reply whose hold has ended, waiting for the mailbox
     /// to be read again: a check of each is asked for, so it goes close to
     /// on time.
@@ -232,7 +250,7 @@ pub struct Run {
 
 impl Run {
     pub fn changed_anything(&self) -> bool {
-        self.held + self.sent + self.stopped + self.failed > 0
+        self.held + self.sent + self.stopped + self.failed + self.unsure > 0
     }
 }
 
@@ -301,6 +319,24 @@ fn refusal(
     if !matches!((on_since, arrived), (Some(on), Some(at)) if at >= on) {
         return Ok(Some(BEFORE_ON));
     }
+    // Not a backlog however it came to be allowed: read more than a day
+    // ago, or reaching Mimic days after it says it was sent. Asked when it
+    // is held; a hold, or hours, may then keep it a day or more.
+    if holding {
+        let read = db
+            .message_imported_at(&incoming.id)?
+            .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
+            .map(|t| t.with_timezone(&Utc));
+        let late =
+            |read: DateTime<Utc>| arrived.is_some_and(|a| read - a.with_timezone(&Utc) > Duration::days(LATE_DAYS));
+        if read.is_none_or(|r| r < now - Duration::hours(READ_WITHIN_HOURS) || late(r)) {
+            return Ok(Some(OLD));
+        }
+    }
+    // Through a list, a reply goes to the list (RFC 3834 §2).
+    if incoming.metadata.get("list").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Ok(Some(LIST));
+    }
     if !rules.mailboxes.contains(&incoming.source_id) {
         return Ok(Some(MAILBOX_OFF));
     }
@@ -364,14 +400,15 @@ fn goes_to_them(db: &Db, person: Option<&str>, to: &[String]) -> Result<bool, Db
         }))
 }
 
-/// Whether the mailbox has been read, successfully, since `since`: an answer
-/// the user sent from another program in the meantime is only known once it
-/// has.
+/// Whether a check that read the mailbox through began after `since` (the
+/// end of a reply's hold): an answer the user sent from another program
+/// before then is only known once one has (`ImapSourceConfig::last_read_at`;
+/// a check that ended, failed or was stopped after it doesn't count).
 fn read_since(db: &Db, config: &ImapSourceConfig, source_id: &str, since: &str) -> Result<bool, DbError> {
     let settled = db.get_source(source_id)?.is_some_and(|s| s.status != "failed" && s.status != "importing");
-    let checked = config.last_checked_at.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let read = config.last_read_at.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
     let held = DateTime::parse_from_rfc3339(since).ok();
-    Ok(settled && matches!((checked, held), (Some(c), Some(h)) if c > h))
+    Ok(settled && matches!((read, held), (Some(r), Some(h)) if r > h))
 }
 
 /// Hold a reply for every draft that may go by itself: one `outbox` row
@@ -398,6 +435,14 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
         if !goes_to_them(db, draft.participant_id.as_deref(), &envelope.to)? {
             continue;
         }
+        // The rules as they are now: turned off, or changed, while this ran.
+        let now_rules = self::rules(db)?;
+        if !is_on(db, &now_rules)? {
+            break;
+        }
+        if now_rules != rules && refusal(db, &now_rules, &draft, &waiting, None, true, now)?.is_some() {
+            continue;
+        }
         let queued = db.queue_outgoing(&NewOutgoing {
             draft_id: Some(draft.id.clone()),
             source_id: incoming.source_id.clone(),
@@ -412,10 +457,10 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
             message_id: outgoing::new_message_id(&account.from_address),
             how: SendHow::Autonomous,
             // Held for the while the user chose, then until the hours they
-            // allow, if those have ended for the day.
+            // allow, if those have ended for the day: as they are now.
             send_after: Some(fmt_rfc3339(first_within(
-                rules.hours,
-                now + Duration::minutes(rules.hold_minutes),
+                now_rules.hours,
+                now + Duration::minutes(now_rules.hold_minutes),
                 &Local,
             ))),
         });
@@ -446,19 +491,17 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
     if due.is_empty() {
         return Ok(run);
     }
-    let rules = rules(db)?;
-    let waiting = waiting_now(db)?;
+    let early_waiting = waiting_now(db)?;
     for entry in due {
         let Some(draft) = entry.draft_id.as_deref().map(|id| db.get_draft(id)).transpose()?.flatten() else {
             run.stopped += usize::from(db.stop_held_outgoing(&entry.id, GONE)?);
             continue;
         };
-        if let Some(why) = refusal(db, &rules, &draft, &waiting, Some(&entry.id), false, now)? {
+        // The rules as they are now, for each: a send before this one can
+        // take a while, and they may have changed meanwhile.
+        let rules = rules(db)?;
+        if let Some(why) = refusal(db, &rules, &draft, &early_waiting, Some(&entry.id), false, now)? {
             run.stopped += usize::from(db.stop_held_outgoing(&entry.id, why)?);
-            continue;
-        }
-        if !goes_to_them(db, draft.participant_id.as_deref(), &entry.to)? {
-            run.stopped += usize::from(db.stop_held_outgoing(&entry.id, NOT_THEIRS)?);
             continue;
         }
         // Outside the hours allowed — set since it was held, or passed while
@@ -479,14 +522,32 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
             }
             Err(e) => return Err(e),
         };
-        // It waits for the next check of the mailbox after it was held.
-        if !read_since(db, &config, &entry.source_id, &entry.created_at)? {
+        // From the address it would go from now: one changed, or no longer
+        // the user's, since it was held stops it.
+        if !entry.from_address.eq_ignore_ascii_case(&account.from_address) {
+            run.stopped += usize::from(db.stop_held_outgoing(&entry.id, FROM_CHANGED)?);
+            continue;
+        }
+        // It waits for a check of the mailbox that began after its hold
+        // ended, so an answer the user sent meanwhile is known.
+        if !read_since(db, &config, &entry.source_id, &entry.send_after)? {
             if !run.waiting_for_check.contains(&entry.source_id) {
                 run.waiting_for_check.push(entry.source_id.clone());
             }
             continue;
         }
-        // Held → sending, unless it was stopped or taken a moment ago.
+        // Then checked again on what that check read.
+        let waiting = waiting_now(db)?;
+        if let Some(why) = refusal(db, &rules, &draft, &waiting, Some(&entry.id), false, now)? {
+            run.stopped += usize::from(db.stop_held_outgoing(&entry.id, why)?);
+            continue;
+        }
+        if !goes_to_them(db, draft.participant_id.as_deref(), &entry.to)? {
+            run.stopped += usize::from(db.stop_held_outgoing(&entry.id, NOT_THEIRS)?);
+            continue;
+        }
+        // Held → sending, unless it was stopped or taken a moment ago, or its
+        // draft was decided.
         if !db.take_held_outgoing(&entry.id, &now_text)? {
             continue;
         }
@@ -518,6 +579,7 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
                 }
             }
             // `deliver` recorded why, as failed or unsure.
+            Err(e) if e.may_have_gone() => run.unsure += 1,
             Err(_) => run.failed += 1,
         }
     }
@@ -588,7 +650,13 @@ mod tests {
 
     const EARLIER: &str = "From: Ada Lovelace <ada@example.com>\r\nTo: C <c@example.com>\r\nSubject: Lunch\r\nDate: Mon, 2 Mar 2026 09:00:00 +0000\r\nMessage-ID: <l1@x.example>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nlunch on thursday?\r\n";
     const MINE: &str = "From: C <c@example.com>\r\nTo: Ada <ada@example.com>\r\nSubject: Re: Lunch\r\nDate: Mon, 2 Mar 2026 09:30:00 +0000\r\nMessage-ID: <l2@x.example>\r\nIn-Reply-To: <l1@x.example>\r\nReferences: <l1@x.example>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nyes! where?\r\n";
-    const QUESTION: &str = "From: Ada Lovelace <ada@example.com>\r\nTo: C <c@example.com>\r\nSubject: Re: Lunch\r\nDate: Mon, 2 Mar 2026 10:00:00 +0000\r\nMessage-ID: <l3@x.example>\r\nIn-Reply-To: <l2@x.example>\r\nReferences: <l1@x.example> <l2@x.example>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nthe place by the river?\r\n";
+    /// Ada's question, sent ten minutes before the tests' clock starts.
+    fn question() -> String {
+        format!(
+            "From: Ada Lovelace <ada@example.com>\r\nTo: C <c@example.com>\r\nSubject: Re: Lunch\r\nDate: {}\r\nMessage-ID: <l3@x.example>\r\nIn-Reply-To: <l2@x.example>\r\nReferences: <l1@x.example> <l2@x.example>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nthe place by the river?\r\n",
+            at(-10).to_rfc2822()
+        )
+    }
 
     fn read_in(db: &Db, source: &str, raw: &str, sent: bool) {
         let mut mail = crate::sources::mbox::parse_raw(raw.as_bytes()).unwrap();
@@ -622,6 +690,7 @@ mod tests {
             sent_folder: None,
             marks: Default::default(),
             last_checked_at: None,
+            last_read_at: None,
             sending: Some(SmtpAccount {
                 host: "127.0.0.1".into(),
                 port,
@@ -644,7 +713,11 @@ mod tests {
             .id;
         read_in(&db, &mailbox, EARLIER, false);
         read_in(&db, &mailbox, MINE, true);
-        read_in(&db, &mailbox, QUESTION, false);
+        read_in(&db, &mailbox, &question(), false);
+        // Read five minutes after it was sent, on the tests' clock.
+        db.conn()
+            .execute("UPDATE messages SET imported_at = ?1 WHERE external_id = 'l3@x.example'", [fmt_rfc3339(at(-5))])
+            .unwrap();
         let (message, conversation, ada): (String, String, String) = db
             .conn()
             .query_row(
@@ -679,11 +752,18 @@ mod tests {
         World { db, mailbox, ada, draft, seen }
     }
 
-    /// The mailbox has been read since anything was held.
+    /// The mailbox has been read since anything was held: by a check that
+    /// began after any hold here ends, on the tests' clock or the real one.
     fn checked(w: &World) {
+        read_at(w, Utc::now().max(at(0)) + Duration::days(7));
+    }
+
+    /// A check that read the mailbox began at `began`.
+    fn read_at(w: &World, began: DateTime<Utc>) {
         let mut config: ImapSourceConfig =
             serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
-        config.last_checked_at = Some(fmt_rfc3339(Utc::now() + Duration::minutes(1)));
+        config.last_checked_at = Some(fmt_rfc3339(began + Duration::minutes(1)));
+        config.last_read_at = Some(fmt_rfc3339(began));
         w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
         w.db.set_source_status(&w.mailbox, "imported", None).unwrap();
     }
@@ -754,6 +834,108 @@ mod tests {
             .unwrap();
         assert!(metadata.contains("\"sentOnItsOwn\":true") && !metadata.contains("automated"), "{metadata}");
         assert_eq!(tick(&w.db, &credentials(), at(30)).unwrap(), Run::default(), "and nothing is sent twice");
+    }
+
+    #[test]
+    fn a_check_that_began_before_the_hold_ended_does_not_count() {
+        let w = world(Behaviour::default());
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1);
+        // Read during the hold: an answer the user sent from elsewhere after
+        // that check began isn't in what it read.
+        read_at(&w, at(1));
+        let run = tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap();
+        assert_eq!((run.sent, run.waiting_for_check.clone()), (0, vec![w.mailbox.clone()]));
+        read_at(&w, at(DEFAULT_HOLD_MINUTES) + Duration::seconds(1));
+        assert_eq!(tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES + 1)).unwrap().sent, 1);
+    }
+
+    #[test]
+    fn mail_through_a_list_or_read_long_after_it_was_sent_is_left_for_the_user() {
+        let through_a_list = |w: &World| {
+            w.db.conn()
+                .execute(
+                    "UPDATE messages SET metadata_json = json_set(metadata_json, '$.list', json('true'))
+                     WHERE external_id = 'l3@x.example'",
+                    [],
+                )
+                .unwrap();
+        };
+        let w = world(Behaviour::default());
+        through_a_list(&w);
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+
+        // Read more than a day ago: a backlog, however it came to be allowed.
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET imported_at = ?1 WHERE external_id = 'l3@x.example'",
+                [fmt_rfc3339(at(-60 * 25))],
+            )
+            .unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+
+        // Read just now, but sent days before.
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET sent_at = ?1 WHERE external_id = 'l3@x.example'",
+                [fmt_rfc3339(at(-60 * 24 * 4))],
+            )
+            .unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+
+        // One already held is stopped, saying why.
+        let w = world(Behaviour::default());
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1);
+        through_a_list(&w);
+        checked(&w);
+        let run = tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap();
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(only_entry(&w.db).error.as_deref(), Some(LIST));
+    }
+
+    #[test]
+    fn a_held_reply_whose_sending_address_changed_waits_for_the_user() {
+        let w = world(Behaviour::default());
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        w.db.add_user_identifier(IdentifierKind::Email, "c@work.example").unwrap();
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
+        config.sending.as_mut().unwrap().from_address = "c@work.example".into();
+        w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
+        checked(&w);
+        let run = tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap();
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        let stopped = only_entry(&w.db);
+        assert_eq!((stopped.status, stopped.error.as_deref()), (SendStatus::Canceled, Some(FROM_CHANGED)));
+    }
+
+    #[test]
+    fn pressing_send_on_a_reply_held_to_go_by_itself_says_so_and_leaves_it() {
+        let w = world(Behaviour::default());
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        let req = sending::SendRequest {
+            draft_id: w.draft.id.clone(),
+            text: "yes, the river place".into(),
+            source_id: w.mailbox.clone(),
+            to: vec!["ada@example.com".into()],
+            cc: vec![],
+            subject: "Re: Lunch".into(),
+        };
+        let e = sending::send_reply(&w.db, &credentials(), &req).unwrap_err();
+        assert!(matches!(e, SendError::Db(DbError::Invalid(ref m)) if m == sending::HELD), "{e}");
+        assert_eq!(only_entry(&w.db).status, SendStatus::Held, "the held one is untouched");
+    }
+
+    #[test]
+    fn a_reply_by_itself_that_may_have_gone_is_counted_apart() {
+        let w = world(Behaviour { drop_after_data: true, ..Behaviour::default() });
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        checked(&w);
+        let run = tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap();
+        assert_eq!((run.sent, run.failed, run.unsure), (0, 0, 1));
+        assert!(run.changed_anything());
+        assert_eq!(only_entry(&w.db).status, SendStatus::Unsure);
     }
 
     #[test]
@@ -904,14 +1086,15 @@ mod tests {
     #[test]
     fn a_backlog_from_before_it_was_turned_on_is_left_for_the_user() {
         let w = world(Behaviour::default());
-        let on = Rules { enabled_at: Some("2026-06-01T00:00:00.000Z".into()), ..rules(&w.db).unwrap() };
+        // Turned on after Ada's question came in.
+        let on = Rules { enabled_at: Some(fmt_rfc3339(at(-1))), ..rules(&w.db).unwrap() };
         w.db.set_setting(SETTING, &on).unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
         // Turning it off and on again moves the start to now.
         set_rules(&w.db, Rules { enabled: false, ..rules(&w.db).unwrap() }).unwrap();
         assert_eq!(rules(&w.db).unwrap().enabled_at, None);
         let again = set_rules(&w.db, Rules { enabled: true, ..rules(&w.db).unwrap() }).unwrap();
-        assert!(again.enabled_at.is_some_and(|t| t.as_str() > "2026-06-01"));
+        assert!(again.enabled_at.is_some_and(|t| Some(t) > on.enabled_at));
     }
 
     #[test]
@@ -958,6 +1141,16 @@ mod tests {
         set_rules(&w.db, Rules { daily_limit: 0, ..rules(&w.db).unwrap() }).unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
         assert!(w.db.recent_outgoing(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_reply_held_a_day_still_goes_when_its_hold_ends() {
+        let w = world(Behaviour::default());
+        set_rules(&w.db, Rules { hold_minutes: MAX_HOLD_MINUTES, ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1);
+        checked(&w);
+        let run = tick(&w.db, &credentials(), at(MAX_HOLD_MINUTES)).unwrap();
+        assert_eq!((run.sent, run.stopped), (1, 0), "read a day before it went, and not a backlog for that");
     }
 
     #[test]

@@ -45,6 +45,8 @@ export const AutoReplyRun = z.object({
   sent: z.number().int(),
   stopped: z.number().int(),
   failed: z.number().int(),
+  /** Gone or not, the connection lost as it went (0.10.0-alpha.44). */
+  unsure: z.number().int().optional(),
 });
 export type AutoReplyRun = z.infer<typeof AutoReplyRun>;
 

@@ -87,10 +87,10 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
                 queue_check(state, source_id);
             }
             if run.changed_anything() {
-                tracing::info!(target: "autoreply", held = run.held, sent = run.sent, stopped = run.stopped, failed = run.failed, "replied by itself");
+                tracing::info!(target: "autoreply", held = run.held, sent = run.sent, stopped = run.stopped, failed = run.failed, unsure = run.unsure, "replied by itself");
                 let _ = app.emit("sending://changed", &run);
-                let hold = autoreply::rules(&state.db).map(|r| r.hold_minutes).unwrap_or_default();
-                for (title, body) in crate::background::replied_by_itself(&run, hold) {
+                let rules = autoreply::rules(&state.db).unwrap_or_default();
+                for (title, body) in crate::background::replied_by_itself(&run, &rules) {
                     crate::background::tell(app, &title, &body);
                 }
             }
@@ -100,15 +100,17 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
     }
 }
 
-/// Ask for a mailbox to be checked, unless one is already queued or running,
-/// or the mailbox is failing (that waits for the user).
+/// Ask for a mailbox to be checked, unless one is already queued or the
+/// mailbox is failing (that waits for the user). One running doesn't stop
+/// it: mail that arrived after that check began isn't in what it reads.
 pub(crate) fn queue_check(state: &SharedState, source_id: &str) {
     use mimic_core::sources::imap;
     let failing = state.db.get_source(source_id).ok().flatten().is_none_or(|s| s.status == "failed");
-    let queued = state
-        .db
-        .list_jobs(500, true)
-        .map(|jobs| jobs.iter().any(|j| j.kind == imap::JOB_KIND && j.payload["sourceId"].as_str() == Some(source_id)));
+    let queued = state.db.list_jobs(500, true).map(|jobs| {
+        jobs.iter().any(|j| {
+            j.kind == imap::JOB_KIND && j.status == "queued" && j.payload["sourceId"].as_str() == Some(source_id)
+        })
+    });
     if failing || !matches!(queued, Ok(false)) {
         return;
     }
