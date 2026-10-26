@@ -170,6 +170,37 @@ pub fn new_message_id(from: &str) -> String {
     format!("{}@{domain}", uuid::Uuid::new_v4().simple())
 }
 
+/// What marks a reply Mimic sent by itself, in its Message-ID and nowhere
+/// else, so Mimic on another of the user's computers knows it when it reads
+/// it back from the Sent folder (0.10.0-alpha.56): the random part, a dot,
+/// and the first 12 hex digits of a digest of this and the random part. It
+/// names nothing; a vacation responder's reply, which also says it was sent
+/// automatically, doesn't carry it.
+const OWN_MARK: &str = "mimic: sent on its own\n";
+
+fn own_tag(random: &str) -> String {
+    crate::ids::sha256_hex(format!("{OWN_MARK}{random}").as_bytes())[..12].to_string()
+}
+
+/// The Message-ID of a reply sent by itself: `new_message_id`'s, with the
+/// mark `is_sent_on_its_own` reads.
+pub fn new_own_message_id(from: &str) -> String {
+    let id = new_message_id(from);
+    match id.split_once('@') {
+        Some((random, domain)) => format!("{random}.{}@{domain}", own_tag(random)),
+        None => id,
+    }
+}
+
+/// Whether a Message-ID (with or without its angle brackets) is one
+/// `new_own_message_id` made.
+pub fn is_sent_on_its_own(message_id: &str) -> bool {
+    let id = message_id.trim().trim_matches(['<', '>']);
+    let Some((local, _)) = id.split_once('@') else { return false };
+    let Some((random, tag)) = local.split_once('.') else { return false };
+    random.len() == 32 && random.bytes().all(|b| b.is_ascii_hexdigit()) && tag == own_tag(random)
+}
+
 /// The subject of a reply: the original's, with `Re: ` before it unless it
 /// already says it is a reply (in English, German, the Nordic languages or
 /// Dutch).
@@ -534,5 +565,21 @@ mod tests {
         assert!(a.ends_with("@example.com") && is_message_id(&a), "{a}");
         assert_ne!(a, new_message_id("c@example.com"));
         assert!(new_message_id("not an address").ends_with("@localhost"));
+    }
+
+    #[test]
+    fn a_reply_sent_by_itself_is_known_by_its_message_id_alone() {
+        let own = new_own_message_id("c@Example.com");
+        assert!(own.ends_with("@example.com") && is_message_id(&own), "{own}");
+        assert!(is_sent_on_its_own(&own));
+        assert!(is_sent_on_its_own(&format!("<{own}>")), "as a header writes it");
+        assert_ne!(own, new_own_message_id("c@example.com"));
+        // One the user sent, and one whose mark doesn't match what it marks.
+        assert!(!is_sent_on_its_own(&new_message_id("c@example.com")));
+        let (random, rest) = own.split_once('.').unwrap();
+        let other = format!("{}{}.{rest}", &random[..31], if random.ends_with('0') { '1' } else { '0' });
+        assert!(!is_sent_on_its_own(&other), "{other}");
+        assert!(!is_sent_on_its_own("CAFxyz.abc@mail.gmail.com"));
+        assert!(!is_sent_on_its_own("no at sign"));
     }
 }

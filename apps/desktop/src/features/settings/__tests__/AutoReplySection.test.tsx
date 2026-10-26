@@ -79,6 +79,7 @@ describe("replying by myself", () => {
       screen.getByText(/a gap left to fill\s+in, a link they didn.t send/),
     ).toBeInTheDocument();
     expect(screen.getByText(/You can rehearse it first/)).toBeInTheDocument();
+    expect(screen.getByText(/from me on your other computer, too/)).toBeInTheDocument();
     fireEvent.click(within(confirm).getByRole("button", { name: "Turn it on" }));
     await waitFor(() =>
       expect(native.setAutoReply).toHaveBeenCalledWith({ ...off, enabled: true, rehearse: false }),

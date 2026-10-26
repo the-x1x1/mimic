@@ -34,13 +34,13 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Duration, Local, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::db::{Db, DbError, Draft, IdentifierInput, IdentifierKind, NewOutgoing, SendHow};
+use crate::db::{Db, DbError, Draft, IdentifierInput, IdentifierKind, Message, NewOutgoing, SendHow};
 use crate::ids::fmt_rfc3339;
 use crate::sending::{self, SendError};
-use crate::sources::imap::{Credentials, ImapSourceConfig};
+use crate::sources::imap::{Credentials, ImapError, ImapSourceConfig};
 use crate::sources::outgoing;
 
 /// Where the rules are kept.
@@ -83,6 +83,17 @@ pub const OLD: &str = "I read it more than a day ago, or long after it was sent,
 pub const LIST: &str = "It came through a mailing list, where a reply goes to everyone on it, so it waits for you.";
 /// It came with something a reply can't have read (0.10.0-alpha.53).
 pub const ATTACHED: &str = "It came with an attachment or an invitation, which I can't read, so it waits for you.";
+/// A reply to it is already in the Sent folder (0.10.0-alpha.56): from Mimic
+/// on another computer, or the user, since the last check read it.
+pub const ALREADY_IN_SENT: &str = "A reply to it is already in your Sent folder, so this one didn't go.";
+/// The Sent folder couldn't be read for a reply already there: the server
+/// said no to it, or it stayed out of reach `SENT_PATIENCE_MINUTES` past the
+/// reply's time (0.10.0-alpha.56).
+pub const SENT_UNKNOWN: &str =
+    "I couldn't look in your Sent folder for a reply already there, so this one didn't go. It waits for you.";
+/// Mail without a Message-ID: a reply couldn't say what it answers, so it
+/// wouldn't thread, nor be found in the Sent folder on another computer.
+pub const NO_MESSAGE_ID: &str = "It came without the ID a reply is linked to it by, so it waits for you.";
 /// Read before Mimic looked for attachments: whether it has one isn't known.
 pub const NOT_LOOKED_AT: &str = "I read it before I looked for attachments, so it waits for you.";
 /// What a reply says, read before it goes by itself (0.10.0-alpha.49): a
@@ -384,6 +395,12 @@ fn refusal(
         Some(true) => return Ok(Some(ATTACHED)),
         None => return Ok(Some(NOT_LOOKED_AT)),
     }
+    // A reply says what it answers by its Message-ID, which is also how one
+    // sent from another computer is found (0.10.0-alpha.56); mail read
+    // without one has `sha-…` in its place.
+    if !outgoing::is_message_id(&incoming.external_id) {
+        return Ok(Some(NO_MESSAGE_ID));
+    }
     if let Some(why) = unfinished(&draft.generated_text, &incoming.body) {
         return Ok(Some(why));
     }
@@ -582,7 +599,8 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
             cc: Vec::new(),
             subject: envelope.subject.clone(),
             body: sending::signed(&draft.generated_text, config.signature()),
-            message_id: outgoing::new_message_id(&account.from_address),
+            // Marked, so Mimic on another computer knows it (alpha.56).
+            message_id: outgoing::new_own_message_id(&account.from_address),
             how: SendHow::Autonomous,
             // Held for the while the user chose, then until the hours they
             // allow, if those have ended for the day: as they are now.
@@ -613,6 +631,74 @@ fn released(entry: &crate::db::OutboxEntry) -> bool {
 /// Send every held reply whose time has come and which the rules still
 /// allow; stop, with the reason, any they no longer do.
 pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Result<Run, SendError> {
+    send_due_with(db, credentials, now, &reply_in_sent(credentials))
+}
+
+/// How long past its time a reply waits for its Sent folder to be read
+/// before it is left for the user.
+pub const SENT_PATIENCE_MINUTES: i64 = 30;
+/// How many days before the message it answers the Sent folder is read
+/// from: a reply is later than what it answers, and a server's day can be
+/// a day off from ours.
+const SENT_LOOK_BACK_DAYS: i64 = 3;
+
+/// Why the Sent folder couldn't be read for a reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SentUnknown {
+    /// The server said no — to the folder or to the asking — and would again.
+    Refused(String),
+    /// Anything else: offline, a timeout, a sign-in turned down. It may be
+    /// read later.
+    Failed(String),
+}
+
+/// Whether a reply to a message (its Message-ID) is already in a mailbox's
+/// Sent folder, among what it has had since the date given.
+pub type SentCheck<'a> = dyn Fn(&ImapSourceConfig, &str, &str, NaiveDate) -> Result<bool, SentUnknown> + 'a;
+
+/// The mailbox's own Sent folder, asked over IMAP (`imap::reply_in_folder`)
+/// with its own credential: nothing to ask, and so nothing found, without a
+/// Sent folder. A token the server turned down is forgotten, as a check
+/// forgets it.
+pub fn reply_in_sent(
+    credentials: &Credentials,
+) -> impl Fn(&ImapSourceConfig, &str, &str, NaiveDate) -> Result<bool, SentUnknown> + '_ {
+    move |config, source_id, message_id, since| {
+        let Some(folder) = config.sent_folder.as_deref() else { return Ok(false) };
+        let credential = credentials.credential(config.account.auth, source_id).map_err(SentUnknown::Failed)?;
+        match crate::sources::imap::reply_in_folder(&config.account, &credential, folder, message_id, since) {
+            Ok(found) => Ok(found),
+            Err(ImapError::Refused(why)) => Err(SentUnknown::Refused(why)),
+            Err(e @ ImapError::SignIn(_)) => {
+                credentials.forget(source_id);
+                Err(SentUnknown::Failed(e.to_string()))
+            }
+            Err(e) => Err(SentUnknown::Failed(e.to_string())),
+        }
+    }
+}
+
+/// The day the Sent folder is read from for a reply to `incoming`:
+/// `SENT_LOOK_BACK_DAYS` before the earliest of when it says it was sent,
+/// when Mimic read it, and now.
+fn looked_for_since(db: &Db, incoming: &Message, now: DateTime<Utc>) -> Result<NaiveDate, DbError> {
+    let parse = |t: &str| DateTime::parse_from_rfc3339(t).ok().map(|d| d.with_timezone(&Utc));
+    let read = db.message_imported_at(&incoming.id)?;
+    let earliest = [incoming.sent_at.as_deref().and_then(parse), read.as_deref().and_then(parse), Some(now)]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(now);
+    Ok((earliest - Duration::days(SENT_LOOK_BACK_DAYS)).date_naive())
+}
+
+/// `send_due`, asking `in_sent` whether a reply is already in the Sent folder.
+pub fn send_due_with(
+    db: &Db,
+    credentials: &Credentials,
+    now: DateTime<Utc>,
+    in_sent: &SentCheck<'_>,
+) -> Result<Run, SendError> {
     let mut run = Run::default();
     let now_text = fmt_rfc3339(now);
     let due: Vec<_> = db.due_outgoing(&now_text)?.into_iter().filter(|e| e.how == SendHow::Autonomous).collect();
@@ -673,6 +759,33 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
         if !goes_to_them(db, draft.participant_id.as_deref(), &entry.to)? {
             run.stopped += usize::from(db.stop_held_outgoing(&entry.id, NOT_THEIRS)?);
             continue;
+        }
+        // A reply to it already in the Sent folder — from Mimic on another
+        // computer, or the user since that check read it — and this one
+        // doesn't go (0.10.0-alpha.56). Not known: it waits a while, unless
+        // the server said no, and is then left for the user.
+        if let Some(incoming) = sending::answered(db, &draft)? {
+            let since = looked_for_since(db, &incoming, now)?;
+            match in_sent(&config, &entry.source_id, &incoming.external_id, since) {
+                Ok(false) => {}
+                Ok(true) => {
+                    run.stopped += usize::from(db.stop_held_outgoing(&entry.id, ALREADY_IN_SENT)?);
+                    continue;
+                }
+                Err(unknown) => {
+                    let due_at = DateTime::parse_from_rfc3339(&entry.send_after).ok().map(|t| t.with_timezone(&Utc));
+                    let waited_long = due_at.is_none_or(|t| now - t > Duration::minutes(SENT_PATIENCE_MINUTES));
+                    let (why, refused) = match unknown {
+                        SentUnknown::Refused(why) => (why, true),
+                        SentUnknown::Failed(why) => (why, false),
+                    };
+                    tracing::warn!(target: "autoreply", error = %why, refused, "couldn't look in the Sent folder");
+                    if refused || waited_long {
+                        run.stopped += usize::from(db.stop_held_outgoing(&entry.id, SENT_UNKNOWN)?);
+                    }
+                    continue;
+                }
+            }
         }
         // Rehearsing: everything up to here, and no further.
         if rules.rehearse {
@@ -903,6 +1016,13 @@ mod tests {
 
     fn at(minutes: i64) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-10-26T09:00:00Z").unwrap().with_timezone(&Utc) + Duration::minutes(minutes)
+    }
+
+    /// Why the world's draft wouldn't be held now, at the tests' clock.
+    fn why_not(w: &World) -> Option<&'static str> {
+        let rules = rules(&w.db).unwrap();
+        let draft = w.db.get_draft(&w.draft.id).unwrap().unwrap();
+        refusal(&w.db, &rules, &draft, &waiting_now(&w.db).unwrap(), None, true, at(0)).unwrap()
     }
 
     fn only_entry(db: &Db) -> OutboxEntry {
@@ -1224,6 +1344,7 @@ mod tests {
                 [],
             )
             .unwrap();
+        assert_eq!(why_not(&w), Some(NOT_TO_YOU));
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
 
         // Only copied in: someone else was asked.
@@ -1236,7 +1357,8 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "{ONLY_COPIED}");
+        assert_eq!(why_not(&w), Some(ONLY_COPIED));
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
 
         // Found in the Sent folder: perhaps the user's own.
         let w = world(Behaviour::default());
@@ -1247,6 +1369,7 @@ mod tests {
                 [],
             )
             .unwrap();
+        assert_eq!(why_not(&w), Some(SENT_FOLDER));
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
     }
 
@@ -1393,6 +1516,74 @@ mod tests {
         checked(&w);
         let run = tick(&w.db, &credentials(), at(MAX_HOLD_MINUTES)).unwrap();
         assert_eq!((run.sent, run.stopped), (1, 0), "read a day before it went, and not a backlog for that");
+    }
+
+    #[test]
+    fn a_reply_already_in_the_sent_folder_stops_this_one_and_one_not_known_waits_a_while() {
+        let due = DEFAULT_HOLD_MINUTES;
+        let w = world(Behaviour::default());
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1);
+        checked(&w);
+        // The Sent folder couldn't be read: it waits, to be asked again.
+        let asked = std::cell::RefCell::new(Vec::new());
+        let offline = |_: &ImapSourceConfig, source: &str, id: &str, since: NaiveDate| -> Result<bool, SentUnknown> {
+            asked.borrow_mut().push((source.to_string(), id.to_string(), since));
+            Err(SentUnknown::Failed("offline".into()))
+        };
+        let run = send_due_with(&w.db, &credentials(), at(due), &offline).unwrap();
+        assert_eq!((run.sent, run.stopped), (0, 0));
+        assert_eq!(only_entry(&w.db).status, SendStatus::Held);
+        // By what it answers, read from three days before Ada sent it.
+        let from = (at(-10) - Duration::days(3)).date_naive();
+        assert_eq!(asked.borrow().as_slice(), [(w.mailbox.clone(), "l3@x.example".to_string(), from)]);
+        // Still out of reach past the while it is given: left for the user.
+        let run = send_due_with(&w.db, &credentials(), at(due + SENT_PATIENCE_MINUTES + 1), &offline).unwrap();
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        let entry = only_entry(&w.db);
+        assert_eq!((entry.status, entry.error.as_deref()), (SendStatus::Canceled, Some(SENT_UNKNOWN)));
+        assert!(w.seen.try_recv().is_err(), "nothing was said to the server");
+
+        // The server says no to being asked: left for the user at once.
+        let w = world(Behaviour::default());
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        checked(&w);
+        let refused = |_: &ImapSourceConfig, _: &str, _: &str, _: NaiveDate| -> Result<bool, SentUnknown> {
+            Err(SentUnknown::Refused("BAD unknown command".into()))
+        };
+        assert_eq!(send_due_with(&w.db, &credentials(), at(due), &refused).unwrap().stopped, 1);
+        assert_eq!(only_entry(&w.db).error.as_deref(), Some(SENT_UNKNOWN));
+
+        // A reply is there: Mimic on another computer, or the user, sent one.
+        let w = world(Behaviour::default());
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        checked(&w);
+        let found = |_: &ImapSourceConfig, _: &str, _: &str, _: NaiveDate| -> Result<bool, SentUnknown> { Ok(true) };
+        let run = send_due_with(&w.db, &credentials(), at(due), &found).unwrap();
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        let entry = only_entry(&w.db);
+        assert_eq!((entry.status, entry.error.as_deref()), (SendStatus::Canceled, Some(ALREADY_IN_SENT)));
+        assert!(w.seen.try_recv().is_err(), "nothing was said to the server");
+        assert_eq!(tick(&w.db, &credentials(), at(30)).unwrap(), Run::default(), "and it isn't held again");
+    }
+
+    #[test]
+    fn mail_without_a_message_id_is_left_for_the_user() {
+        let w = world(Behaviour::default());
+        // As mail with none is stored: an id made from what it says.
+        w.db.conn()
+            .execute("UPDATE messages SET external_id = 'sha-0123456789abcdef' WHERE external_id = 'l3@x.example'", [])
+            .unwrap();
+        assert_eq!(why_not(&w), Some(NO_MESSAGE_ID));
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+    }
+
+    #[test]
+    fn a_reply_sent_by_itself_carries_the_mark_another_computer_reads() {
+        let w = world(Behaviour::default());
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        let held = only_entry(&w.db);
+        assert!(outgoing::is_sent_on_its_own(&held.message_id), "{}", held.message_id);
+        assert!(held.message_id.ends_with("@example.com"), "at the sender's domain");
     }
 
     #[test]
