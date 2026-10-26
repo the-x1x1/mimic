@@ -47,6 +47,18 @@ describe("answering a message from anywhere", () => {
     expect(screen.getByText(/written to whoever the window.s title names/)).toBeInTheDocument();
   });
 
+  it("presses Enter after pasting only once that is turned on", async () => {
+    native.setSetting.mockResolvedValue({});
+    renderIt();
+    const box = await screen.findByRole("checkbox", { name: /Paste it there and send/ });
+    expect(box).not.toBeChecked();
+    expect(screen.getByText(/only if it.s still in front/)).toBeInTheDocument();
+    fireEvent.click(box);
+    await waitFor(() =>
+      expect(native.setSetting).toHaveBeenCalledWith("anywhere.pressEnter", true),
+    );
+  });
+
   it("says so when another app already has the shortcut", async () => {
     native.setSetting.mockRejectedValue(
       new Error("Another app is already using Ctrl+Shift+Alt+R. Pick another, or turn it off."),

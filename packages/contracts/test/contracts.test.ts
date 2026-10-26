@@ -755,6 +755,7 @@ describe("settings and updater contracts", () => {
       "app.keepRunning": true,
       "notify.enabled": true,
       "anywhere.shortcut": "",
+      "anywhere.pressEnter": false,
       "send.undoSeconds": 5,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();

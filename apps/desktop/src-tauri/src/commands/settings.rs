@@ -37,6 +37,8 @@ pub fn defaults() -> Map<String, Value> {
     m.insert(crate::background::NOTIFY.into(), json!(true));
     // The shortcut that opens Write on what the clipboard holds; empty is off.
     m.insert(crate::anywhere::SETTING.into(), json!(""));
+    // Paste it there and send: Enter after the paste (0.10.0-alpha.58). Off.
+    m.insert(crate::anywhere::PRESS_ENTER.into(), json!(false));
     // Seconds a reply the user sent waits, to be taken back (0.10.0-alpha.40).
     m.insert(UNDO_SECONDS.into(), json!(5));
     m
@@ -165,5 +167,13 @@ mod tests {
         for bad in [json!(-1), json!(31), json!(2.5), json!("5")] {
             assert!(check(UNDO_SECONDS, &bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn pressing_enter_after_pasting_is_off_until_turned_on() {
+        let key = crate::anywhere::PRESS_ENTER;
+        assert_eq!(defaults().get(key), Some(&json!(false)));
+        assert!(check(key, &json!(true)).is_ok());
+        assert!(check(key, &json!("yes")).is_err());
     }
 }

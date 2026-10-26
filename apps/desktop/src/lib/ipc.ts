@@ -202,7 +202,8 @@ export const ipc = {
   /** Get out of the way so what was copied can be pasted: true when hidden, false when minimised. */
   stepAside: () => call("step_aside", z_bool),
   /** Paste a reply where the message came from: null when pasted, else why it is only copied. */
-  pasteBack: (text: string) => call("paste_back", z_string.nullable(), { text }),
+  pasteBack: (text: string, send = false) =>
+    call("paste_back", z_string.nullable(), send ? { text, send } : { text }),
 
   connectors: () => call("list_connectors", ConnectorInfo.array()),
   sources: () => call("list_sources", Source.array()),

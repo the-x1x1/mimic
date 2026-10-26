@@ -22,11 +22,25 @@ pub async fn step_aside(app: tauri::AppHandle) -> CommandResult<bool> {
 
 /// Put a reply in the window the message came from (0.10.0-alpha.46,
 /// `anywhere::paste_back`): none when it was pasted; otherwise why it was
-/// only copied. Nothing is sent: the user sends it there.
+/// only copied. Nothing is sent, unless `send` and the user turned on
+/// pressing Enter after pasting (0.10.0-alpha.58); `send` with it off is
+/// refused before anything is done.
 #[tauri::command]
-pub async fn paste_back(app: tauri::AppHandle, text: String) -> CommandResult<Option<String>> {
+pub async fn paste_back(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::SharedState>,
+    text: String,
+    send: Option<bool>,
+) -> CommandResult<Option<String>> {
+    let send = send.unwrap_or(false);
+    if send && state.db.get_setting::<bool>(crate::anywhere::PRESS_ENTER)? != Some(true) {
+        return Err(CommandError::new(
+            "off",
+            "Pressing Enter after pasting is off. Turn it on under Settings, in Answering a message from anywhere.",
+        ));
+    }
     let pasting = app.clone();
-    tauri::async_runtime::spawn_blocking(move || crate::anywhere::paste_back(&pasting, &text))
+    tauri::async_runtime::spawn_blocking(move || crate::anywhere::paste_back(&pasting, &text, send))
         .await
         .map_err(|e| CommandError::new("window", format!("I couldn't put it there: {e}")))?
         .map(|why| why.map(str::to_string))

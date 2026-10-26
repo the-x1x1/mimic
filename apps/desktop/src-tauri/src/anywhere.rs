@@ -14,7 +14,11 @@
 //! window the user was in when they pressed the shortcut is remembered, and
 //! **Paste it there** copies the reply, brings that window back and pastes
 //! into it — only that window, only once it is in front. Nothing is sent:
-//! the user sends it there, as they would have.
+//! the user sends it there, as they would have — unless they turned on
+//! pressing Enter after pasting (0.10.0-alpha.58, `PRESS_ENTER`, off by
+//! default), for chat apps where Enter sends, and press **Paste it there and
+//! send**: then Enter is pressed too, once, in that window, only if it is
+//! still the one in front.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::{Duration, Instant};
@@ -25,6 +29,10 @@ use crate::SharedState;
 
 /// The setting: one of `CHOICES`' names, empty for off.
 pub const SETTING: &str = "anywhere.shortcut";
+
+/// Whether **Paste it there and send** is offered: Enter pressed after the
+/// paste, which sends in most chat apps (0.10.0-alpha.58). Off by default.
+pub const PRESS_ENTER: &str = "anywhere.pressEnter";
 
 /// The shortcuts offered, as the screen names them and as the plugin reads
 /// them. Each takes three modifiers, so none is one an app is likely to use
@@ -73,6 +81,11 @@ pub fn listen(app: &AppHandle, choice: &str) -> Result<(), String> {
 /// Windows names it; zero for none, or for one of Mimic's own.
 static CAME_FROM: AtomicIsize = AtomicIsize::new(0);
 
+/// That window's title then, whole: before Enter is pressed for the user
+/// (0.10.0-alpha.58), the window must still say the same, so a chat app
+/// switched to another conversation meanwhile isn't sent to.
+static CAME_FROM_TITLE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 /// The longest window title passed on.
 const MOST_TITLE: usize = 200;
 
@@ -84,8 +97,9 @@ pub fn pressed(app: &AppHandle) {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     let from = window::front_elsewhere();
     CAME_FROM.store(from, Ordering::SeqCst);
-    let title: String = if from == 0 { String::new() } else { window::title(from) };
-    let title: String = title.trim().chars().take(MOST_TITLE).collect();
+    let whole: String = if from == 0 { String::new() } else { window::title(from) };
+    *CAME_FROM_TITLE.lock().unwrap_or_else(|p| p.into_inner()) = whole.clone();
+    let title: String = whole.trim().chars().take(MOST_TITLE).collect();
     let text = app.clipboard().read_text().unwrap_or_default();
     let text: String = text.trim().chars().take(MOST).collect();
     crate::bring_to_front(app);
@@ -98,25 +112,72 @@ pub const WINDOW_GONE: &str = "The window the message came from has closed, so t
 pub const NOT_IN_FRONT: &str =
     "I couldn't bring the window the message came from to the front, and I won't paste into another. The reply is copied for you to paste.";
 pub const NOT_PASTED: &str = "Windows didn't let me paste, so the reply is copied for you to paste.";
+pub const MOVED_ON: &str =
+    "That window shows something else now than when you copied the message, so I didn't paste or send. The reply is copied for you to paste.";
+pub const NOT_SENT: &str =
+    "It's pasted there, but I didn't press Enter: that window wasn't in front any more, or Windows didn't let me. Send it there yourself.";
 
 /// Ctrl+V, as Windows' virtual keys pressed and let go: (key, up).
 const VK_CONTROL: u16 = 0x11;
 const VK_V: u16 = 0x56;
 const PASTE: [(u16, bool); 4] = [(VK_CONTROL, false), (VK_V, false), (VK_V, true), (VK_CONTROL, true)];
+/// Enter, alone: no Shift, which most chat apps read as a new line.
+const VK_RETURN: u16 = 0x0D;
+const ENTER: [(u16, bool); 2] = [(VK_RETURN, false), (VK_RETURN, true)];
+/// How long a paste has to land before Enter.
+const ENTER_AFTER: Duration = Duration::from_millis(250);
 
 /// Only into the window the message came from, once it is the one in front.
 fn may_paste(target: isize, front: isize) -> bool {
     target != 0 && target == front
 }
 
+/// Whether a window's title still says what it did: the same, but for an
+/// unread count — "(2) …", "[3]" — or a marker that comes and goes ("•",
+/// "*"), which change as messages arrive.
+fn same_place(then: &str, now: &str) -> bool {
+    fn calm(title: &str) -> String {
+        let mut out = String::new();
+        let mut chars = title.chars();
+        while let Some(c) = chars.next() {
+            let close = match c {
+                '(' => ')',
+                '[' => ']',
+                '•' | '*' => continue,
+                _ => {
+                    out.push(c);
+                    continue;
+                }
+            };
+            // A bracket holding only a number is a count: left out.
+            let rest: String = chars.clone().take_while(|&d| d != close).collect();
+            let n = rest.chars().count();
+            if n > 0 && rest.chars().all(|d| d.is_ascii_digit() || d == '+') && chars.clone().nth(n) == Some(close) {
+                // The count and its closing bracket.
+                chars.nth(n);
+            } else {
+                out.push(c);
+            }
+        }
+        out.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+    calm(then) == calm(now)
+}
+
+fn came_from_title() -> String {
+    CAME_FROM_TITLE.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
 /// How long the window the message came from has to come to the front.
 const COMING_BACK: Duration = Duration::from_secs(1);
 
 /// Put a reply where the message came from: copied, that window brought
-/// back, Mimic out of the way, and Ctrl+V pressed in it. `None` when it was
-/// pasted; otherwise why it is only copied. Nothing is sent: the user sends
-/// it there. Mimic steps aside either way.
-pub fn paste_back(app: &AppHandle, text: &str) -> Result<Option<&'static str>, String> {
+/// back, Mimic out of the way, and Ctrl+V pressed in it — and, when `send`
+/// (which the command allows only with `PRESS_ENTER` on), Enter after it, if
+/// that window is still in front. `None` when it was all done; otherwise why
+/// it is only copied, or only pasted (`NOT_SENT`). Mimic steps aside either
+/// way.
+pub fn paste_back(app: &AppHandle, text: &str, send: bool) -> Result<Option<&'static str>, String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     app.clipboard().write_text(text.to_string()).map_err(|e| e.to_string())?;
     let target = CAME_FROM.load(Ordering::SeqCst);
@@ -130,6 +191,12 @@ pub fn paste_back(app: &AppHandle, text: &str) -> Result<Option<&'static str>, S
     if let Some(why) = unknown {
         crate::background::step_aside(app).map_err(|e| e.to_string())?;
         return Ok(Some(why));
+    }
+    // To be sent: only to what that window showed when the message was
+    // copied — not, say, another conversation in the same chat app.
+    if send && !same_place(&came_from_title(), &window::title(target)) {
+        crate::background::step_aside(app).map_err(|e| e.to_string())?;
+        return Ok(Some(MOVED_ON));
     }
     // Asked while Mimic is in front, which Windows allows; then out of the way.
     window::bring(target);
@@ -146,7 +213,19 @@ pub fn paste_back(app: &AppHandle, text: &str) -> Result<Option<&'static str>, S
     if !may_paste(target, window::front()) {
         return Ok(Some(NOT_IN_FRONT));
     }
-    Ok(if window::press(&PASTE) { None } else { Some(NOT_PASTED) })
+    if !window::press(&PASTE) {
+        return Ok(Some(NOT_PASTED));
+    }
+    if !send {
+        return Ok(None);
+    }
+    // The paste a moment to land, and a last look: Enter goes only to the
+    // window the message came from.
+    std::thread::sleep(ENTER_AFTER);
+    if !may_paste(target, window::front()) || !same_place(&came_from_title(), &window::title(target)) {
+        return Ok(Some(NOT_SENT));
+    }
+    Ok(if window::press(&ENTER) { None } else { Some(NOT_SENT) })
 }
 
 /// Windows' windows, by their handles as numbers.
@@ -279,6 +358,19 @@ mod tests {
         assert!(!may_paste(42, 7), "not into whatever else is in front");
         assert!(!may_paste(0, 0), "not when it came from nowhere known");
         assert_eq!(PASTE, [(0x11, false), (0x56, false), (0x56, true), (0x11, true)], "Ctrl+V, let go in order");
+        assert_eq!(ENTER, [(0x0D, false), (0x0D, true)], "Enter alone, without Shift");
+    }
+
+    #[test]
+    fn a_window_still_shows_the_same_place_but_for_a_count_that_changed() {
+        assert!(same_place("Ada Lovelace | Microsoft Teams", "Ada Lovelace | Microsoft Teams"));
+        assert!(same_place("(2) WhatsApp", "WhatsApp"));
+        assert!(same_place("Slack | #general | Acme", "Slack | #general | Acme [3]"));
+        assert!(same_place("• Discord | @ada", "Discord | @ada"));
+        assert!(!same_place("#general - Acme - Slack", "#random - Acme - Slack"));
+        assert!(!same_place("Ada Lovelace | Messenger", "Charles Babbage | Messenger"));
+        assert!(same_place("Notes (draft)", "Notes (draft)"), "words in brackets are kept");
+        assert!(!same_place("Notes (draft)", "Notes"));
     }
 
     #[test]
