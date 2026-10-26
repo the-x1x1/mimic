@@ -2,6 +2,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { contractFixture, importFixture } from "@mimic/test-fixtures";
 import {
+  OutboxEntry,
+  ReplyEnvelope,
+  describeOutboxEntry,
+  listAddresses,
+  sendMayHaveGone,
   ADJUSTMENT_LABELS,
   Adjustment,
   PersonConversations,
@@ -219,6 +224,18 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(report.messages).toBeGreaterThan(0);
   });
 
+  it("parses who a reply goes to before it goes, and what was sent", () => {
+    const envelope = ReplyEnvelope.parse(read(contractFixture("reply_envelope.json")));
+    expect(envelope.whyNot).toBeNull();
+    expect(envelope.to).toEqual(["ada.replies@example.com"]);
+    expect(envelope.mailboxes[0]?.fromAddress).toBe("c@example.com");
+    const sent = OutboxEntry.array().parse(read(contractFixture("outbox.json")));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.status).toBe("sent");
+    expect(sent[0]?.how).toBe("approved");
+    expect(sent[0]?.error).toBeNull();
+  });
+
   it("rejects a payload that is missing a field the UI reads", () => {
     const overview = read(contractFixture("voice_overview.json"));
     delete overview.messagesUntilMeasurable;
@@ -308,6 +325,7 @@ describe("deletion is described in consequences, not counts", () => {
     profilesInvalidated: 3,
     conversationsKept: 1,
     evaluations: 1,
+    sent: 2,
   };
 
   it("warns that the user's own messages go too", () => {
@@ -315,6 +333,8 @@ describe("deletion is described in consequences, not counts", () => {
     expect(lines.some((l) => l.includes("20 of those are messages you wrote"))).toBe(true);
     expect(lines.some((l) => l.includes("measurement of how close my drafts come"))).toBe(true);
     expect(lines.some((l) => l.includes("group conversations will be kept"))).toBe(true);
+    expect(lines.some((l) => l.includes("2 replies I sent will be removed"))).toBe(true);
+    expect(lines.some((l) => l.includes("can't be taken back"))).toBe(true);
     expect(lines[lines.length - 1]).toBe("This cannot be undone.");
   });
 
@@ -327,11 +347,13 @@ describe("deletion is described in consequences, not counts", () => {
       conversationsKept: 0,
       profilesInvalidated: 0,
       evaluations: 0,
+      sent: 0,
     };
     const lines = describeDeletion(empty);
     expect(lines.some((l) => l.includes("messages you wrote"))).toBe(false);
     expect(lines.some((l) => l.includes("measurement"))).toBe(false);
     expect(lines.some((l) => l.includes("drafts"))).toBe(false);
+    expect(lines.some((l) => l.includes("I sent"))).toBe(false);
   });
 });
 
@@ -1259,5 +1281,53 @@ describe("a Discord package, before it is imported", () => {
     expect(yoursAs(account, [id("handle", "discord:90001")])).toBeNull();
     const both = [id("email", "c@example.com"), id("account_id", "discord:90001")];
     expect(yoursAs(account, both)).toEqual(id("account_id", "discord:90001"));
+  });
+});
+
+describe("what was sent says where it went and whether it got there", () => {
+  const entry = (over: Partial<OutboxEntry> = {}): OutboxEntry => ({
+    id: "o1",
+    draftId: "d1",
+    sourceId: "s1",
+    conversationId: "c1",
+    answersMessageId: "m1",
+    participantId: "p1",
+    fromAddress: "c@example.com",
+    to: ["ada@example.com"],
+    cc: [],
+    subject: "Re: Lunch",
+    body: "perfect, see you there",
+    messageId: "x@example.com",
+    how: "approved",
+    status: "sent",
+    sendAfter: "2026-10-26T09:00:00Z",
+    error: null,
+    createdAt: "2026-10-26T09:00:00Z",
+    updatedAt: "2026-10-26T09:00:01Z",
+    sentAt: "2026-10-26T09:00:01Z",
+    ...over,
+  });
+
+  it("names who it went to, and says when it went by itself", () => {
+    expect(describeOutboxEntry(entry())).toBe("Sent to ada@example.com.");
+    expect(describeOutboxEntry(entry({ how: "autonomous" }))).toBe(
+      "I sent this to ada@example.com by myself.",
+    );
+    expect(listAddresses(["a@x.io", "b@x.io", "c@x.io"])).toBe("a@x.io, b@x.io and c@x.io");
+  });
+
+  it("says why one didn't go, and that one waiting can still be stopped", () => {
+    expect(
+      describeOutboxEntry(entry({ status: "failed", error: "The mail server said no: 550" })),
+    ).toBe("Didn't go to ada@example.com: The mail server said no: 550");
+    expect(describeOutboxEntry(entry({ status: "held" }))).toMatch(/You can stop it/);
+    expect(describeOutboxEntry(entry({ status: "canceled" }))).toMatch(/^Stopped before it went/);
+    expect(describeOutboxEntry(entry({ status: "unsure" }))).toMatch(/Look in your Sent folder/);
+  });
+
+  it("treats only a send that may have gone as one not to repeat", () => {
+    expect(sendMayHaveGone("send_unsure")).toBe(true);
+    expect(sendMayHaveGone("send_failed")).toBe(false);
+    expect(sendMayHaveGone(undefined)).toBe(false);
   });
 });

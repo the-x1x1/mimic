@@ -88,6 +88,23 @@ impl From<mimic_core::engine::EngineError> for CommandError {
     }
 }
 
+impl From<mimic_core::sending::SendError> for CommandError {
+    /// `send_unsure` when the reply may have gone, so the screen says to look
+    /// in the Sent folder rather than offering to send it again.
+    fn from(e: mimic_core::sending::SendError) -> Self {
+        use mimic_core::sending::SendError;
+        if e.may_have_gone() {
+            return Self::new("send_unsure", e.to_string());
+        }
+        match e {
+            SendError::Db(d) => d.into(),
+            SendError::Smtp(s) => Self::new("send_failed", s.to_string()),
+            SendError::Message(m) => Self::new("invalid", m.to_string()),
+            SendError::Cannot(why) => Self::new("cannot_send", why),
+        }
+    }
+}
+
 impl From<std::io::Error> for CommandError {
     fn from(e: std::io::Error) -> Self {
         Self::new("io", e.to_string())

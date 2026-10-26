@@ -184,6 +184,9 @@ fn add_mailbox(
         sent_folder: probe.sent_folder,
         marks: Default::default(),
         last_checked_at: None,
+        // Nothing set by hand: its provider's usual server, when there is
+        // one (`sending_account`), until the user sets another.
+        sending: None,
     };
     let source = state.db.create_source(&mimic_core::db::NewSource {
         connector: imap::CONNECTOR.into(),

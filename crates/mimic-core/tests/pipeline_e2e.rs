@@ -947,3 +947,142 @@ fn a_discord_package_is_the_users_own_writing_and_nothing_waits() {
         .unwrap();
     assert_eq!(run_import(&by_email, &source.id).from_self, 5);
 }
+
+/// A mail server on this computer that takes one message and hands back what
+/// it was sent after `DATA`.
+fn one_message_server() -> (u16, std::sync::mpsc::Receiver<String>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut w = stream.try_clone().unwrap();
+        let mut r = BufReader::new(stream);
+        w.write_all(b"220 ready\r\n").unwrap();
+        let mut data = String::new();
+        loop {
+            let mut line = String::new();
+            if r.read_line(&mut line).unwrap_or(0) == 0 {
+                break;
+            }
+            let cmd = line.trim_end().to_ascii_uppercase();
+            let reply = if cmd.starts_with("EHLO") {
+                "250-ready\r\n250 AUTH PLAIN\r\n"
+            } else if cmd.starts_with("AUTH") {
+                "235 ok\r\n"
+            } else if cmd == "DATA" {
+                w.write_all(b"354 go ahead\r\n").unwrap();
+                loop {
+                    let mut l = String::new();
+                    if r.read_line(&mut l).unwrap_or(0) == 0 || l == ".\r\n" {
+                        break;
+                    }
+                    data.push_str(&l);
+                }
+                "250 queued\r\n"
+            } else if cmd == "QUIT" {
+                w.write_all(b"221 bye\r\n").unwrap();
+                break;
+            } else {
+                "250 ok\r\n"
+            };
+            w.write_all(reply.as_bytes()).unwrap();
+        }
+        let _ = tx.send(data);
+    });
+    (port, rx)
+}
+
+/// A reply sent from Mimic: where it goes, through what and under which
+/// subject is worked out before it goes (`reply_envelope.json`); it goes to
+/// where the sender asked for replies, threaded under their message; and once
+/// it has gone it is recorded (`outbox.json`) and the thread is answered.
+#[test]
+fn a_reply_sent_from_the_mailbox_answers_the_thread() {
+    let db = Db::open_in_memory().unwrap();
+    db.set_setting(mimic_core::db::WITHIN_DAYS_SETTING, &0).unwrap();
+    db.set_user_identity("C").unwrap();
+    db.add_user_identifier(IdentifierKind::Email, "c@example.com").unwrap();
+    let export = db
+        .create_source(&NewSource {
+            connector: "mbox".into(),
+            name: "Lunch".into(),
+            channel: "email".into(),
+            location: Some(fixture("import/waiting_for_a_reply.mbox").to_string_lossy().into()),
+            config: Value::Null,
+        })
+        .unwrap();
+    run_import(&db, &export.id);
+    let waiting = db.threads_awaiting_reply(10).unwrap();
+    assert_eq!(waiting.len(), 1);
+    let thread = &waiting[0];
+
+    let (port, received) = one_message_server();
+    let mailbox = db
+        .create_source(&NewSource {
+            connector: "imap".into(),
+            name: "c@example.com".into(),
+            channel: "email".into(),
+            location: None,
+            config: serde_json::json!({
+                "account": { "host": "127.0.0.1", "port": 1, "username": "c@example.com", "security": "plain" },
+                "sending": {
+                    "host": "127.0.0.1", "port": port, "security": "plain",
+                    "username": "c@example.com", "fromAddress": "c@example.com"
+                }
+            }),
+        })
+        .unwrap();
+    let provider = MockProvider::answering("perfect, see you there");
+    let draft = mimic_core::generation::compose(
+        &db,
+        &provider,
+        &ComposeRequest {
+            participant_id: thread.participant_id.clone(),
+            conversation_id: Some(thread.conversation.id.clone()),
+            channel: "email".into(),
+            incoming_message: Some(thread.last_message.clone()),
+            incoming_message_id: Some(thread.last_message_id.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let envelope = mimic_core::sending::envelope_for(&db, &draft.id).unwrap();
+    assert_eq!(envelope.why_not, None);
+    assert_eq!(envelope.mailbox.as_deref(), Some(mailbox.id.as_str()), "the one mailbox that can send");
+    assert_eq!(envelope.to, vec!["ada.replies@example.com".to_string()], "where Ada asked for replies to go");
+    assert_eq!(envelope.other_addresses, vec!["ada@example.com".to_string()]);
+    assert_eq!(envelope.subject, "Re: Lunch");
+    check_fixture("reply_envelope.json", &serde_json::to_value(&envelope).unwrap());
+
+    let credentials = mimic_core::sources::imap::Credentials::new(
+        std::sync::Arc::new(|_: &str| Some("app-pass".to_string())),
+        std::sync::Arc::new(|_: &str, _: &str| Ok(())),
+        mimic_core::sources::oauth::Provider::microsoft(),
+        None,
+    );
+    let sent = mimic_core::sending::send_reply(
+        &db,
+        &credentials,
+        &mimic_core::sending::SendRequest {
+            draft_id: draft.id.clone(),
+            text: draft.generated_text.clone(),
+            source_id: mailbox.id.clone(),
+            to: envelope.to.clone(),
+            subject: envelope.subject.clone(),
+        },
+    )
+    .unwrap();
+    let data = received.recv().unwrap();
+    assert!(data.contains("\r\nIn-Reply-To: <lunch-3@example.com>\r\n"), "{data}");
+    assert!(
+        data.contains("\r\nReferences: <lunch-1@example.com> <lunch-2@example.com> <lunch-3@example.com>\r\n"),
+        "{data}"
+    );
+    assert_eq!(sent.status, mimic_core::db::SendStatus::Sent);
+    assert_eq!(db.get_draft(&draft.id).unwrap().unwrap().outcome.as_deref(), Some("sent_unedited"));
+    assert_eq!(db.count_threads_awaiting_reply().unwrap(), 0, "Ada has her answer");
+    check_fixture("outbox.json", &serde_json::to_value(db.recent_outgoing(10).unwrap()).unwrap());
+}

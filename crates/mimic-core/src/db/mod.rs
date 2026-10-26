@@ -12,6 +12,7 @@ mod repo_evaluations;
 mod repo_identity;
 mod repo_jobs;
 mod repo_messages;
+mod repo_outbox;
 pub mod repo_people;
 mod repo_search;
 mod repo_situations;
@@ -35,6 +36,10 @@ pub use repo_identity::{
 };
 pub use repo_messages::{
     word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
+};
+pub use repo_outbox::{
+    NewOutgoing, OutboxEntry, SendHow, SendStatus, ALREADY_SENDING, DID_NOT_GO, INTERRUPTED, MAY_HAVE_GONE, NOT_UNSURE,
+    TOO_LATE,
 };
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
 pub use repo_search::{search_query, FoundMessage, SearchPage, SearchWho, SnippetPiece, COUNT_CAP as SEARCH_COUNT_CAP};

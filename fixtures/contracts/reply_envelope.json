@@ -1,0 +1,17 @@
+{
+  "draftId": "bdc6842e-1a23-4eab-bb16-dba2ae4579dd",
+  "mailboxes": [
+    {
+      "sourceId": "664b36cc-7983-4e83-9586-50e10845bae6",
+      "name": "c@example.com",
+      "fromAddress": "c@example.com",
+      "server": "127.0.0.1",
+      "whyNot": null
+    }
+  ],
+  "mailbox": "664b36cc-7983-4e83-9586-50e10845bae6",
+  "to": ["ada.replies@example.com"],
+  "otherAddresses": ["ada@example.com"],
+  "subject": "Re: Lunch",
+  "whyNot": null
+}

@@ -142,6 +142,19 @@ pub struct ImapSourceConfig {
     pub marks: BTreeMap<String, FolderMark>,
     #[serde(default)]
     pub last_checked_at: Option<String>,
+    /// How replies go out through this mailbox, as the user set it
+    /// (0.10.0-alpha.23). `None` for one connected before then, or never set:
+    /// `sending_account` falls back to its provider's known server.
+    #[serde(default)]
+    pub sending: Option<super::smtp::SmtpAccount>,
+}
+
+impl ImapSourceConfig {
+    /// Where replies through this mailbox go out: as the user set it, or the
+    /// server its provider is known to send from. `None` when neither.
+    pub fn sending_account(&self) -> Option<super::smtp::SmtpAccount> {
+        self.sending.clone().or_else(|| super::smtp::known_for(&self.account.host, &self.account.username))
+    }
 }
 
 /// The secret-store key a source's password lives under.
@@ -722,6 +735,14 @@ pub fn sync(
     // Every attempt is recorded, successful or not, so the schedule waits a
     // whole interval before the next one rather than retrying every minute.
     config.last_checked_at = Some(crate::ids::now_rfc3339());
+    // How replies go out may have been changed while this check ran; that is
+    // the user's, and is kept rather than written over with what was read at
+    // the start.
+    if let Some(latest) =
+        db.get_source(source_id)?.and_then(|s| serde_json::from_value::<ImapSourceConfig>(s.config).ok())
+    {
+        config.sending = latest.sending;
+    }
     db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
     match &result {
         Ok(_) => db.set_source_status(source_id, "imported", None)?,
@@ -1082,7 +1103,7 @@ impl Credentials {
                     }
                 }
                 let Some(client) = self.microsoft_client.as_deref() else {
-                    return Err("This copy of Mimic can't sign in with Microsoft, so this mailbox can't be checked.".into());
+                    return Err("This copy of Mimic can't sign in with Microsoft, so I can't reach this mailbox.".into());
                 };
                 let Some(refresh) = (self.password_for)(&key) else {
                     return Err("I don't have a Microsoft sign-in I can use for this mailbox. Sign in again under Your mail.".into());
@@ -1435,6 +1456,7 @@ mod tests {
             sent_folder: None,
             marks: BTreeMap::new(),
             last_checked_at: None,
+            sending: None,
         };
         let source = db
             .create_source(&crate::db::NewSource {
@@ -2176,6 +2198,7 @@ mod tests {
             sent_folder: None,
             marks: BTreeMap::new(),
             last_checked_at: None,
+            sending: None,
         };
         let second = db
             .create_source(&crate::db::NewSource {

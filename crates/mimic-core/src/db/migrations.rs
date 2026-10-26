@@ -31,6 +31,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 12, name: "situation_readings", sql: include_str!("migrations/0012_situation_readings.sql") },
     Migration { version: 13, name: "message_search", sql: include_str!("migrations/0013_message_search.sql") },
     Migration { version: 14, name: "draft_alternatives", sql: include_str!("migrations/0014_draft_alternatives.sql") },
+    Migration { version: 15, name: "outbox", sql: include_str!("migrations/0015_outbox.sql") },
 ];
 
 /// Highest schema version this build knows about.
@@ -85,7 +86,7 @@ mod tests {
         for (i, m) in MIGRATIONS.iter().enumerate() {
             assert_eq!(m.version, i as i64 + 1, "migration {} out of order", m.name);
         }
-        assert_eq!(latest_version(), 14);
+        assert_eq!(latest_version(), 15);
     }
 
     fn table_names(conn: &Connection) -> Vec<String> {
@@ -179,7 +180,7 @@ mod tests {
         .unwrap();
 
         let applied = migrate(&mut conn).unwrap();
-        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(applied, vec![5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
         assert_eq!(current_version(&conn), Ok(latest_version()));
         assert!(column_names(&conn, "participants").contains(&"kept_apart".to_string()));
         let cases = column_names(&conn, "evaluation_cases");
@@ -229,6 +230,7 @@ mod tests {
             "message_situations",
             "situation_readings",
             "message_search",
+            "outbox",
             "voice_profiles",
             "voice_preferences",
             "representative_examples",
@@ -489,7 +491,7 @@ mod tests {
             [],
         )
         .unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11, 12, 13, 14]);
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![10, 11, 12, 13, 14, 15]);
         let apart: i64 =
             conn.query_row("SELECT kept_apart FROM participants WHERE id = 'p'", [], |r| r.get(0)).unwrap();
         assert_eq!(apart, 0, "only the user's own no sets it");
@@ -509,7 +511,7 @@ mod tests {
             )
         };
         conn.execute_batch(&draft("old")).unwrap();
-        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![14]);
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![14, 15]);
         let first: Option<String> =
             conn.query_row("SELECT alternative_to FROM drafts WHERE id = 'old'", [], |r| r.get(0)).unwrap();
         assert_eq!(first, None);
@@ -519,5 +521,37 @@ mod tests {
         conn.execute("DELETE FROM drafts WHERE id = 'old'", []).unwrap();
         let left: i64 = conn.query_row("SELECT COUNT(*) FROM drafts", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 0, "another way of a draft that is gone goes too");
+    }
+    /// What Mimic sends goes with the person it was to, the mailbox it went
+    /// through and the conversation it answered, and a draft has at most one
+    /// reply on its way or gone.
+    #[test]
+    fn what_is_sent_goes_with_its_person_and_a_draft_goes_out_once() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&mut conn, 14).unwrap();
+        conn.execute_batch(
+            "INSERT INTO participants(id, display_name, is_self, created_at, updated_at) VALUES ('p', 'Ada', 0, 't', 't');
+             INSERT INTO sources(id, connector, name, channel, status, config_json, created_at)
+               VALUES ('s', 'imap', 'c@example.com', 'email', 'ready', '{}', 't');
+             INSERT INTO drafts(id, channel, generated_text, provider, model, prompt_hash, created_at)
+               VALUES ('d', 'email', 'Sure.', 'mock', 'm', 'h', 't');",
+        )
+        .unwrap();
+        assert_eq!(migrate_to(&mut conn, latest_version()).unwrap(), vec![15]);
+        let row = |id: &str, status: &str| {
+            format!(
+                "INSERT INTO outbox(id, draft_id, source_id, participant_id, from_address, to_json, subject, body,
+                                    message_id, how, status, send_after, created_at, updated_at)
+                 VALUES ('{id}', 'd', 's', 'p', 'c@example.com', '[\"ada@example.com\"]', 'Re: x', 'Sure.',
+                         '{id}@example.com', 'approved', '{status}', 't', 't', 't');"
+            )
+        };
+        conn.execute_batch(&row("o1", "failed")).unwrap();
+        conn.execute_batch(&row("o2", "sent")).unwrap();
+        assert!(conn.execute_batch(&row("o3", "sending")).is_err(), "one reply per draft on its way or gone");
+        conn.execute("DELETE FROM participants WHERE id = 'p'", []).unwrap();
+        let left: i64 = conn.query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0, "what was sent to someone goes with them");
     }
 }

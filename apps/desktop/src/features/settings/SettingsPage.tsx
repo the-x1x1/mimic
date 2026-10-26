@@ -385,7 +385,8 @@ function AssistSection() {
         {active?.local
           ? `Those messages go to ${active.displayName}, which runs on this computer.`
           : `Those messages are sent to ${active?.displayName ?? "the configured provider"} — including messages you have not read yet.`}{" "}
-        Mimic still never sends a reply: every draft waits for you.
+        A reply prepared this way is never sent by itself: each waits for you to send it, change it
+        or put it aside.
       </p>
     </Card>
   );

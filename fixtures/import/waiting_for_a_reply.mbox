@@ -1,0 +1,34 @@
+From 1829341987234000101@xxx Mon Mar 09 09:00:00 +0000 2026
+From: Ada Lovelace <ada@example.com>
+To: C <c@example.com>
+Subject: Lunch
+Date: Mon, 9 Mar 2026 09:00:00 +0000
+Message-ID: <lunch-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+lunch on thursday?
+
+From 1829341987234000102@xxx Mon Mar 09 09:20:00 +0000 2026
+From: C <c@example.com>
+To: Ada Lovelace <ada@example.com>
+Subject: Re: Lunch
+Date: Mon, 9 Mar 2026 09:20:00 +0000
+Message-ID: <lunch-2@example.com>
+In-Reply-To: <lunch-1@example.com>
+References: <lunch-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+yes! where?
+
+From 1829341987234000103@xxx Mon Mar 09 10:05:00 +0000 2026
+From: Ada Lovelace <ada@example.com>
+Reply-To: Ada Lovelace <ada.replies@example.com>
+To: C <c@example.com>
+Subject: Re: Lunch
+Date: Mon, 9 Mar 2026 10:05:00 +0000
+Message-ID: <lunch-3@example.com>
+In-Reply-To: <lunch-2@example.com>
+References: <lunch-1@example.com> <lunch-2@example.com>
+Content-Type: text/plain; charset=utf-8
+
+the place by the river, 12:30?

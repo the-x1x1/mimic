@@ -6,6 +6,8 @@ import { useDeleteSource, useSources, useStartImport } from "@/hooks/useSources"
 import { AddSourceDialog } from "./AddSourceDialog";
 import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
 import { MailboxPassword, MailboxSignInAgain } from "./MailboxPassword";
+import { MailboxSending } from "./MailboxSending";
+import { SentList } from "./SentList";
 import { formatRelative } from "@/lib/format";
 
 const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> = {
@@ -30,7 +32,7 @@ export function SourcesPage() {
         title="Your mail"
         subtitle={
           hasMailbox
-            ? "Everything I know comes from mail you gave me: files you handed over, and the mailbox you connected, which I check for new mail. Nothing is uploaded."
+            ? "Everything I know comes from mail you gave me: files you handed over, and the mailbox you connected, which I check for new mail. Nothing is uploaded. A reply you send from me goes out through that mailbox, as if you'd sent it yourself."
             : "Everything I know comes from files you hand me. Nothing is uploaded, and nothing arrives on its own."
         }
         actions={
@@ -82,6 +84,9 @@ export function SourcesPage() {
                     {s.lastError ? (
                       <div className="danger small">{String(s.lastError.message)}</div>
                     ) : null}
+                    {s.connector === "imap" ? (
+                      <MailboxSending sourceId={s.id} name={s.name} />
+                    ) : null}
                   </td>
                   <td>{CHANNEL_LABELS[s.channel as Channel] ?? s.channel}</td>
                   <td className="num">{s.messageCount.toLocaleString()}</td>
@@ -124,6 +129,8 @@ export function SourcesPage() {
           </p>
         </Card>
       )}
+
+      {hasMailbox ? <SentList /> : null}
 
       {adding ? <AddSourceDialog onClose={() => setAdding(false)} /> : null}
       {connecting ? <ConnectMailboxDialog onClose={() => setConnecting(false)} /> : null}

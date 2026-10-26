@@ -50,6 +50,11 @@ pub(crate) struct Mail {
     /// `From` is whoever wrote it first, so its being in the Sent folder says
     /// nothing about who that is.
     pub(crate) resent: bool,
+    /// Where the sender asked for replies to go (`Reply-To`), when they did.
+    pub(crate) reply_to: Vec<String>,
+    /// Who else it was to (`To` and `Cc`), for a reply to everyone.
+    pub(crate) to: Vec<String>,
+    pub(crate) cc: Vec<String>,
 }
 
 impl CommunicationSource for MboxSource {
@@ -240,6 +245,9 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         automated,
         sent: get("x-gmail-labels").is_some_and(|labels| in_sent(&super::mime::decode_header(&labels))),
         resent: get("resent-from").is_some() || get("resent-sender").is_some(),
+        reply_to: get("reply-to").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
+        to: get("to").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
+        cc: get("cc").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
     })
 }
 
@@ -370,35 +378,54 @@ pub(crate) fn thread(mut mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
             let subject = group.iter().find_map(|m| m.subject.clone());
             let messages = group
                 .into_iter()
-                .map(|m| RawMessage {
-                    external_id: m.message_id,
-                    author: m.from,
-                    sent_at: m.date,
-                    body: m.body,
-                    // What this message answers, by Message-ID. The importer
-                    // uses it to join a conversation that already holds one
-                    // of them — from an earlier check, or another source.
-                    metadata: {
-                        let refs: Vec<&String> = m.in_reply_to.iter().chain(m.references.iter()).collect();
-                        let mut meta = serde_json::Map::new();
-                        if let Some(s) = &m.subject {
-                            meta.insert("subject".into(), json!(s));
-                        }
-                        // Read by `Db::sent_folder_people` to ask whether
-                        // whoever this is filed under is the user.
-                        if m.sent && !m.resent {
-                            meta.insert("sentFolder".into(), json!(true));
-                        }
-                        if !refs.is_empty() {
-                            meta.insert("refs".into(), json!(refs));
-                        }
-                        // Read by the dashboard to leave the thread out of
-                        // what is waiting; absent means a person wrote it.
-                        if let Some(a) = m.automated {
-                            meta.insert("automated".into(), json!(a.as_str()));
-                        }
-                        serde_json::Value::Object(meta)
-                    },
+                .map(|m| {
+                    // Taken before the author is moved into the message.
+                    let from_email =
+                        m.from.identifiers.iter().find(|i| i.kind == IdentifierKind::Email).map(|i| i.value.clone());
+                    RawMessage {
+                        external_id: m.message_id,
+                        author: m.from,
+                        sent_at: m.date,
+                        body: m.body,
+                        // What this message answers, by Message-ID. The importer
+                        // uses it to join a conversation that already holds one
+                        // of them — from an earlier check, or another source.
+                        metadata: {
+                            let refs: Vec<&String> = m.in_reply_to.iter().chain(m.references.iter()).collect();
+                            let mut meta = serde_json::Map::new();
+                            if let Some(s) = &m.subject {
+                                meta.insert("subject".into(), json!(s));
+                            }
+                            // Read by `Db::sent_folder_people` to ask whether
+                            // whoever this is filed under is the user.
+                            if m.sent && !m.resent {
+                                meta.insert("sentFolder".into(), json!(true));
+                            }
+                            if !refs.is_empty() {
+                                meta.insert("refs".into(), json!(refs));
+                            }
+                            // Read to answer it (`sending::envelope_for`): which
+                            // of `refs` it answers, whom it was from, where its
+                            // sender wants replies, and who else it went to.
+                            if let Some(irt) = &m.in_reply_to {
+                                meta.insert("inReplyTo".into(), json!(irt));
+                            }
+                            if let Some(from) = from_email {
+                                meta.insert("from".into(), json!(from));
+                            }
+                            for (key, list) in [("replyTo", &m.reply_to), ("to", &m.to), ("cc", &m.cc)] {
+                                if !list.is_empty() {
+                                    meta.insert(key.into(), json!(list));
+                                }
+                            }
+                            // Read by the dashboard to leave the thread out of
+                            // what is waiting; absent means a person wrote it.
+                            if let Some(a) = m.automated {
+                                meta.insert("automated".into(), json!(a.as_str()));
+                            }
+                            serde_json::Value::Object(meta)
+                        },
+                    }
                 })
                 .collect();
             DiscoveredConversation { external_id: root, subject, channel: "email".into(), messages }

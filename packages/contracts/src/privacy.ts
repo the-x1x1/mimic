@@ -16,6 +16,8 @@ export const DeletionReport = z.object({
   conversationsKept: z.number(),
   /** Measurements of the drafts removed: any of them may hold this mail. */
   evaluations: z.number(),
+  /** Replies Mimic sent, or held to send, that go with it (0.10.0-alpha.23). */
+  sent: z.number(),
 });
 export type DeletionReport = z.infer<typeof DeletionReport>;
 
@@ -47,6 +49,13 @@ export function describeDeletion(r: DeletionReport): string[] {
   }
   if (r.drafts > 0) {
     lines.push(`${r.drafts} drafts written to them will be removed.`);
+  }
+  if (r.sent > 0) {
+    lines.push(
+      r.sent === 1
+        ? "My record of the reply I sent will be removed. The reply itself has gone and can't be taken back."
+        : `My record of ${r.sent} replies I sent will be removed. The replies themselves have gone and can't be taken back.`,
+    );
   }
   if (r.evaluations > 0) {
     lines.push(

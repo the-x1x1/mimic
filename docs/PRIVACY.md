@@ -62,8 +62,14 @@ None of these are recoverable. `Db::open` writes a database backup before a sche
 
 Provider API keys, mailbox app passwords and a Microsoft mailbox's sign-in (each under `imap:<source id>`) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. A build for macOS would seal them with a key kept in your login Keychain (there is no such build yet, and that code has never run on a Mac). Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth. The hour-long access token a sign-in is traded for is kept in memory only and never written.
 
+## Sending
+
+Since 0.10.0-alpha.23 a reply can be sent from Mimic, and only through the user's own connected mailbox: from one of their own addresses, to the person who wrote (where they asked for replies, else the address they wrote from), through their provider's mail server, signed in exactly as the mailbox signs in to read. What goes is what the Send panel showed — the words, who, which mailbox, the subject — and nothing goes until the user presses **Send it**. Nothing passes through anything of Mimic's.
+
+Each reply is recorded in the database (`outbox`) before the mail server is spoken to, with what it said and who it went to, and marked sent, or failed with the server's reason. Those records are listed under Your mail → What I've sent, and go with the person, the mailbox or the conversation when any of them is deleted — the deletion preview counts them. A reply that may have gone without the server confirming it is never sent again by Mimic; the user is told to look in their Sent folder. The message Mimic sends carries a random Message-ID at the sender's domain, introduces Mimic to the server only as `[127.0.0.1]`, and states the time in UTC, so it says nothing about the computer it came from.
+
 ## What Mimic will not do
 
-It will not send a message. It has no send access to anything and no code path that could acquire one. Every draft is a draft, and the user moves it into whatever app they actually use.
+It will not send a message the user has not approved. Replies sent by themselves — Trusted mode, `docs/PRODUCT.md` — are being built for 0.10.0-alpha.24, will be off unless the user turns them on, and are bounded by the rules written there.
 
-Trusted Mode — Mimic sending low-stakes replies itself — is designed and deliberately unbuilt. The reason is not technical. A product that can send as you needs a much stronger account of what it will not send, how a mistake is caught, and what "low-stakes" means than this product currently has.
+It will not write to a mailbox: reading is `EXAMINE` and `BODY.PEEK[]`, and nothing Mimic sends is put in the Sent folder by Mimic (Gmail and Microsoft put it there themselves).

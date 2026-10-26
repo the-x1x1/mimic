@@ -47,6 +47,11 @@ export const qk = {
   voicePreferences: (layer: string, scope: string) => ["voicePrefs", layer, scope] as const,
   generationContext: (key: string) => ["generationContext", key] as const,
   drafts: ["drafts"] as const,
+  // Under "dashboard": a mailbox connected, a draft decided, anything that
+  // refreshes the home screen can change who a reply goes to and through what.
+  envelope: (draftId: string) => ["dashboard", "envelope", draftId] as const,
+  sent: ["sent"] as const,
+  mailboxSending: (sourceId: string) => ["sources", "sending", sourceId] as const,
   draftOutcomes: ["draftOutcomes"] as const,
   providers: ["providers"] as const,
   providerHealth: (id: string) => ["providerHealth", id] as const,
