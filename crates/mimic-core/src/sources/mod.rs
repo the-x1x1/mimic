@@ -19,6 +19,7 @@ pub mod automated;
 pub mod discord;
 pub mod imap;
 pub mod mbox;
+pub mod meta;
 pub mod mime;
 pub mod mimic_json;
 pub mod normalize;
@@ -260,6 +261,7 @@ pub fn all() -> Vec<Box<dyn CommunicationSource>> {
         Box::new(whatsapp::WhatsAppSource),
         Box::new(discord::DiscordSource),
         Box::new(telegram::TelegramSource),
+        Box::new(meta::MetaSource),
     ]
 }
 

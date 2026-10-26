@@ -56,6 +56,9 @@ export function WhoIsYou({
   const identifiers = identity.data?.identifiers ?? [];
   const mineAs = (w: WriterName) => yoursAs(w, identifiers);
   const yours = names.filter((w) => mineAs(w) !== null);
+  // A whole Telegram account's export lists its owner alone, with the phone
+  // number on the account; one chat's lists everyone who wrote in it.
+  const oneAccount = names.length === 1 && (names[0]?.also.length ?? 0) > 0;
   const shown = all ? names : names.slice(0, SHOWN);
 
   async function ask(writer: WriterName, changed: boolean) {
@@ -127,18 +130,22 @@ export function WhoIsYou({
             I&rsquo;ll import it once you say it&rsquo;s yours.
           </p>
         )
+      ) : connector === "meta" ? (
+        <p id={heading}>
+          <strong>Which of these is you?</strong> Meta&rsquo;s download names who wrote each message
+          and nothing more, so say which name is yours. Until you do, I&rsquo;ll read your messages
+          as someone else&rsquo;s.
+        </p>
+      ) : connector === "telegram" && oneAccount ? (
+        <p id={heading}>
+          <strong>{yours.length > 0 ? "This is you." : "Is this you?"}</strong> This Telegram export
+          is of one account, and its messages are read as yours once you say it&rsquo;s you.
+        </p>
       ) : connector === "telegram" ? (
         <p id={heading}>
-          <strong>
-            {yours.length > 0
-              ? "This is you."
-              : names.length === 1
-                ? "Is this you?"
-                : "Which of these is you?"}
-          </strong>{" "}
-          {names.length === 1
-            ? "This Telegram export is of one account, and its messages are read as yours once you say it's you."
-            : "Telegram's export of a chat doesn't say whose it is, so say which of these wrote your messages. Until you do, I'll read them as someone else's."}
+          <strong>Which of these is you?</strong> Telegram&rsquo;s export of a chat doesn&rsquo;t
+          say whose it is, so say which of these wrote your messages. Until you do, I&rsquo;ll read
+          them as someone else&rsquo;s.
         </p>
       ) : (
         <>

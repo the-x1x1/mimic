@@ -94,8 +94,9 @@ export function OnboardingFlow() {
         {welcome ? (
           <Card title="Start with what you already have">
             <p>
-              Import a WhatsApp chat, a Telegram export, a Discord data package, an email export
-              (.mbox), or a Mimic JSON file. You can start with one conversation and add more later.
+              Import a WhatsApp chat, a Telegram export, your Messenger or Instagram messages, a
+              Discord data package, an email export (.mbox), or a Mimic JSON file. You can start
+              with one conversation and add more later.
             </p>
             <p className="muted small">
               Mimic learns your writing style from messages you wrote. It does not yet import PDFs,
@@ -252,8 +253,9 @@ function SourceStep() {
   return (
     <Card title="Choose messages to learn from">
       <p className="neutral">
-        Start with a WhatsApp chat, Telegram export, Discord data package, email export (.mbox), or
-        Mimic JSON file. You will see what is in the file before importing it. Nothing is uploaded.
+        Start with a WhatsApp chat, Telegram export, Messenger or Instagram download, Discord data
+        package, email export (.mbox), or Mimic JSON file. You will see what is in the file before
+        importing it. Nothing is uploaded.
       </p>
       <Button variant="primary" onClick={() => setAdding(true)}>
         Choose the file

@@ -118,7 +118,7 @@
     },
     {
       "layer": "relationship",
-      "scopeKey": "52b01723-622d-4fba-a626-9730843fabc8",
+      "scopeKey": "9b97fab7-9eab-4c81-a04a-16d04251dc03",
       "label": "What you write to Ada Lovelace",
       "sampleSize": 20,
       "measurable": true,
@@ -219,6 +219,6 @@
   ],
   "peopleWithProfiles": 1,
   "stale": false,
-  "lastAnalyzedAt": "2026-10-26T16:48:10.978Z",
+  "lastAnalyzedAt": "2026-10-26T16:58:32.788Z",
   "messagesUntilMeasurable": 0
 }

@@ -220,9 +220,19 @@ describe("which name in a chat is the user's", () => {
       kind: "account_id",
       value: "telegram:user7",
       normalized: "telegram:user7",
+      also: [{ kind: "phone", value: "+1 808 555 0100", normalized: "18085550100" }],
     });
     renderIt([account], "telegram");
     expect(await screen.findByText("Is this you?")).toBeInTheDocument();
     expect(screen.getByText(/This Telegram export is of one account/)).toBeInTheDocument();
+  });
+
+  it("asks which name in a Messenger or Instagram download is the user's", async () => {
+    native.userIdentity.mockResolvedValue(identity());
+    const named = (n: string, count: number) =>
+      writer(n, count, { value: `meta:${n}`, normalized: `meta:${n.toLowerCase()}` });
+    renderIt([named("Ada Lovelace", 2), named("C Haynes", 1)], "meta");
+    expect(await screen.findByText(/Meta.s download names who wrote each/)).toBeInTheDocument();
+    expect(screen.queryByText(/saved on your phone/)).toBeNull();
   });
 });

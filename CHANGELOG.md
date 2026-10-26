@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.61] — 2026-10-26
+
+Messenger and Instagram.
+
+### Added
+
+- **Your Messenger and Instagram messages.** Download your information from Facebook or Instagram in JSON (not HTML) and import the zip — or one part of it, if it came in several — or the folder it unzips to. Both sides of each conversation are read, so I learn how you reply; message requests and filtered messages are left out. Meta's download names who wrote each message and nothing more, so you say which name is yours, as for WhatsApp. Calls, people joining or leaving, photos, videos, stickers and files without words, Instagram's likes and reactions, and unsent messages are left out and counted, and the way Meta writes accented letters and emoji is put right. A chat imported again through another export or download — one Telegram chat, then your whole account — is one conversation, each message kept once.
+
 ## [0.10.0-alpha.60] — 2026-10-26
 
 Telegram chats.
