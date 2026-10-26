@@ -20,6 +20,7 @@ import {
   useProviderState,
   useResolveDraft,
 } from "@/hooks/useCompose";
+import { useSettings } from "@/hooks/useSystem";
 import { ipc } from "@/lib/ipc";
 import { useAnywhere } from "@/state/anywhere";
 import { personFromTitle } from "./fromTitle";
@@ -57,6 +58,10 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   const [guessed, setGuessed] = useState<string | null>(null);
   const copiedAway = useAnywhere((s) => s.copied);
   const setCopiedAway = useAnywhere((s) => s.setCopied);
+  // Paste it there and send (0.10.0-alpha.58): only once the user turned on
+  // pressing Enter after pasting.
+  const settings = useSettings();
+  const pressEnter = settings.data?.["anywhere.pressEnter"] === true;
 
   // Opened from anywhere (the shortcut, `anywhere.rs`): what was copied is
   // the message being answered, and a draft for something else goes —
@@ -185,10 +190,12 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
 
   /**
    * Put the reply where the message came from (0.10.0-alpha.46): pasted
-   * into the window the shortcut was pressed in, for the user to send there;
-   * copied, saying why, when it can't be. Then the same question as a copy.
+   * into the window the shortcut was pressed in, for the user to send there —
+   * or, with `send`, Enter pressed after it, which sends in most chat apps
+   * (0.10.0-alpha.58); copied, saying why, when it can't be. Then the same
+   * question as a copy: whether it went is the user's to say.
    */
-  async function pasteThere() {
+  async function pasteThere(send = false) {
     if (!draft) return;
     const text = edited;
     setCopiedAway({ draftId: draft.id, text, generatedText: draft.generatedText });
@@ -198,11 +205,14 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     setIncoming("");
     setFromAnywhere(false);
     try {
-      const why = await ipc.pasteBack(text);
-      if (why) toast.info("Copied", why);
-    } catch {
+      const why = send ? await ipc.pasteBack(text, true) : await ipc.pasteBack(text);
+      if (why) toast.info(send ? "Not sent" : "Copied", why);
+    } catch (e) {
       await navigator.clipboard.writeText(text).catch(() => undefined);
-      toast.info("Copied", "Paste it where the message was.");
+      toast.info(
+        "Copied",
+        send && e instanceof Error ? e.message : "Paste it where the message was.",
+      );
     }
   }
 
@@ -409,9 +419,17 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                 onChange={(e) => setEdited(e.target.value)}
               />
               <div className="row gap-2">
+                {fromAnywhere && pressEnter ? (
+                  <Button variant="primary" onClick={() => void pasteThere(true)}>
+                    Paste it there and send
+                  </Button>
+                ) : null}
                 {fromAnywhere ? (
                   <>
-                    <Button variant="primary" onClick={() => void pasteThere()}>
+                    <Button
+                      variant={pressEnter ? "ghost" : "primary"}
+                      onClick={() => void pasteThere()}
+                    >
                       Paste it there
                     </Button>
                     <Button variant="ghost" onClick={() => void copyAndGoBack()}>

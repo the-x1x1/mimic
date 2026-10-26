@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.58] — 2026-10-26
+
+Paste it there and send.
+
+### Added
+
+- For chat apps where Enter sends — WhatsApp, Discord, Slack, Teams, Messenger — you can turn on **Paste it there and send** under Settings, in Answering a message from anywhere. It pastes my reply into the window the message came from, as Paste it there does, then presses Enter once, there and only if that window is still in front. Off unless you turn it on; Paste it there stays as it was. Afterwards I still ask whether it went, and record only what you say.
+
 ## [0.10.0-alpha.57] — 2026-10-26
 
 Why not by myself.

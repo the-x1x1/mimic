@@ -12,6 +12,7 @@ import { ipc } from "@/lib/ipc";
 export function AnywhereSection() {
   const settings = useSettings();
   const chosen = settings.data?.["anywhere.shortcut"] ?? "";
+  const pressEnter = settings.data?.["anywhere.pressEnter"] === true;
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -47,11 +48,31 @@ export function AnywhereSection() {
           ))}
         </select>
       </label>
+      <label className="row gap-2">
+        <input
+          type="checkbox"
+          checked={pressEnter}
+          onChange={(e) => {
+            setError(null);
+            ipc
+              .setSetting("anywhere.pressEnter", e.target.checked)
+              .catch((err: unknown) => setError((err as Error).message));
+          }}
+        />
+        <span>Offer Paste it there and send, which presses Enter after pasting</span>
+      </label>
+      <p className="muted small">
+        For chat apps where Enter sends &mdash; WhatsApp, Discord, Slack, Teams, Messenger. I press
+        Enter once, in the window the message came from, and only if it&rsquo;s still in front and
+        its title still says what it did when you copied the message. WhatsApp&rsquo;s title is the
+        same for every chat, so stay in that chat until it&rsquo;s sent. In an email or a document
+        Enter only starts a new line, so use Paste it there for those.
+      </p>
       <p className="muted small">
         I read what you copied, and the title of the window you were in, only when you press it, and
         they go into Write and nowhere else until you ask for a draft. Paste it there presses Ctrl+V
-        in that window and nothing else. It works while I&rsquo;m running, in the notification area
-        too.
+        in that window and nothing else; Paste it there and send, Ctrl+V and then Enter. It works
+        while I&rsquo;m running, in the notification area too.
       </p>
       {error ? <InlineError>{error}</InlineError> : null}
     </Card>

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,7 @@ const native = vi.hoisted(() => ({
   resolveDraft: vi.fn(),
   stepAside: vi.fn(),
   pasteBack: vi.fn(),
+  settings: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -50,6 +51,7 @@ const draft = (id: string, text: string): Draft => ({
 describe("writing something new", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
+    native.settings.mockResolvedValue({ "anywhere.pressEnter": false });
     native.people.mockResolvedValue({ people: [], peopleTotal: 0 });
     native.providerState.mockResolvedValue({
       providers: [{ id: "local", displayName: "Local model", local: true }],
@@ -292,6 +294,22 @@ describe("writing something new", () => {
           "yes, see you at 7",
         ),
       );
+    });
+
+    it("pastes and presses Enter only when that is turned on, and still asks whether it went", async () => {
+      await draftFromAnywhere();
+      await waitFor(() => expect(native.settings).toHaveBeenCalled());
+      expect(screen.getByRole("button", { name: "Paste it there" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Paste it there and send" })).toBeNull();
+      cleanup();
+
+      native.settings.mockResolvedValue({ "anywhere.pressEnter": true });
+      native.pasteBack.mockResolvedValue(null);
+      await draftFromAnywhere();
+      fireEvent.click(await screen.findByRole("button", { name: "Paste it there and send" }));
+      await waitFor(() => expect(native.pasteBack).toHaveBeenCalledWith("yes, see you at 7", true));
+      expect(native.resolveDraft).not.toHaveBeenCalled();
+      expect(await screen.findByText("The reply you copied")).toBeInTheDocument();
     });
 
     it("records a reply that didn't go, and nothing for one changed after copying", async () => {
