@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { describeImport, ImportSummary } from "@mimic/contracts";
+import { describeImport, ImportSummary, type SignInSetup } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
@@ -67,13 +67,44 @@ export function useSetMailboxPassword() {
   });
 }
 
-/** Which providers this copy of Mimic can sign in to a mailbox with. It can't change while it runs. */
+/**
+ * Which providers this copy of Mimic can sign in to a mailbox with. It
+ * changes only when the user saves or forgets their own registration
+ * (`useSaveSignInSetup`), which refreshes it.
+ */
 export function useMailSignIn() {
   return useQuery({
     queryKey: qk.mailSignIn,
     queryFn: ipc.mailSignInAvailable,
     staleTime: Infinity,
   });
+}
+
+/** What each provider signs mailboxes in as (0.10.0-alpha.59). */
+export function useSignInSetup() {
+  return useQuery({ queryKey: qk.signInSetup, queryFn: ipc.signInSetup });
+}
+
+/** Keep, or forget, the user's own registration with a provider. */
+export function useSaveSignInSetup() {
+  const qc = useQueryClient();
+  const settled = (data: SignInSetup) => {
+    qc.setQueryData(qk.signInSetup, data);
+    qc.invalidateQueries({ queryKey: qk.mailSignIn });
+  };
+  const save = useMutation({
+    mutationFn: (v: {
+      with: "microsoft" | "google";
+      clientId: string;
+      clientSecret: string | null;
+    }) => ipc.saveSignInSetup(v.with, v.clientId, v.clientSecret),
+    onSuccess: settled,
+  });
+  const forget = useMutation({
+    mutationFn: (withProvider: "microsoft" | "google") => ipc.forgetSignInSetup(withProvider),
+    onSuccess: settled,
+  });
+  return { save, forget };
 }
 
 /**

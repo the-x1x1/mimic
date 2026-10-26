@@ -53,6 +53,7 @@ import {
   MailboxSending,
   MailExchangers,
   MailSignIns,
+  SignInSetup,
   OutboxEntry,
   ReplyEnvelope,
   type AutoReplyRules,
@@ -228,6 +229,14 @@ export const ipc = {
     call("set_mailbox_password", Source, { sourceId, password }),
   /** Which providers this copy of Mimic can sign in to a mailbox with. */
   mailSignInAvailable: () => call("mail_sign_in_available", MailSignIns),
+  signInSetup: () => call("get_sign_in_setup", SignInSetup),
+  saveSignInSetup: (
+    withProvider: "microsoft" | "google",
+    clientId: string,
+    clientSecret: string | null,
+  ) => call("save_sign_in_setup", SignInSetup, { with: withProvider, clientId, clientSecret }),
+  forgetSignInSetup: (withProvider: "microsoft" | "google") =>
+    call("forget_sign_in_setup", SignInSetup, { with: withProvider }),
   /** Who handles mail for a domain: its mail exchangers, from this computer's resolver. */
   mailExchangers: (domain: string) => call("mail_exchangers", MailExchangers, { domain }),
   /**

@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.59] — 2026-10-26
+
+Your own registration with Microsoft and Google.
+
+### Added
+
+- **Signing in with Microsoft and Google**, in Settings. Outlook.com, Hotmail and Microsoft 365 mailboxes, and Gmail without an app password, are signed in to through an app registered with Microsoft or Google. A copy of me built without a registration couldn't sign in with them at all; now you can register me yourself, following the steps there, and paste what Microsoft or Google shows you — the Application (client) ID, or Google's client ID and secret. It's kept with your other saved sign-ins and used from the next sign-in on, and you can forget it to go back to this copy's own. A mailbox already signed in with that provider under another registration then needs Sign in again, which it says. Google's secret is never shown again.
+
 ## [0.10.0-alpha.58] — 2026-10-26
 
 Paste it there and send.

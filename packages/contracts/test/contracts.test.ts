@@ -39,6 +39,7 @@ import {
   SituationSummary,
   SituationFiling,
   MailSignIns,
+  SignInSetup,
   EncoderView,
   VoiceOverview,
   Dashboard,
@@ -126,6 +127,17 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
   it("parses which providers this copy can sign in to a mailbox with", () => {
     const view = MailSignIns.parse(read(contractFixture("mail_sign_ins.json")));
     expect(view).toEqual({ microsoft: false, google: true });
+  });
+
+  it("parses what each provider signs mailboxes in as, without a secret", () => {
+    const view = SignInSetup.parse(read(contractFixture("sign_in_setup.json")));
+    expect(view.microsoft).toEqual({
+      clientId: "0f5c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b",
+      own: true,
+      builtIn: false,
+    });
+    expect(view.google.clientId).toBeNull();
+    expect(JSON.stringify(view)).not.toMatch(/secret/i);
   });
 
   it("parses how the user's messages came to be filed, and the model that could read them", () => {
