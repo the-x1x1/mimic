@@ -8,6 +8,7 @@ import { useSources } from "@/hooks/useSources";
 import { useAutoReply, useMailboxSending } from "@/hooks/useSending";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
+import { CheckEverything } from "./CheckEverything";
 
 /** Bring a card on this page into view: links within a page can't be hash links here. */
 function goTo(id: string) {
@@ -164,6 +165,10 @@ export function ReplyingForYou() {
             : "I tell you with a notification when replies are ready or something went."}
         </Step>
       </ul>
+      <CheckEverything
+        mailboxes={mailboxes.map((m) => ({ id: m.id, name: m.name }))}
+        ready={sources.data !== undefined}
+      />
     </Card>
   );
 }

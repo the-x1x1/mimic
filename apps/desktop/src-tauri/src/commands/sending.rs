@@ -194,6 +194,31 @@ pub async fn test_mailbox_sending(state: State<'_, SharedState>, source_id: Stri
     Ok(host)
 }
 
+/// Sign in to a connected mailbox with its own credential and look at its
+/// folders, opening no message and changing nothing (0.10.0-alpha.51):
+/// whether a check would work now. What the server said is kept if it fails,
+/// as a probe's is.
+#[tauri::command]
+pub async fn test_mailbox_reading(state: State<'_, SharedState>, source_id: String) -> CommandResult<imap::ImapProbe> {
+    let config = mailbox_config(&state, &source_id)?;
+    let (credentials, id, db) = (state.mail_credentials.clone(), source_id.clone(), state.db.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let credential =
+            credentials.credential(config.account.auth, &id).map_err(|why| CommandError::new("mailbox", why))?;
+        transcript::kept_if_it_fails(&db, "probe_failed", &config.account.host.clone(), || {
+            imap::probe(&config.account, &credential)
+        })
+        .map_err(|e| {
+            if matches!(e, imap::ImapError::SignIn(_)) {
+                credentials.forget(&id);
+            }
+            CommandError::new("mailbox", e.to_string())
+        })
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", e.to_string()))?
+}
+
 /// Forget how the user set a mailbox to send, and use its provider's known
 /// server again (none, for a provider Mimic doesn't know).
 #[tauri::command]

@@ -348,6 +348,8 @@ export const ipc = {
   mailboxSending: (sourceId: string) => call("get_mailbox_sending", MailboxSending, { sourceId }),
   /** Sign in to the mailbox's outgoing server and send nothing; its name when it worked. */
   testMailboxSending: (sourceId: string) => call("test_mailbox_sending", z_string, { sourceId }),
+  /** Sign in to a connected mailbox and look at its folders, opening nothing. */
+  testMailboxReading: (sourceId: string) => call("test_mailbox_reading", ImapProbe, { sourceId }),
   /** Checked first — signed in to, nothing sent — and kept only if that worked. */
   setMailboxSending: (sourceId: string, sending: SmtpAccount) =>
     call("set_mailbox_sending", MailboxSending, { sourceId, sending }),

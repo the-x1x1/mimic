@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.51] — 2026-10-26
+
+Check it all now.
+
+### Added
+
+- **Check it all now (sends nothing)**, under Replying for you: for each mailbox I sign in to read (looking at its folders, opening no message) and to send (sending nothing), then ask the model that writes your replies whether it answers, and say what each found, one after another.
+
 ## [0.10.0-alpha.50] — 2026-10-26
 
 Replying by myself says everything it checks.
