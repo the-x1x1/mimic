@@ -755,6 +755,7 @@ describe("settings and updater contracts", () => {
       "app.keepRunning": true,
       "notify.enabled": true,
       "anywhere.shortcut": "",
+      "send.undoSeconds": 5,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();
     expect(() => Settings.parse({ ...defaults, "updates.channel": "nightly" })).toThrow();

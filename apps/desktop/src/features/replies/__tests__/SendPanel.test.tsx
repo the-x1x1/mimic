@@ -11,6 +11,7 @@ const native = vi.hoisted(() => ({
   resolveDraft: vi.fn(),
   writeAnotherDraft: vi.fn(),
   addDraftPreference: vi.fn(),
+  settings: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -79,6 +80,13 @@ const sent = (to: string[], cc: string[] = []): OutboxEntry => ({
   sentAt: "2026-10-20T10:01:01Z",
 });
 
+/** Press Send it once it can be: after the wait chosen has been read. */
+async function sendIt(panel: HTMLElement) {
+  const go = within(panel).getByRole("button", { name: "Send it" });
+  await waitFor(() => expect(go).toBeEnabled());
+  fireEvent.click(go);
+}
+
 function renderReview(onDone = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -92,6 +100,8 @@ function renderReview(onDone = vi.fn()) {
 describe("sending a reply from Mimic", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
+    // At once, unless a test says otherwise.
+    native.settings.mockResolvedValue({ "send.undoSeconds": 0 });
   });
 
   it("shows who it goes to and through what before anything goes, and sends exactly that", async () => {
@@ -115,7 +125,7 @@ describe("sending a reply from Mimic", () => {
     fireEvent.change(within(panel).getByLabelText("Subject"), {
       target: { value: "Re: Friday (and Saturday)" },
     });
-    fireEvent.click(within(panel).getByRole("button", { name: "Send it" }));
+    await sendIt(panel);
 
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(native.sendReply).toHaveBeenCalledWith({
@@ -154,7 +164,7 @@ describe("sending a reply from Mimic", () => {
     expect(
       within(copy).getByRole("checkbox", { name: "Everyone else on their message" }),
     ).not.toBeChecked();
-    fireEvent.click(within(panel).getByRole("button", { name: "Send it" }));
+    await sendIt(panel);
 
     await waitFor(() => expect(native.sendReply).toHaveBeenCalled());
     expect(native.sendReply.mock.calls[0]?.[0]).toMatchObject({
@@ -197,7 +207,7 @@ describe("sending a reply from Mimic", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     const panel = screen.getByRole("group", { name: "Send it" });
     expect(within(panel).getByText("ada@work.example")).toBeInTheDocument();
-    fireEvent.click(within(panel).getByRole("button", { name: "Send it" }));
+    await sendIt(panel);
     await waitFor(() => expect(native.sendReply).toHaveBeenCalled());
     expect(native.sendReply.mock.calls[0]?.[0]).toMatchObject({ text: "yes — friday at nine" });
   });
@@ -222,9 +232,28 @@ describe("sending a reply from Mimic", () => {
     const onDone = renderReview();
     fireEvent.click(await screen.findByRole("button", { name: "Send" }));
     const panel = screen.getByRole("group", { name: "Send it" });
-    fireEvent.click(within(panel).getByRole("button", { name: "Send it" }));
+    await sendIt(panel);
     expect(await within(panel).findByText(/I won't send it again by myself/)).toBeInTheDocument();
     expect(within(panel).getByRole("button", { name: "Send it" })).toBeDisabled();
     expect(onDone).not.toHaveBeenCalled();
   });
+
+  it("waits the seconds chosen before it goes, and can be taken back", async () => {
+    native.settings.mockResolvedValue({ "send.undoSeconds": 1 });
+    native.replyEnvelope.mockResolvedValue(envelope());
+    native.sendReply.mockImplementation(async (r: { to: string[] }) => sent(r.to));
+    renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    await sendIt(panel);
+    expect(within(panel).getByRole("status")).toHaveTextContent("Sending in 1 second");
+    expect(within(panel).getByLabelText("Subject")).toBeDisabled();
+    fireEvent.click(within(panel).getByRole("button", { name: "Don’t send it" }));
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(native.sendReply).not.toHaveBeenCalled();
+    expect(within(panel).getByRole("button", { name: "Send it" })).toBeEnabled();
+
+    await sendIt(panel);
+    await waitFor(() => expect(native.sendReply).toHaveBeenCalledTimes(1), { timeout: 3000 });
+  }, 10_000);
 });
