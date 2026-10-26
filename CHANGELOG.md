@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.55] — 2026-10-26
+
+Answering from anywhere, said in Settings.
+
+### Changed
+
+- Settings' card for answering a message from anywhere now says what it does since alpha.46 and alpha.52: Paste it there, who it's written to from the window's title, and that I read that title only when you press the shortcut.
+
 ## [0.10.0-alpha.54] — 2026-10-26
 
 Not when you were only copied in.
