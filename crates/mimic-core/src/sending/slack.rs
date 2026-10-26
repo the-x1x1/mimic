@@ -125,13 +125,7 @@ pub fn send_reply(db: &Db, api: &SlackApi, req: &SendRequest) -> Result<OutboxEn
     let config: SlackSourceConfig =
         serde_json::from_value(source.config).map_err(|_| SendError::Cannot(UNREADABLE.into()))?;
     let channel = channel_of(&incoming).ok_or_else(|| SendError::Cannot(NO_CONVERSATION.into()))?.to_string();
-    // Only ever as the account the workspace was connected as.
-    match api.auth_test() {
-        Ok(me) if config.is(&me) => {}
-        Ok(_) => return Err(SendError::Cannot(NOT_THE_ACCOUNT.into())),
-        Err(e) => return Err(SendError::Slack(e.to_string())),
-    }
-    let conversation = account_id(&config.team_id, &channel);
+    still_theirs(api, &config)?;
     let entry = db
         .queue_outgoing(&NewOutgoing {
             draft_id: Some(draft.id.clone()),
@@ -139,63 +133,177 @@ pub fn send_reply(db: &Db, api: &SlackApi, req: &SendRequest) -> Result<OutboxEn
             conversation_id: Some(incoming.conversation_id.clone()),
             answers_message_id: Some(incoming.id.clone()),
             participant_id: draft.participant_id.clone().or_else(|| incoming.participant_id.clone()),
-            from_address: account_id(&config.team_id, &config.user_id),
+            from_address: from_address(&config),
             to: vec![conversation_name(db, &draft, &incoming)?],
             cc: Vec::new(),
             subject: String::new(),
             body: req.text.clone(),
-            message_id: format!("{conversation}:{}", crate::ids::new_id()),
+            message_id: pending_id(&config, &channel),
             how: SendHow::Approved,
             send_after: None,
         })
         .map_err(worded)?;
-    let posted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| api.post(&channel, &req.text)));
-    let ts = match posted {
-        Ok(Ok(ts)) => {
-            db.outgoing_sent(&entry.id)?;
-            ts
-        }
-        Ok(Err(PostError::NotSent(e))) => {
-            db.outgoing_failed(&entry.id, &e.to_string())?;
-            return Err(SendError::Slack(e.to_string()));
-        }
-        Ok(Err(e @ PostError::Unsure(_))) => {
-            let why = format!("{e} Look in the conversation in Slack before sending it again.");
-            db.outgoing_unsure(&entry.id, &why)?;
-            return Err(SendError::SlackUnsure(why));
-        }
-        Err(_) => {
-            db.outgoing_unsure(&entry.id, PANICKED)?;
-            return Err(SendError::SlackUnsure(PANICKED.into()));
-        }
-    };
+    post(db, api, &entry, &config, &channel, &req.text)?;
     if let Err(e) = record_sent_draft(db, &draft, &req.text) {
         tracing::warn!(target: "sending", error = %e, "a sent reply's draft could not be marked as sent");
     }
-    if let Err(e) = record_in_conversation(db, &req.source_id, &config, &channel, &ts, &req.text) {
+    if let Err(e) = record_in_conversation(db, &entry, &config, &channel, &req.text, false) {
         tracing::warn!(target: "sending", error = %e, "a sent reply could not be put in its conversation");
     }
     Ok(db.outgoing(&entry.id)?.unwrap_or(entry))
 }
 
-/// What went, put in its conversation as the next check would read it: the
-/// user's message, under its `ts`.
-fn record_in_conversation(
+/// Whether `api`'s token is still the account the workspace was connected
+/// as: Mimic sends as nobody else.
+pub(crate) fn still_theirs(api: &SlackApi, config: &SlackSourceConfig) -> Result<(), SendError> {
+    match api.auth_test() {
+        Ok(me) if config.is(&me) => Ok(()),
+        Ok(_) => Err(SendError::Cannot(NOT_THE_ACCOUNT.into())),
+        Err(e) => Err(SendError::Slack(e.to_string())),
+    }
+}
+
+/// What a reply goes through: its workspace's settings and the conversation
+/// the message it answers came from — or why it can't go.
+pub(crate) fn route(db: &Db, incoming: &Message) -> Result<(SlackSourceConfig, String), &'static str> {
+    let source = workspace_of(db, incoming).ok().flatten().ok_or(WORKSPACE_GONE)?;
+    let config: SlackSourceConfig = serde_json::from_value(source.config).map_err(|_| UNREADABLE)?;
+    let channel = channel_of(incoming).ok_or(NO_CONVERSATION)?.to_string();
+    Ok((config, channel))
+}
+
+/// The account a workspace's replies go from, as recorded on them.
+pub(crate) fn from_address(config: &SlackSourceConfig) -> String {
+    account_id(&config.team_id, &config.user_id)
+}
+
+/// An id for a reply until Slack names it (`Db::outgoing_sent_as`).
+pub(crate) fn pending_id(config: &SlackSourceConfig, channel: &str) -> String {
+    format!("{}:{}", account_id(&config.team_id, channel), crate::ids::new_id())
+}
+
+/// Post a reply whose `outbox` row is `sending`, and record how it went:
+/// sent under the id Slack gave it, failed with Slack's reason, or unsure.
+pub(crate) fn post(
     db: &Db,
-    source_id: &str,
+    api: &SlackApi,
+    entry: &OutboxEntry,
     config: &SlackSourceConfig,
     channel: &str,
-    ts: &str,
     text: &str,
+) -> Result<(), SendError> {
+    let posted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| api.post(channel, text)));
+    match posted {
+        Ok(Ok(ts)) => {
+            db.outgoing_sent_as(&entry.id, &format!("{}:{ts}", account_id(&config.team_id, channel)))?;
+            Ok(())
+        }
+        Ok(Err(PostError::NotSent(e))) => {
+            db.outgoing_failed(&entry.id, &e.to_string())?;
+            Err(SendError::Slack(e.to_string()))
+        }
+        Ok(Err(e @ PostError::Unsure(_))) => {
+            let why = format!("{e} Look in the conversation in Slack before sending it again.");
+            db.outgoing_unsure(&entry.id, &why)?;
+            Err(SendError::SlackUnsure(why))
+        }
+        Err(_) => {
+            db.outgoing_unsure(&entry.id, PANICKED)?;
+            Err(SendError::SlackUnsure(PANICKED.into()))
+        }
+    }
+}
+
+/// What was said in a conversation after the message a reply answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Since {
+    Nothing,
+    /// The user wrote: it is answered.
+    You,
+    /// Someone else did: the reply would answer what is no longer the last
+    /// word.
+    Them,
+}
+
+/// Asked of Slack just before a reply goes by itself (0.10.0-alpha.66), as
+/// a Sent folder is for mail: what people said after `incoming` in its
+/// conversation. `Ok(Err(why))` when Slack refused to say, as it would
+/// again (a token or a scope); `Err(why)` for a failure that may pass.
+pub(crate) fn said_since(
+    api: &SlackApi,
+    config: &SlackSourceConfig,
+    channel: &str,
+    incoming: &Message,
+) -> Result<Result<Since, String>, String> {
+    let ts = incoming.external_id.rsplit(':').next().unwrap_or("");
+    let known = |e: slack::SlackError| match e {
+        slack::SlackError::Network(_) | slack::SlackError::RateLimited => Err(e.to_string()),
+        e => Ok(Err(e.to_string())),
+    };
+    // A reply in the message's thread is not in the conversation itself:
+    // the message says who replied there.
+    let thread: Vec<String> = match api.message(channel, ts) {
+        Ok(Some(m)) if m.get("reply_count").and_then(Value::as_u64).unwrap_or(0) > 0 => m
+            .get("reply_users")
+            .and_then(Value::as_array)
+            .map(|u| u.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            // Replied to, by whom it doesn't say: someone.
+            .unwrap_or_else(|| vec![String::new()]),
+        Ok(_) => Vec::new(),
+        Err(e) => return known(e),
+    };
+    match api.history(channel, Some(ts), 50) {
+        Ok((messages, _)) => {
+            let mut people: Vec<&str> = messages
+                .iter()
+                .filter(|m| m.get("bot_id").is_none() && m.get("ts").and_then(Value::as_str) != Some(ts))
+                .filter(|m| {
+                    m.get("subtype")
+                        .and_then(Value::as_str)
+                        .is_none_or(|s| s == "thread_broadcast" || s == "file_share")
+                })
+                .filter_map(|m| m.get("user").and_then(Value::as_str))
+                .collect();
+            people.extend(thread.iter().map(String::as_str));
+            Ok(Ok(if people.contains(&config.user_id.as_str()) {
+                Since::You
+            } else if people.is_empty() {
+                Since::Nothing
+            } else {
+                Since::Them
+            }))
+        }
+        Err(e) => known(e),
+    }
+}
+
+/// What went, put in its conversation as the next check would read it: the
+/// user's message, under the id Slack gave it — the one its `outbox` row
+/// now carries, so one sent on its own (`on_its_own`) is marked as such
+/// however it is read (`import::SENDS_CONNECTORS`), and never learned from
+/// as the user's writing.
+pub(crate) fn record_in_conversation(
+    db: &Db,
+    entry: &OutboxEntry,
+    config: &SlackSourceConfig,
+    channel: &str,
+    text: &str,
+    on_its_own: bool,
 ) -> Result<(), String> {
     let conversation = account_id(&config.team_id, channel);
-    let mut importer = Importer::begin(db, source_id).map_err(|e| e.to_string())?;
+    let sent = db.outgoing(&entry.id).map_err(|e| e.to_string())?.ok_or("its outbox row is gone")?;
+    let ts = sent.message_id.rsplit(':').next().unwrap_or("").to_string();
+    let mut metadata = json!({ "slackChannel": channel });
+    if on_its_own {
+        metadata["sentOnItsOwn"] = Value::Bool(true);
+    }
+    let mut importer = Importer::begin(db, &entry.source_id).map_err(|e| e.to_string())?;
     let taken = importer.take(DiscoveredConversation {
         external_id: conversation.clone(),
         subject: None,
         channel: "chat".into(),
         messages: vec![RawMessage {
-            external_id: format!("{conversation}:{ts}"),
+            external_id: sent.message_id.clone(),
             author: AuthorRef {
                 display_name: config.user.clone(),
                 identifiers: vec![IdentifierInput::new(
@@ -203,9 +311,9 @@ fn record_in_conversation(
                     account_id(&config.team_id, &config.user_id),
                 )],
             },
-            sent_at: slack::ts_time(ts),
+            sent_at: slack::ts_time(&ts),
             body: text.trim().to_string(),
-            metadata: json!({ "slackChannel": channel }),
+            metadata,
         }],
     });
     if let Err(e) = taken {

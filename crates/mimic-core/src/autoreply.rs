@@ -31,6 +31,12 @@
 //!   (left out of the learning loop and the measured outcomes) and so is the
 //!   message put in the conversation (left out of everything that measures
 //!   or shows how the user writes: `db::written_by_the_user`).
+//! * **In Slack too** (0.10.0-alpha.66), through a workspace the user named
+//!   among `Rules.mailboxes`, under the same rules, but only for a direct
+//!   message (`slackDirect`), never a group; with the workspace's own token,
+//!   only while it is the account connected (`sending::slack::still_theirs`);
+//!   and, just before it goes, Slack is asked what was said after the
+//!   message (`sending::slack::said_since`), as a mailbox's Sent folder is.
 
 use std::collections::HashSet;
 
@@ -42,6 +48,7 @@ use crate::ids::fmt_rfc3339;
 use crate::sending::{self, SendError};
 use crate::sources::imap::{Credentials, ImapError, ImapSourceConfig};
 use crate::sources::outgoing;
+use crate::sources::slack::{SlackApi, SlackSourceConfig};
 
 /// Where the rules are kept.
 pub const SETTING: &str = "autoreply";
@@ -81,6 +88,12 @@ pub const FAILED: &str = "The reply I held for this didn't go, so it waits for y
 pub const DAILY_LIMIT: &str = "I've sent as many replies by myself today as you allow.";
 pub const LOOPING: &str = "I've already replied by myself twice in this conversation today.";
 pub const NOT_EMAIL: &str = "This isn't an email, so it can't be sent from here.";
+/// Slack (0.10.0-alpha.66).
+pub const GROUP: &str = "It's a group conversation, where a reply goes to everyone in it, so it waits for you.";
+pub const ALREADY_IN_SLACK: &str = "You'd already replied in Slack, so this one didn't go.";
+pub const SAID_SINCE: &str = "They wrote again in Slack after the message this answers, so it waits for you.";
+pub const SLACK_UNKNOWN: &str = "I couldn't look in Slack for a reply already there, so this one waits for you.";
+pub const NO_SLACK: &str = "I don't have a Slack token I can use for this workspace, so this one waits for you.";
 pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
 pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
@@ -321,6 +334,12 @@ fn waiting_now(db: &Db) -> Result<HashSet<(String, String)>, DbError> {
         .collect())
 }
 
+/// Whether a draft answers a message read from a Slack workspace.
+fn answers_slack(db: &Db, draft: &Draft) -> Result<bool, DbError> {
+    let Some(incoming) = sending::answered(db, draft)? else { return Ok(false) };
+    Ok(db.get_source(&incoming.source_id)?.is_some_and(|s| s.connector == crate::sources::slack::CONNECTOR))
+}
+
 /// Why this draft may not go by itself now; `None` when it may. `except` is
 /// the held reply being checked again, which is not counted against itself;
 /// `holding` adds the limits, which only decide whether a reply is held.
@@ -339,7 +358,9 @@ fn refusal(
     if draft.outcome.is_some() {
         return Ok(Some(DEALT_WITH));
     }
-    if draft.channel != "email" {
+    // Mail, or a message read from Slack (0.10.0-alpha.66).
+    let in_slack = draft.channel != "email";
+    if in_slack && !answers_slack(db, draft)? {
         return Ok(Some(NOT_EMAIL));
     }
     // Only a draft assisted drafting prepared: one the user asked for, even
@@ -402,7 +423,7 @@ fn refusal(
     // A reply says what it answers by its Message-ID, which is also how one
     // sent from another computer is found (0.10.0-alpha.56); mail read
     // without one has `sha-…` in its place.
-    if !outgoing::is_message_id(&incoming.external_id) {
+    if !in_slack && !outgoing::is_message_id(&incoming.external_id) {
         return Ok(Some(NO_MESSAGE_ID));
     }
     if let Some(why) = unfinished(&draft.generated_text, &incoming.body) {
@@ -417,6 +438,12 @@ fn refusal(
     // Written to the user, by name — not a list, not a copy they were hidden
     // on, and not mail too old to say (RFC 3834); and in `To`, not only
     // copied in (0.10.0-alpha.54).
+    if in_slack {
+        // A direct message is to the user; a group's reply goes to the group.
+        if incoming.metadata.get("slackDirect").and_then(serde_json::Value::as_bool) != Some(true) {
+            return Ok(Some(GROUP));
+        }
+    }
     let mine = db.user_identifier_set()?;
     let names_me = |key: &str| {
         incoming
@@ -428,7 +455,7 @@ fn refusal(
             .filter_map(serde_json::Value::as_str)
             .any(|a| mine.contains(&IdentifierInput::new(IdentifierKind::Email, a).key()))
     };
-    if !names_me("to") {
+    if !in_slack && !names_me("to") {
         return Ok(Some(if names_me("cc") { ONLY_COPIED } else { NOT_TO_YOU }));
     }
     let Some(person) = draft.participant_id.as_deref() else {
@@ -574,16 +601,32 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
             continue;
         }
         let Some(incoming) = sending::answered(db, &draft)? else { continue };
-        // Through the mailbox the message came in to, as the user's own
-        // address there, or not at all.
-        let Ok((config, account)) = sending::sending_from(db, &incoming.source_id) else { continue };
         let envelope = sending::envelope_for(db, &draft.id)?;
         if envelope.why_not.is_some() || draft.generated_text.trim().is_empty() {
             continue;
         }
-        if !goes_to_them(db, draft.participant_id.as_deref(), &envelope.to)? {
-            continue;
-        }
+        // Through the mailbox the message came in to, as the user's own
+        // address there, to who wrote; or into the Slack conversation it
+        // came from, as the account the workspace was connected as.
+        let (from_address, body, message_id) = if envelope.kind == sending::ReplyKind::Slack {
+            let Ok((config, channel)) = sending::slack::route(db, &incoming) else { continue };
+            (
+                sending::slack::from_address(&config),
+                draft.generated_text.clone(),
+                sending::slack::pending_id(&config, &channel),
+            )
+        } else {
+            let Ok((config, account)) = sending::sending_from(db, &incoming.source_id) else { continue };
+            if !goes_to_them(db, draft.participant_id.as_deref(), &envelope.to)? {
+                continue;
+            }
+            (
+                account.from_address.clone(),
+                sending::signed(&draft.generated_text, config.signature()),
+                // Marked, so Mimic on another computer knows it (alpha.56).
+                outgoing::new_own_message_id(&account.from_address),
+            )
+        };
         // The rules as they are now: turned off, or changed, while this ran.
         let now_rules = self::rules(db)?;
         if !is_on(db, &now_rules)? {
@@ -598,13 +641,12 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
             conversation_id: Some(incoming.conversation_id.clone()),
             answers_message_id: Some(incoming.id.clone()),
             participant_id: draft.participant_id.clone(),
-            from_address: account.from_address.clone(),
+            from_address,
             to: envelope.to.clone(),
             cc: Vec::new(),
             subject: envelope.subject.clone(),
-            body: sending::signed(&draft.generated_text, config.signature()),
-            // Marked, so Mimic on another computer knows it (alpha.56).
-            message_id: outgoing::new_own_message_id(&account.from_address),
+            body,
+            message_id,
             how: SendHow::Autonomous,
             // Held for the while the user chose, then until the hours they
             // allow, if those have ended for the day: as they are now.
@@ -634,9 +676,18 @@ fn released(entry: &crate::db::OutboxEntry) -> bool {
 
 /// Send every held reply whose time has come and which the rules still
 /// allow; stop, with the reason, any they no longer do.
-pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Result<Run, SendError> {
-    send_due_with(db, credentials, now, &reply_in_sent(credentials))
+pub fn send_due(
+    db: &Db,
+    credentials: &Credentials,
+    slack: &SlackFor<'_>,
+    now: DateTime<Utc>,
+) -> Result<Run, SendError> {
+    send_due_all(db, credentials, now, &reply_in_sent(credentials), slack)
 }
+
+/// A Slack workspace's API with its own token (by source id), when there is
+/// one to use.
+pub type SlackFor<'a> = dyn Fn(&str) -> Option<SlackApi> + 'a;
 
 /// How long past its time a reply waits for its Sent folder to be read
 /// before it is left for the user.
@@ -696,12 +747,25 @@ fn looked_for_since(db: &Db, incoming: &Message, now: DateTime<Utc>) -> Result<N
     Ok((earliest - Duration::days(SENT_LOOK_BACK_DAYS)).date_naive())
 }
 
-/// `send_due`, asking `in_sent` whether a reply is already in the Sent folder.
+/// `send_due`, asking `in_sent` whether a reply is already in the Sent
+/// folder, and with no Slack workspace to send through.
 pub fn send_due_with(
     db: &Db,
     credentials: &Credentials,
     now: DateTime<Utc>,
     in_sent: &SentCheck<'_>,
+) -> Result<Run, SendError> {
+    send_due_all(db, credentials, now, in_sent, &|_| None)
+}
+
+/// `send_due`, asking `in_sent` about Sent folders and `slack` for each
+/// workspace's API.
+pub fn send_due_all(
+    db: &Db,
+    credentials: &Credentials,
+    now: DateTime<Utc>,
+    in_sent: &SentCheck<'_>,
+    slack: &SlackFor<'_>,
 ) -> Result<Run, SendError> {
     let mut run = Run::default();
     let now_text = fmt_rfc3339(now);
@@ -731,6 +795,11 @@ pub fn send_due_with(
                 db.hold_until(&entry.id, &fmt_rfc3339(start))?;
                 continue;
             }
+        }
+        // Into Slack: its own way from here on.
+        if db.get_source(&entry.source_id)?.is_some_and(|s| s.connector == crate::sources::slack::CONNECTOR) {
+            send_into_slack(db, &rules, &draft, &entry, now, slack, &mut run)?;
+            continue;
         }
         let (config, account) = match sending::sending_from(db, &entry.source_id) {
             Ok(found) => found,
@@ -836,10 +905,122 @@ pub fn send_due_with(
     Ok(run)
 }
 
+/// The rest of `send_due_all` for a reply held to go into Slack: as for
+/// mail — the account it goes as, a check of the workspace that began after
+/// its hold ended, every rule again on what that read — then Slack asked
+/// what was said since the message (`sending::slack::said_since`): the user's
+/// own reply, or someone else's word since, stops it; not knowing waits
+/// `SENT_PATIENCE_MINUTES`, unless Slack refused to say. Then it is posted
+/// as the user, unless rehearsing.
+fn send_into_slack(
+    db: &Db,
+    rules: &Rules,
+    draft: &Draft,
+    entry: &crate::db::OutboxEntry,
+    now: DateTime<Utc>,
+    slack: &SlackFor<'_>,
+    run: &mut Run,
+) -> Result<(), SendError> {
+    let Some(incoming) = sending::answered(db, draft)? else { return stopped(db, entry, run, NOT_WAITING) };
+    let (config, channel) = match sending::slack::route(db, &incoming) {
+        Ok(found) => found,
+        Err(why) => return stopped(db, entry, run, why),
+    };
+    if entry.from_address != sending::slack::from_address(&config) {
+        return stopped(db, entry, run, FROM_CHANGED);
+    }
+    // A check of the workspace that began after the hold ended.
+    if !slack_read_since(db, &config, &entry.source_id, &entry.send_after)? {
+        if !run.waiting_for_check.contains(&entry.source_id) {
+            run.waiting_for_check.push(entry.source_id.clone());
+        }
+        return Ok(());
+    }
+    let waiting = waiting_now(db)?;
+    if let Some(why) = refusal(db, rules, draft, &waiting, Some(&entry.id), false, now)? {
+        return stopped(db, entry, run, why);
+    }
+    let Some(api) = slack(&entry.source_id) else { return stopped(db, entry, run, NO_SLACK) };
+    let waited_long = || {
+        DateTime::parse_from_rfc3339(&entry.send_after)
+            .ok()
+            .is_none_or(|t| now - t.with_timezone(&Utc) > Duration::minutes(SENT_PATIENCE_MINUTES))
+    };
+    match sending::slack::still_theirs(&api, &config) {
+        Ok(()) => {}
+        Err(SendError::Cannot(why)) => return stopped(db, entry, run, &why),
+        Err(e) => {
+            tracing::warn!(target: "autoreply", error = %e, "couldn't ask Slack whose token it is");
+            return if waited_long() { stopped(db, entry, run, SLACK_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    match sending::slack::said_since(&api, &config, &channel, &incoming) {
+        Ok(Ok(sending::slack::Since::Nothing)) => {}
+        Ok(Ok(sending::slack::Since::You)) => return stopped(db, entry, run, ALREADY_IN_SLACK),
+        Ok(Ok(sending::slack::Since::Them)) => return stopped(db, entry, run, SAID_SINCE),
+        Ok(Err(why)) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = true, "couldn't look in Slack");
+            return stopped(db, entry, run, SLACK_UNKNOWN);
+        }
+        Err(why) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = false, "couldn't look in Slack");
+            return if waited_long() { stopped(db, entry, run, SLACK_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    if rules.rehearse {
+        run.rehearsed += usize::from(db.stop_held_outgoing(&entry.id, REHEARSED)?);
+        return Ok(());
+    }
+    if !db.take_held_outgoing(&entry.id, &fmt_rfc3339(now))? {
+        return Ok(());
+    }
+    match sending::slack::post(db, &api, entry, &config, &channel, &entry.body) {
+        Ok(()) => {
+            run.sent += 1;
+            if let Err(e) = db
+                .mark_sent_on_its_own(&draft.id)
+                .and_then(|_| sending::record_sent_draft(db, draft, &draft.generated_text))
+            {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be recorded on its draft");
+            }
+            if let Err(e) = sending::slack::record_in_conversation(db, entry, &config, &channel, &entry.body, true) {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be put in its conversation");
+            }
+        }
+        Err(e) if e.may_have_gone() => run.unsure += 1,
+        Err(_) => run.failed += 1,
+    }
+    Ok(())
+}
+
+/// Stop a held reply with the reason, counting it.
+fn stopped(db: &Db, entry: &crate::db::OutboxEntry, run: &mut Run, why: &str) -> Result<(), SendError> {
+    run.stopped += usize::from(db.stop_held_outgoing(&entry.id, why)?);
+    Ok(())
+}
+
+/// Whether a check that read the workspace through began after `since`.
+fn slack_read_since(db: &Db, config: &SlackSourceConfig, source_id: &str, since: &str) -> Result<bool, DbError> {
+    let settled = db.get_source(source_id)?.is_some_and(|s| s.status != "failed" && s.status != "importing");
+    let read = config.last_read_at.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let held = DateTime::parse_from_rfc3339(since).ok();
+    Ok(settled && matches!((read, held), (Some(r), Some(h)) if r > h))
+}
+
 /// One look: hold what may go, then send what is due.
 pub fn tick(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Result<Run, SendError> {
+    tick_with(db, credentials, &|_| None, now)
+}
+
+/// `tick`, with each Slack workspace's API.
+pub fn tick_with(
+    db: &Db,
+    credentials: &Credentials,
+    slack: &SlackFor<'_>,
+    now: DateTime<Utc>,
+) -> Result<Run, SendError> {
     let held = hold_replies(db, now)?;
-    let mut run = send_due(db, credentials, now)?;
+    let mut run = send_due(db, credentials, slack, now)?;
     run.held = held;
     Ok(run)
 }
@@ -898,8 +1079,8 @@ pub fn status(db: &Db) -> Result<Status, DbError> {
 }
 
 /// `tick` at the current time.
-pub fn tick_now(db: &Db, credentials: &Credentials) -> Result<Run, SendError> {
-    tick(db, credentials, Utc::now())
+pub fn tick_now(db: &Db, credentials: &Credentials, slack: &SlackFor<'_>) -> Result<Run, SendError> {
+    tick_with(db, credentials, slack, Utc::now())
 }
 
 /// Replies sent, or held to send, by themselves in the last day: what the
@@ -1786,5 +1967,282 @@ mod tests {
         let read = rules(&db).unwrap();
         assert!(read.enabled);
         assert_eq!(read.hold_minutes, DEFAULT_HOLD_MINUTES, "a field left out takes its default");
+    }
+}
+
+#[cfg(test)]
+mod slack_tests {
+    //! Replying by itself in Slack (0.10.0-alpha.66), against a Slack that
+    //! keeps what it is told (`sources::slack::fake::live`).
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::db::{NewDraft, SendStatus};
+    use crate::sources::slack::fake::{self, Room, Rooms, TOKEN};
+    use crate::sources::slack::{sync, SlackApi};
+
+    fn credentials() -> Credentials {
+        Credentials::new(
+            Arc::new(|_: &str| None),
+            Arc::new(|_: &str, _: &str| Ok(())),
+            crate::sources::oauth::Provider::microsoft(),
+            None,
+        )
+    }
+
+    /// The tests' clock, as the mail tests keep it.
+    fn at(minutes: i64) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-26T09:00:00Z").unwrap().with_timezone(&Utc) + Duration::minutes(minutes)
+    }
+
+    fn ts(minutes: i64) -> String {
+        format!("{}.000100", at(minutes).timestamp())
+    }
+
+    fn said(user: &str, text: &str, minutes: i64) -> serde_json::Value {
+        json!({ "type": "message", "user": user, "text": text, "ts": ts(minutes) })
+    }
+
+    struct World {
+        db: Db,
+        source: String,
+        rooms: Rooms,
+        base: String,
+        api: SlackApi,
+        direct: Draft,
+        group: Draft,
+    }
+
+    /// Acme read once: a direct message with Ada, where the user wrote to
+    /// her before and her question waits, and a group where Bob's does; a
+    /// draft prepared for each; replying by itself on for the workspace.
+    fn world() -> World {
+        world_with(|answer| answer)
+    }
+
+    /// `world`, with Slack's answers passed through `wrap`.
+    fn world_with(wrap: impl FnOnce(fake::Answer) -> fake::Answer) -> World {
+        let rooms: Rooms = Arc::new(Mutex::new(vec![
+            Room {
+                id: "D1".into(),
+                other: Some("U2".into()),
+                messages: vec![said("U1", "lunch soon?", -120), said("U2", "the place by the river?", -10)],
+            },
+            Room { id: "G1".into(), other: None, messages: vec![said("U3", "dinner sunday, all of us?", -10)] },
+        ]));
+        let (base, _) = fake::slack(wrap(fake::live(rooms.clone())));
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        db.set_setting(crate::assist::SETTING, &true).unwrap();
+        let api = SlackApi::at(&base, TOKEN).unwrap();
+        sync(&db, &source, &api, &|| false).unwrap();
+        // Read five minutes after they were sent, on the tests' clock.
+        db.conn().execute("UPDATE messages SET imported_at = ?1", [fmt_rfc3339(at(-5))]).unwrap();
+        read_through(&db, &source, at(-5));
+        let direct = prepared(&db, &format!("slack:T1:D1:{}", ts(-10)), "yes, the river place. 12:30?");
+        let group = prepared(&db, &format!("slack:T1:G1:{}", ts(-10)), "sunday works");
+        set_rules(&db, Rules { enabled: true, mailboxes: vec![source.clone()], ..Rules::default() }).unwrap();
+        let on = Rules { enabled_at: Some("2026-01-01T00:00:00.000Z".into()), ..rules(&db).unwrap() };
+        db.set_setting(SETTING, &on).unwrap();
+        World { db, source, rooms, base, api, direct, group }
+    }
+
+    fn prepared(db: &Db, external_id: &str, text: &str) -> Draft {
+        let (message, conversation, person, body): (String, String, Option<String>, String) = db
+            .conn()
+            .query_row(
+                "SELECT id, conversation_id, participant_id, body FROM messages WHERE external_id = ?1",
+                [external_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        let draft = db
+            .create_draft(&NewDraft {
+                participant_id: person,
+                conversation_id: Some(conversation),
+                channel: "chat".into(),
+                situation_id: None,
+                incoming_message: Some(body),
+                incoming_message_id: Some(message),
+                intent: None,
+                generated_text: text.into(),
+                provider: "mock".into(),
+                model: "m".into(),
+                context: json!({}),
+                prompt_hash: "h".into(),
+                evidence: json!({}),
+                alternative_to: None,
+            })
+            .unwrap();
+        db.mark_prepared(&draft.id).unwrap();
+        db.get_draft(&draft.id).unwrap().unwrap()
+    }
+
+    /// A check that read the workspace through began at `began`.
+    fn read_through(db: &Db, source: &str, began: DateTime<Utc>) {
+        let mut config: SlackSourceConfig =
+            serde_json::from_value(db.get_source(source).unwrap().unwrap().config).unwrap();
+        config.last_read_at = Some(fmt_rfc3339(began));
+        db.set_source_config(source, &serde_json::to_value(&config).unwrap()).unwrap();
+        db.set_source_status(source, "imported", None).unwrap();
+    }
+
+    /// The workspace has been read through since any hold here ended.
+    fn checked(w: &World) {
+        read_through(&w.db, &w.source, at(60 * 24));
+    }
+
+    fn send(w: &World, minutes: i64) -> Run {
+        send_due_all(&w.db, &credentials(), at(minutes), &|_, _, _, _| Ok(false), &|_| {
+            Some(SlackApi::at(&w.base, TOKEN).unwrap())
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_direct_message_is_answered_by_itself_and_a_group_is_not() {
+        let w = world();
+        assert_eq!(why_not_by_itself(&w.db, &w.group.id, at(0)).unwrap().as_deref(), Some(GROUP));
+        assert_eq!(why_not_by_itself(&w.db, &w.direct.id, at(0)).unwrap(), None);
+        assert_eq!(hold_replies(&w.db, at(0)).unwrap(), 1);
+        let held = w.db.recent_outgoing(5).unwrap();
+        assert_eq!(held.len(), 1);
+        assert_eq!((held[0].status, held[0].from_address.as_str()), (SendStatus::Held, "slack:T1:U1"));
+        assert_eq!(held[0].to, ["Ada Lovelace"]);
+
+        // Its hold over, it waits for the workspace to be read through.
+        let early = send(&w, 20);
+        assert_eq!((early.sent, early.waiting_for_check.clone()), (0, vec![w.source.clone()]));
+
+        checked(&w);
+        let run = send(&w, 20);
+        assert_eq!(run.sent, 1, "{run:?}");
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert_eq!(entry.status, SendStatus::Sent);
+        let posted = w.rooms.lock().unwrap()[0].messages.last().cloned().unwrap();
+        assert_eq!(posted["text"], "yes, the river place. 12:30?");
+        assert_eq!(entry.message_id, format!("slack:T1:D1:{}", posted["ts"].as_str().unwrap()));
+
+        // Not the user's writing: the draft, and the message in the
+        // conversation, say it went by itself; the next check skips it.
+        let draft = w.db.get_draft(&w.direct.id).unwrap().unwrap();
+        assert_eq!(draft.outcome.as_deref(), Some("sent_unedited"));
+        assert_eq!(draft.context["sentOnItsOwn"], true);
+        let marked: serde_json::Value =
+            w.db.conn()
+                .query_row("SELECT metadata_json FROM messages WHERE external_id = ?1", [&entry.message_id], |r| {
+                    r.get::<_, String>(0)
+                })
+                .map(|m| serde_json::from_str(&m).unwrap())
+                .unwrap();
+        assert_eq!(marked["sentOnItsOwn"], true);
+        let next = sync(&w.db, &w.source, &w.api, &|| false).unwrap();
+        assert_eq!((next.inserted, next.duplicates), (0, 1));
+    }
+
+    #[test]
+    fn what_was_said_in_slack_since_stops_it() {
+        // The user answered in Slack itself, after the last check.
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        checked(&w);
+        w.rooms.lock().unwrap()[0].messages.push(said("U1", "on my way", -2));
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(ALREADY_IN_SLACK));
+
+        // Ada wrote again: this answers what is no longer her last word.
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        checked(&w);
+        w.rooms.lock().unwrap()[0].messages.push(said("U2", "or the cafe?", -2));
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(SAID_SINCE));
+        assert_eq!(w.rooms.lock().unwrap()[0].messages.len(), 3, "nothing posted");
+    }
+
+    #[test]
+    fn a_reply_in_the_messages_thread_stops_it() {
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        checked(&w);
+        {
+            let mut rooms = w.rooms.lock().unwrap();
+            rooms[0].messages[1]["reply_count"] = json!(1);
+            rooms[0].messages[1]["reply_users"] = json!(["U1"]);
+        }
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(ALREADY_IN_SLACK));
+    }
+
+    #[test]
+    fn one_whose_answer_was_lost_is_still_not_the_users_writing_when_read_back() {
+        // Slack takes it, and the answer never comes.
+        let w = world_with(|live| {
+            Box::new(move |method, query| {
+                let answered = live(method, query);
+                if method == "chat.postMessage" {
+                    (0, String::new())
+                } else {
+                    answered
+                }
+            })
+        });
+        hold_replies(&w.db, at(0)).unwrap();
+        checked(&w);
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.unsure), (0, 1));
+        assert_eq!(w.rooms.lock().unwrap()[0].messages.len(), 3, "it went");
+        sync(&w.db, &w.source, &w.api, &|| false).unwrap();
+        let posted = format!("slack:T1:D1:{}", w.rooms.lock().unwrap()[0].messages[2]["ts"].as_str().unwrap());
+        let metadata: String =
+            w.db.conn()
+                .query_row("SELECT metadata_json FROM messages WHERE external_id = ?1", [&posted], |r| r.get(0))
+                .unwrap();
+        let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(metadata["sentOnItsOwn"], true);
+    }
+
+    #[test]
+    fn without_a_token_it_waits_for_the_user_and_rehearsing_sends_nothing() {
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        checked(&w);
+        let run = send_due_all(&w.db, &credentials(), at(20), &|_, _, _, _| Ok(false), &|_| None).unwrap();
+        assert_eq!(run.stopped, 1);
+        assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(NO_SLACK));
+
+        let w = world();
+        let on = Rules { rehearse: true, ..rules(&w.db).unwrap() };
+        w.db.set_setting(SETTING, &on).unwrap();
+        hold_replies(&w.db, at(0)).unwrap();
+        checked(&w);
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.rehearsed), (0, 1));
+        assert_eq!(w.rooms.lock().unwrap()[0].messages.len(), 2, "nothing posted");
+    }
+
+    #[test]
+    fn a_reply_sent_by_itself_read_back_first_is_known_by_its_id() {
+        // Read back before it was put in its conversation (or on a second
+        // computer's check): known by the id Slack gave it.
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert!(w.db.take_held_outgoing(&entry.id, &fmt_rfc3339(at(20))).unwrap());
+        let posted = format!("slack:T1:D1:{}", ts(-1));
+        w.db.outgoing_sent_as(&entry.id, &posted).unwrap();
+        w.rooms.lock().unwrap()[0].messages.push(said("U1", "yes, the river place. 12:30?", -1));
+        sync(&w.db, &w.source, &w.api, &|| false).unwrap();
+        let metadata: String =
+            w.db.conn()
+                .query_row("SELECT metadata_json FROM messages WHERE external_id = ?1", [&posted], |r| r.get(0))
+                .unwrap();
+        let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(metadata["sentOnItsOwn"], true);
     }
 }
