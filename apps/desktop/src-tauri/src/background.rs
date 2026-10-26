@@ -114,20 +114,93 @@ pub fn step_aside(app: &AppHandle) -> tauri::Result<Aside> {
     Ok(how)
 }
 
-/// The icon in the notification area: a click opens Mimic; its menu opens
-/// or quits it.
-pub fn tray(app: &AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem};
-    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+/// What the icon says of replying by itself (0.10.0-alpha.47): how it
+/// stands, and the menu item that stops it, while it runs (on, with
+/// replies prepared in advance); nothing otherwise.
+pub fn tray_says(status: &mimic_core::autoreply::Status) -> Option<(&'static str, &'static str)> {
+    if !status.running {
+        None
+    } else if status.rules.rehearse {
+        Some(("Rehearsing replies by myself", "Turn replying by myself off"))
+    } else {
+        Some(("Replying by myself", "Turn replying by myself off"))
+    }
+}
+
+/// The icon's menu for the rules as they are: Open Mimic; while replying by
+/// itself is on, how it stands and one item to stop it; Quit Mimic.
+fn tray_menu(app: &AppHandle, says: Option<(&str, &str)>) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
     let open = MenuItem::with_id(app, "open", "Open Mimic", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Mimic", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let gap = PredefinedMenuItem::separator(app)?;
+    let replying = match says {
+        Some((stands, stop)) => Some((
+            MenuItem::with_id(app, "replying", stands, false, None::<&str>)?,
+            MenuItem::with_id(app, "stop_replying", stop, true, None::<&str>)?,
+        )),
+        None => None,
+    };
+    let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = vec![&open];
+    if let Some((stands, stop)) = &replying {
+        items.extend([&gap as &dyn IsMenuItem<tauri::Wry>, stands, stop]);
+    }
+    items.push(&quit);
+    Menu::with_items(app, &items)
+}
+
+/// How replying by itself stands, as the icon says it.
+fn tray_status(app: &AppHandle) -> Option<(&'static str, &'static str)> {
+    let state = app.try_state::<SharedState>()?;
+    let status = mimic_core::autoreply::status(&state.db).ok()?;
+    tray_says(&status)
+}
+
+/// Make the icon's menu and its tooltip say how replying by itself stands:
+/// after the rules, or preparing replies in advance, change.
+pub fn refresh_tray(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("main") else { return };
+    let says = tray_status(app);
+    let tip = match says {
+        Some((stands, _)) => format!("Mimic: {}", stands.to_lowercase()),
+        None => "Mimic".to_string(),
+    };
+    match tray_menu(app, says) {
+        Ok(menu) => {
+            let _ = tray.set_menu(Some(menu));
+            let _ = tray.set_tooltip(Some(tip));
+        }
+        Err(e) => tracing::warn!(target: "app", error = %e, "could not change the icon's menu"),
+    }
+}
+
+/// Stop replying by itself from the icon: off, as Settings turns it off,
+/// stopping every reply still held.
+fn stop_replying(app: &AppHandle) {
+    let Some(state) = app.try_state::<SharedState>() else { return };
+    let off = mimic_core::autoreply::rules(&state.db)
+        .map(|r| mimic_core::autoreply::Rules { enabled: false, ..r })
+        .and_then(|r| mimic_core::autoreply::set_rules(&state.db, r));
+    if let Err(e) = off {
+        tracing::warn!(target: "autoreply", error = %e, "could not turn replying by itself off from the icon");
+        return;
+    }
+    let _ = tauri::Emitter::emit(app, "sending://changed", serde_json::json!({}));
+    refresh_tray(app);
+}
+
+/// The icon in the notification area: a click opens Mimic; its menu opens
+/// or quits it, and stops replying by itself while that is on.
+pub fn tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    let menu = tray_menu(app, tray_status(app))?;
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("Mimic")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => crate::bring_to_front(app),
+            "stop_replying" => stop_replying(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -141,6 +214,7 @@ pub fn tray(app: &AppHandle) -> tauri::Result<()> {
     }
     tray.build(app)?;
     HAS_ICON.store(true, Ordering::SeqCst);
+    refresh_tray(app);
     Ok(())
 }
 
@@ -277,6 +351,20 @@ pub fn replied_by_itself(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_icon_says_replying_by_itself_only_while_it_runs() {
+        use mimic_core::autoreply::{Rules, Status};
+        let on = Rules { enabled: true, ..Rules::default() };
+        let status = |rules: &Rules, running: bool| Status { rules: rules.clone(), running, last_day: 0 };
+        assert_eq!(tray_says(&status(&Rules::default(), false)), None);
+        assert_eq!(tray_says(&status(&on, false)), None, "on, but nothing prepared to send");
+        assert_eq!(tray_says(&status(&on, true)), Some(("Replying by myself", "Turn replying by myself off")));
+        assert_eq!(
+            tray_says(&status(&Rules { rehearse: true, ..on.clone() }, true)),
+            Some(("Rehearsing replies by myself", "Turn replying by myself off"))
+        );
+    }
 
     #[test]
     fn stepping_aside_hides_only_where_the_icon_can_bring_it_back() {

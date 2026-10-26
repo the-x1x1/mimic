@@ -38,6 +38,7 @@ pub async fn set_autoreply(
     }
     autoreply::set_rules(&state.db, rules)?;
     let _ = app.emit("sending://changed", serde_json::json!({}));
+    crate::background::refresh_tray(&app);
     look(&app, &state).await;
     read(&state)
 }
