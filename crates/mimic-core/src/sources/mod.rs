@@ -25,6 +25,7 @@ pub mod normalize;
 pub mod oauth;
 pub mod outgoing;
 pub mod smtp;
+pub mod transcript;
 pub mod whatsapp;
 
 #[derive(Debug, thiserror::Error)]

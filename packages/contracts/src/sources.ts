@@ -36,7 +36,14 @@ export const Source = z.object({
   createdAt: z.string(),
   lastImportedAt: z.string().nullable(),
   messageCount: z.number(),
-  lastError: z.object({ message: z.string() }).passthrough().nullable(),
+  lastError: z
+    .object({
+      message: z.string(),
+      /** What was said to the mail server when a check failed (0.10.0-alpha.38). */
+      transcript: z.array(z.string()).optional(),
+    })
+    .passthrough()
+    .nullable(),
 });
 export type Source = z.infer<typeof Source>;
 

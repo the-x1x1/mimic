@@ -153,6 +153,15 @@ impl Db {
 
         let solo_list = sql_list(&solo);
         self.transaction(|tx| {
+            // What a mail server was told when a reply to them failed names
+            // them (`sources::transcript`); it goes before the replies do.
+            tx.execute(
+                &format!(
+                    "DELETE FROM events WHERE entity_type = 'outbox' AND entity_id IN
+                          (SELECT id FROM outbox WHERE participant_id = ?1 OR conversation_id IN ({solo_list}))"
+                ),
+                [participant_id],
+            )?;
             // Order matters only for the rows that do not cascade.
             tx.execute(
                 &format!(
@@ -246,6 +255,12 @@ impl Db {
             let conn = self.conn();
             // Every measurement of the drafts: this mail may be in any of it.
             conn.execute("DELETE FROM evaluations", [])?;
+            // What its server was told when a reply through it failed.
+            conn.execute(
+                "DELETE FROM events WHERE entity_type = 'outbox' AND entity_id IN
+                      (SELECT id FROM outbox WHERE source_id = ?1)",
+                [source_id],
+            )?;
             conn.execute("DELETE FROM messages WHERE source_id = ?1", [source_id])?;
         }
         self.delete_source(source_id)?;
@@ -325,6 +340,8 @@ impl Db {
             ] {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
             }
+            // What mail servers were told and said (`sources::transcript`).
+            tx.execute("DELETE FROM events WHERE category = 'mail'", [])?;
             Ok(())
         })?;
         Ok(report)

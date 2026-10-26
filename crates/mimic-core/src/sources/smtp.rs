@@ -236,8 +236,9 @@ impl<S: Read + Write> Session<S> {
         loop {
             if let Some(p) = self.buf.iter().position(|b| *b == b'\n') {
                 let raw: Vec<u8> = self.buf.drain(..=p).collect();
-                let text = String::from_utf8_lossy(&raw[..p]);
-                return Ok(text.trim_end_matches('\r').to_string());
+                let text = String::from_utf8_lossy(&raw[..p]).trim_end_matches('\r').to_string();
+                super::transcript::note("smtp <", &text);
+                return Ok(text);
             }
             if self.buf.len() > MAX_REPLY_BYTES {
                 return Err(SmtpError::Protocol("a reply with no end".into()));
@@ -270,6 +271,13 @@ impl<S: Read + Write> Session<S> {
     }
 
     fn send_line(&mut self, line: &str) -> Result<(), SmtpError> {
+        self.send_shown(line, line)
+    }
+
+    /// Send `line`, kept in the transcript as `shown`: a secret is never
+    /// kept, only what it was.
+    fn send_shown(&mut self, line: &str, shown: &str) -> Result<(), SmtpError> {
+        super::transcript::note("smtp >", shown);
         self.stream.write_all(line.as_bytes())?;
         self.stream.write_all(b"\r\n")?;
         self.stream.flush()?;
@@ -278,6 +286,12 @@ impl<S: Read + Write> Session<S> {
 
     fn command(&mut self, line: &str) -> Result<Reply, SmtpError> {
         self.send_line(line)?;
+        self.read_reply()
+    }
+
+    /// A command carrying a secret, kept in the transcript as `shown`.
+    fn secret(&mut self, line: &str, shown: &str) -> Result<Reply, SmtpError> {
+        self.send_shown(line, shown)?;
         self.read_reply()
     }
 
@@ -312,7 +326,7 @@ impl<S: Read + Write> Session<S> {
                 if r.code != 334 {
                     return Err(refused(r));
                 }
-                let r = self.command(&super::oauth::xoauth2(username, token))?;
+                let r = self.secret(&super::oauth::xoauth2(username, token), "[the sign-in]")?;
                 match r.code {
                     235 => Ok(()),
                     334 => {
@@ -329,18 +343,18 @@ impl<S: Read + Write> Session<S> {
                     if r.code != 334 {
                         return Err(refused(r));
                     }
-                    let r = self.command(&base64_standard(username.as_bytes()))?;
+                    let r = self.secret(&base64_standard(username.as_bytes()), "[the username]")?;
                     if r.code != 334 {
                         return Err(refused(r));
                     }
-                    let r = self.command(&base64_standard(password.as_bytes()))?;
+                    let r = self.secret(&base64_standard(password.as_bytes()), "[the password]")?;
                     if r.code != 235 {
                         return Err(refused(r));
                     }
                     return Ok(());
                 }
                 let response = base64_standard(format!("\0{username}\0{password}").as_bytes());
-                let r = self.command(&format!("AUTH PLAIN {response}"))?;
+                let r = self.secret(&format!("AUTH PLAIN {response}"), "AUTH PLAIN [the username and password]")?;
                 if r.code != 235 {
                     return Err(refused(r));
                 }
@@ -373,6 +387,7 @@ impl<S: Read + Write> Session<S> {
             return Err(SmtpError::Refused(r.text()));
         }
         let stuffed = dot_stuff(message);
+        super::transcript::note("smtp >", &format!("[a message, {} bytes]", message.len()));
         self.stream.write_all(&stuffed)?;
         let unsure = |_| SmtpError::Unsure;
         self.stream.write_all(b".\r\n").map_err(unsure)?;
@@ -494,6 +509,17 @@ fn open(account: &SmtpAccount, credential: &Credential) -> Result<(Session<Strea
         return Err(SmtpError::PlainRefused(host.to_string()));
     }
     let addr = format!("{host}:{}", account.port);
+    super::transcript::note(
+        "smtp",
+        &format!(
+            "connecting to {addr}{}",
+            match account.security {
+                SmtpSecurity::Tls => " over TLS",
+                SmtpSecurity::StartTls => ", to encrypt with STARTTLS",
+                SmtpSecurity::Plain => "",
+            }
+        ),
+    );
     let tcp = TcpStream::connect(&addr).map_err(|_| SmtpError::Connect(addr.clone()))?;
     tcp.set_read_timeout(Some(TIMEOUT))?;
     tcp.set_write_timeout(Some(TIMEOUT))?;
@@ -802,6 +828,33 @@ mod tests {
             b"From: c@example.com\r\nTo: ada@example.com\r\nSubject: Re: Offsite\r\n\r\nYes, I'll be there.\r\n..hidden line\r\n...two\r\n",
             "a line starting with a full stop has another put before it, so it can't end the message"
         );
+    }
+
+    #[test]
+    fn what_was_said_is_kept_without_the_password_or_the_message() {
+        let (port, _seen) = serve(Behaviour { auth: "LOGIN", ..Behaviour::default() });
+        let (sent, said) = crate::sources::transcript::recording(|| {
+            send(
+                &account(port, SmtpSecurity::Plain),
+                &pw("app-pass"),
+                "c@example.com",
+                &["ada@example.com".into()],
+                MESSAGE,
+            )
+        });
+        sent.unwrap();
+        assert_eq!(said[0], format!("smtp connecting to 127.0.0.1:{port}"));
+        assert!(said.contains(&"smtp > AUTH LOGIN".to_string()), "{said:?}");
+        assert!(
+            said.contains(&"smtp > [the username]".to_string()) && said.contains(&"smtp > [the password]".to_string())
+        );
+        assert!(said.contains(&"smtp > RCPT TO:<ada@example.com>".to_string()));
+        assert!(said.contains(&format!("smtp > [a message, {} bytes]", MESSAGE.len())), "{said:?}");
+        assert!(said.iter().any(|l| l.starts_with("smtp < 250")), "the server's side: {said:?}");
+        let all = said.join("\n");
+        let secret = base64_standard(b"app-pass");
+        assert!(!all.contains("app-pass") && !all.contains(&secret), "{all}");
+        assert!(!all.contains("Offsite") && !all.contains("be there"), "nothing of the message: {all}");
     }
 
     #[test]

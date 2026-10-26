@@ -351,6 +351,7 @@ impl<S: Read + Write> Session<S> {
                 }
                 None => {
                     line.text.push_str(&text);
+                    super::transcript::note("imap <", &line.text);
                     return Ok(line);
                 }
             }
@@ -432,6 +433,7 @@ impl<S: Read + Write> Session<S> {
         self.tag += 1;
         let tag = format!("m{}", self.tag);
         let tagged = format!("{tag} ");
+        super::transcript::note("imap >", &format!("{tag} IDLE"));
         self.stream.write_all(format!("{tag} IDLE\r\n").as_bytes())?;
         self.stream.flush()?;
         let deadline = Instant::now() + TIMEOUT;
@@ -473,6 +475,7 @@ impl<S: Read + Write> Session<S> {
     /// said meanwhile that mail arrived.
     pub fn idle_done(&mut self) -> Result<bool, ImapError> {
         let tagged = format!("m{} ", self.tag);
+        super::transcript::note("imap >", "DONE");
         self.stream.write_all(b"DONE\r\n")?;
         self.stream.flush()?;
         let deadline = Instant::now() + TIMEOUT;
@@ -495,6 +498,7 @@ impl<S: Read + Write> Session<S> {
     fn command(&mut self, cmd: &str) -> Result<Vec<Line>, ImapError> {
         self.tag += 1;
         let tag = format!("m{}", self.tag);
+        super::transcript::note("imap >", &format!("{tag} {}", super::transcript::imap_command(cmd)));
         self.stream.write_all(format!("{tag} {cmd}\r\n").as_bytes())?;
         self.stream.flush()?;
         let mut untagged = Vec::new();
@@ -524,6 +528,7 @@ impl<S: Read + Write> Session<S> {
         self.tag += 1;
         let tag = format!("m{}", self.tag);
         let response = super::oauth::xoauth2(username.trim(), access_token);
+        super::transcript::note("imap >", &format!("{tag} AUTHENTICATE XOAUTH2 [the sign-in]"));
         self.stream.write_all(format!("{tag} AUTHENTICATE XOAUTH2 {response}\r\n").as_bytes())?;
         self.stream.flush()?;
         let mut challenges = 0;
@@ -534,6 +539,7 @@ impl<S: Read + Write> Session<S> {
                 if challenges > 2 {
                     return Err(ImapError::Protocol("the server kept asking for more during sign-in".into()));
                 }
+                super::transcript::note("imap >", "(an empty line, as the server asked)");
                 self.stream.write_all(b"\r\n")?;
                 self.stream.flush()?;
                 continue;
@@ -665,8 +671,9 @@ impl<S: Read + Write> Session<S> {
     pub fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), ImapError> {
         self.tag += 1;
         let tag = format!("m{}", self.tag);
-        self.stream
-            .write_all(format!("{tag} APPEND {} (\\Seen) {{{}}}\r\n", quote(folder)?, message.len()).as_bytes())?;
+        let cmd = format!("{tag} APPEND {} (\\Seen) {{{}}}", quote(folder)?, message.len());
+        super::transcript::note("imap >", &cmd);
+        self.stream.write_all(format!("{cmd}\r\n").as_bytes())?;
         self.stream.flush()?;
         loop {
             let line = self.read_line()?;
@@ -677,6 +684,7 @@ impl<S: Read + Write> Session<S> {
                 return Err(ImapError::Refused(refusal(rest)));
             }
         }
+        super::transcript::note("imap >", &format!("[a message, {} bytes]", message.len()));
         self.stream.write_all(message)?;
         self.stream.write_all(b"\r\n")?;
         self.stream.flush()?;
@@ -801,6 +809,10 @@ impl Connection {
             return Err(ImapError::PlainRefused(account.host.clone()));
         }
         let addr = format!("{}:{}", account.host.trim(), account.port);
+        super::transcript::note(
+            "imap",
+            &format!("connecting to {addr}{}", if account.security == Security::Tls { " over TLS" } else { "" }),
+        );
         let tcp = TcpStream::connect(&addr).map_err(|_| ImapError::Connect(addr.clone()))?;
         tcp.set_read_timeout(Some(TIMEOUT))?;
         tcp.set_write_timeout(Some(TIMEOUT))?;
@@ -1099,7 +1111,10 @@ pub fn sync(
         }
     };
     db.set_source_status(source_id, "importing", None)?;
-    let result = sync_inner(db, source_id, &mut config, credential, on_progress, should_stop);
+    // What was said to the server is kept with a failure, to show why
+    // (`transcript`: never a password, a token or a message).
+    let (result, said) =
+        super::transcript::recording(|| sync_inner(db, source_id, &mut config, credential, on_progress, should_stop));
     // Every attempt is recorded, successful or not, so the schedule waits a
     // whole interval before the next one rather than retrying every minute.
     config.last_checked_at = Some(crate::ids::now_rfc3339());
@@ -1116,7 +1131,9 @@ pub fn sync(
     match &result {
         Ok(_) => db.set_source_status(source_id, "imported", None)?,
         Err(ImapError::Canceled) => db.set_source_status(source_id, "ready", None)?,
-        Err(e) => db.set_source_status(source_id, "failed", Some(&json!({ "message": e.to_string() })))?,
+        Err(e) => {
+            db.set_source_status(source_id, "failed", Some(&json!({ "message": e.to_string(), "transcript": said })))?
+        }
     }
     result
 }
@@ -2372,7 +2389,16 @@ mod tests {
         assert!(err.to_string().contains("app password"));
         let s = db.get_source(&source).unwrap().unwrap();
         assert_eq!(s.status, "failed");
-        assert!(!s.last_error.unwrap().to_string().contains("wrong"), "the password never reaches an error");
+        let last = s.last_error.unwrap();
+        assert!(!last.to_string().contains("wrong"), "the password never reaches an error");
+
+        // What was said is kept with it, without the password.
+        let said: Vec<String> = serde_json::from_value(last["transcript"].clone()).unwrap();
+        assert_eq!(said[0], format!("imap connecting to 127.0.0.1:{port}"));
+        assert!(said[1].starts_with("imap < * OK"), "{said:?}");
+        assert!(said.iter().any(|l| l.ends_with("LOGIN [the username and password]")), "{said:?}");
+        assert!(said.iter().any(|l| l.contains("NO [AUTHENTICATIONFAILED]")), "the server's answer: {said:?}");
+        assert!(!said.iter().any(|l| l.contains("wrong") || l.contains("c@example.com\"")), "{said:?}");
     }
 
     #[test]
