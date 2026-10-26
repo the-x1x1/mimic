@@ -3,6 +3,7 @@
 //! commands to the React frontend.
 
 mod app_state;
+mod background;
 mod commands;
 mod error;
 #[cfg(test)]
@@ -37,6 +38,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
+        // Started at sign-in, when the user asks, with no window: only the
+        // icon in the notification area (`background`).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![background::AT_SIGN_IN]),
+        ))
         .setup(|app| {
             let handle = app.handle().clone();
             let resource_dir = app.path().resource_dir().ok();
@@ -61,7 +69,19 @@ pub fn run() {
                 .find(|w| w.label == "main")
                 .cloned()
                 .ok_or_else(|| std::io::Error::other("tauri.conf.json has no main window"))?;
-            tauri::WebviewWindowBuilder::from_config(&handle, &window)?.build()?;
+            // Started by Windows at sign-in: the icon only, until opened.
+            let at_sign_in = std::env::args().any(|a| a == background::AT_SIGN_IN);
+            let main = tauri::WebviewWindowBuilder::from_config(&handle, &window)?.visible(!at_sign_in).build()?;
+            background::hide_on_close(&main);
+            if let Err(e) = background::tray(&handle) {
+                // Without the icon, closing the window quits as before
+                // (`background::hide_on_close` asks), and a start at sign-in
+                // shows the window rather than running unseen.
+                tracing::warn!(target: "app", error = %e, "could not put Mimic in the notification area");
+                if at_sign_in {
+                    bring_to_front(&handle);
+                }
+            }
             startup::spawn_background(handle.clone(), state.clone());
             let _ = handle.emit("app://ready", serde_json::json!({"version": mimic_core::APP_VERSION}));
             Ok(())
@@ -140,6 +160,8 @@ pub fn run() {
             commands::compose::add_draft_preference,
             commands::compose::list_recent_drafts,
             commands::sending::reply_envelope,
+            commands::background::get_start_with_windows,
+            commands::background::set_start_with_windows,
             commands::autoreply::get_autoreply,
             commands::autoreply::set_autoreply,
             commands::autoreply::stop_held_reply,
@@ -249,9 +271,9 @@ fn reopen() {
     }
 }
 
-/// The window of the Mimic already running, shown and focused for a second
-/// launch.
-fn bring_to_front(app: &tauri::AppHandle) {
+/// The window of the Mimic already running, shown and focused: for a second
+/// launch, and from the icon in the notification area.
+pub(crate) fn bring_to_front(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();

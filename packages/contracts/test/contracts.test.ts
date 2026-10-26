@@ -751,6 +751,8 @@ describe("settings and updater contracts", () => {
       "mail.checkEveryMinutes": 15,
       "waiting.withinDays": 30,
       "onboarding.completed": false,
+      "app.keepRunning": true,
+      "notify.enabled": true,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();
     expect(() => Settings.parse({ ...defaults, "updates.channel": "nightly" })).toThrow();

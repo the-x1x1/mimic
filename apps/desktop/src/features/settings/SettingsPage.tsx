@@ -33,6 +33,7 @@ import { qk } from "@/app/queryClient";
 import { DeleteEverythingDialog } from "./DeleteEverythingDialog";
 import { MeaningSection } from "./MeaningSection";
 import { AutoReplySection } from "./AutoReplySection";
+import { BackgroundSection } from "./BackgroundSection";
 import { ModelStep } from "@/features/onboarding/ModelStep";
 
 export function SettingsPage() {
@@ -48,6 +49,7 @@ export function SettingsPage() {
       <AutoReplySection />
       <MeaningSection />
       <MailSection />
+      <BackgroundSection />
       <EngineSection />
       <PrivacySection />
       <UpdatesSection />
@@ -609,8 +611,9 @@ function MailSection() {
     <Card title="Checking your mail">
       <p className="neutral">
         I look for new mail in {boxes.length === 1 ? "your mailbox" : "your mailboxes"} on a
-        schedule, read-only: nothing is marked as read, moved or deleted. A reply goes out only when
-        you send it, or when replying by myself is on.
+        schedule, and as it arrives where your mail server can tell me, read-only: nothing is marked
+        as read, moved or deleted. A reply goes out only when you send it, or when replying by
+        myself is on. Turning checking off stops both.
       </p>
       <label className="row gap-2">
         <span>Check</span>

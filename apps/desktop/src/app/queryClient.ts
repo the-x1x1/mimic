@@ -24,6 +24,7 @@ export const qk = {
   system: ["system"] as const,
   onboarding: ["onboarding"] as const,
   settings: ["settings"] as const,
+  startWithWindows: ["startWithWindows"] as const,
   connectors: ["connectors"] as const,
   sources: ["sources"] as const,
   mailSignIn: ["mailSignIn"] as const,

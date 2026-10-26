@@ -339,6 +339,21 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                             crate::commands::people::reconcile_identity(&st.db, &st.jobs, "after_job");
                         }
                         let _ = app2.emit("jobs://event", &ev);
+                        // Replies prepared in advance: said, when the user
+                        // isn't looking at Mimic, so they can look them over.
+                        if ev.status == "completed" && ev.kind == mimic_core::assist::JOB_KIND {
+                            let drafted = st
+                                .db
+                                .get_job(&ev.job_id)
+                                .ok()
+                                .flatten()
+                                .and_then(|j| j.result)
+                                .and_then(|r| r["drafted"].as_u64())
+                                .unwrap_or(0);
+                            if let Some((title, body)) = crate::background::replies_ready(drafted as usize) {
+                                crate::background::tell(&app2, &title, &body);
+                            }
+                        }
                         // New messages change how the user writes where they
                         // landed: once it has been measured, what changed is
                         // measured again by itself.

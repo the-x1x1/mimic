@@ -31,6 +31,10 @@ pub fn defaults() -> Map<String, Value> {
     // Older ones are left out as gone quiet, counted and shown on request.
     m.insert(mimic_core::db::WITHIN_DAYS_SETTING.into(), json!(mimic_core::db::DEFAULT_WITHIN_DAYS));
     m.insert("onboarding.completed".into(), json!(false));
+    // Closing the window keeps Mimic running in the notification area, and
+    // Windows notifications say when there is something to look at.
+    m.insert(crate::background::KEEP_RUNNING.into(), json!(true));
+    m.insert(crate::background::NOTIFY.into(), json!(true));
     m
 }
 

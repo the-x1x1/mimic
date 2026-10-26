@@ -89,6 +89,10 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
             if run.changed_anything() {
                 tracing::info!(target: "autoreply", held = run.held, sent = run.sent, stopped = run.stopped, failed = run.failed, "replied by itself");
                 let _ = app.emit("sending://changed", &run);
+                let hold = autoreply::rules(&state.db).map(|r| r.hold_minutes).unwrap_or_default();
+                for (title, body) in crate::background::replied_by_itself(&run, hold) {
+                    crate::background::tell(app, &title, &body);
+                }
             }
         }
         Ok(Err(e)) => tracing::warn!(target: "autoreply", error = %e, "a look at replies sent by themselves failed"),

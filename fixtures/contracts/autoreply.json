@@ -1,12 +1,12 @@
 {
   "rules": {
     "enabled": true,
-    "mailboxes": ["45a951fd-27b3-431a-bd19-8654d0904997"],
+    "mailboxes": ["d39960ff-b2b6-4808-9772-300e0f2f03a6"],
     "who": "known",
     "people": [],
     "holdMinutes": 10,
     "dailyLimit": 10,
-    "enabledAt": "2026-10-26T11:28:59.043Z"
+    "enabledAt": "2026-10-26T11:32:45.863Z"
   },
   "running": false,
   "lastDay": 0

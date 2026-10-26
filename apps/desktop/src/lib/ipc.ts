@@ -194,6 +194,11 @@ export const ipc = {
     return next;
   },
 
+  /** Whether Windows starts Mimic when the user signs in. */
+  startWithWindows: () => call("get_start_with_windows", z_bool),
+  /** Start Mimic at sign-in, or stop; resolves to what Windows then says. */
+  setStartWithWindows: (on: boolean) => call("set_start_with_windows", z_bool, { on }),
+
   connectors: () => call("list_connectors", ConnectorInfo.array()),
   sources: () => call("list_sources", Source.array()),
   validateSourceFile: (connector: string, location: string) =>
