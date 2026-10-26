@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.46] — 2026-10-26
+
+Paste it there.
+
+### Added
+
+- When you answer a message from anywhere with your shortcut, **Paste it there** puts my reply back where the message was: I remember the window you were in, bring it back to the front and paste the reply into it, ready for you to send. I only ever paste into that window, and only once it's in front; if it has closed or won't come forward, the reply is copied for you to paste instead. I never press Send for you there. **Copy and go back** is still beside it.
+
 ## [0.10.0-alpha.45] — 2026-10-26
 
 Rehearse before I reply by myself.

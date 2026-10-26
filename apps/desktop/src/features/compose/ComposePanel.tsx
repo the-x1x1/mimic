@@ -149,6 +149,29 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     toast.info("Copied");
   }
 
+  /**
+   * Put the reply where the message came from (0.10.0-alpha.46): pasted
+   * into the window the shortcut was pressed in, for the user to send there;
+   * copied, saying why, when it can't be. Then the same question as a copy.
+   */
+  async function pasteThere() {
+    if (!draft) return;
+    const text = edited;
+    setCopiedAway({ draftId: draft.id, text, generatedText: draft.generatedText });
+    setDraft(null);
+    setEdited("");
+    setIntent("");
+    setIncoming("");
+    setFromAnywhere(false);
+    try {
+      const why = await ipc.pasteBack(text);
+      if (why) toast.info("Copied", why);
+    } catch {
+      await navigator.clipboard.writeText(text).catch(() => undefined);
+      toast.info("Copied", "Paste it where the message was.");
+    }
+  }
+
   /** Copy the reply and step aside, to paste it where the message came from. */
   async function copyAndGoBack() {
     if (!draft) return;
@@ -348,9 +371,14 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
               />
               <div className="row gap-2">
                 {fromAnywhere ? (
-                  <Button variant="primary" onClick={() => void copyAndGoBack()}>
-                    Copy and go back
-                  </Button>
+                  <>
+                    <Button variant="primary" onClick={() => void pasteThere()}>
+                      Paste it there
+                    </Button>
+                    <Button variant="ghost" onClick={() => void copyAndGoBack()}>
+                      Copy and go back
+                    </Button>
+                  </>
                 ) : null}
                 <Button variant={fromAnywhere ? "ghost" : "primary"} onClick={markSent}>
                   {dirty ? "I sent my edited version" : "I sent this"}
