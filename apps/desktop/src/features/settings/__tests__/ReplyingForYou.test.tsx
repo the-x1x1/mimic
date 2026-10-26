@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,10 @@ const native = vi.hoisted(() => ({
   autoReply: vi.fn(),
   mailboxSending: vi.fn(),
   startWithWindows: vi.fn(),
+  testMailboxReading: vi.fn(),
+  testMailboxSending: vi.fn(),
+  providerState: vi.fn(),
+  checkProvider: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -165,5 +169,55 @@ describe("replying for you, set up in one place", () => {
     expect(
       within(list).getByText("Send it sends at once, with no moment to take it back."),
     ).toBeInTheDocument();
+  });
+
+  it("checks it all now, one part after another, sending nothing", async () => {
+    native.settings.mockResolvedValue({
+      "assist.autoDraft": true,
+      "app.keepRunning": true,
+      "notify.enabled": true,
+    });
+    native.sources.mockResolvedValue([mailbox("s1", "c@gmail.com")]);
+    native.autoReply.mockResolvedValue(rules(false));
+    native.mailboxSending.mockResolvedValue({
+      sending: null,
+      setByUser: false,
+      keepsSent: true,
+      signature: null,
+    });
+    native.testMailboxReading.mockResolvedValue({
+      folders: ["INBOX", "[Gmail]/Sent Mail"],
+      sentFolder: "[Gmail]/Sent Mail",
+      counts: [
+        ["INBOX", 1234],
+        ["[Gmail]/Sent Mail", 56],
+      ],
+      warnings: [],
+    });
+    native.testMailboxSending.mockRejectedValue(new Error("The server turned down the sign-in."));
+    native.providerState.mockResolvedValue({
+      providers: [{ id: "local", displayName: "Local model", local: true }],
+      active: "local",
+      configuredSecrets: [],
+    });
+    native.checkProvider.mockResolvedValue(undefined);
+    renderIt();
+    const check = await screen.findByRole("button", { name: "Check it all now (sends nothing)" });
+    // Not before the mailboxes are known, which a check would leave out.
+    await waitFor(() => expect(check).toBeEnabled());
+    fireEvent.click(check);
+    const found = await screen.findByRole("list", { name: "What the check found" });
+    await waitFor(() => expect(within(found).getAllByRole("listitem")).toHaveLength(3));
+    // Counts as this computer writes them.
+    expect(
+      within(found).getByText(
+        `Signed in. I'd read INBOX (${(1234).toLocaleString()}), [Gmail]/Sent Mail (56).`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(found).getByText(/The server turned down the sign-in/)).toBeInTheDocument();
+    expect(within(found).getByText("Local model answers.")).toBeInTheDocument();
+    expect(native.testMailboxReading).toHaveBeenCalledWith("s1");
+    expect(native.testMailboxSending).toHaveBeenCalledWith("s1");
+    expect(native.checkProvider).toHaveBeenCalledWith("local");
   });
 });
