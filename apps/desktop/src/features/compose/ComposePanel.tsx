@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { Button, Card, Field, InlineError } from "@mimic/ui";
 import {
   ADJUSTMENT_LABELS,
@@ -43,6 +44,18 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   const [intent, setIntent] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [edited, setEdited] = useState<string>("");
+
+  // Opened from anywhere (the shortcut, `anywhere.rs`): what was copied is
+  // the message being answered, and a draft for something else goes.
+  const location = useLocation();
+  const pasted = (location.state as { pasted?: unknown } | null)?.pasted;
+  useEffect(() => {
+    if (typeof pasted !== "string") return;
+    setIncoming(pasted);
+    setDraft(null);
+    setEdited("");
+    // Each time it is opened this way, even on the same words.
+  }, [location.key, pasted]);
 
   const request: ComposeRequest = useMemo(
     () => ({
