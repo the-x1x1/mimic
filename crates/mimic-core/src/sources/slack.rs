@@ -43,6 +43,23 @@ const MOST_NEW: usize = 10_000;
 const PAGE: &str = "200";
 const MAX_PAGES: usize = 50;
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// When Slack asks a check to slow down (429 with `Retry-After`), it waits
+/// as long as asked, up to this, and asks again — at most `WAITS` times a
+/// request (0.10.0-alpha.70) — rather than stopping: a workspace with more
+/// conversations than a minute's requests is read through in one check.
+const MOST_WAIT: Duration = Duration::from_secs(30);
+const WAITS: usize = 4;
+
+/// How long a 429 asks to wait, when it says, and the wait is one to keep.
+pub(crate) fn asked_to_wait(response: &reqwest::blocking::Response) -> Option<Duration> {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .filter(|wait| *wait <= MOST_WAIT)
+}
 
 /// Where a workspace's token is kept in the secret store.
 pub fn secret_key(source_id: &str) -> String {
@@ -145,16 +162,26 @@ impl SlackApi {
 
     /// One Web API method: its answer when Slack says `ok`, or why not.
     fn call(&self, method: &str, params: &[(&str, &str)], what: &'static str) -> Result<Value, SlackError> {
-        let response = self
-            .client
-            .get(format!("{}/{method}", self.base))
-            .bearer_auth(&self.token)
-            .query(params)
-            .send()
-            .map_err(|e| SlackError::Network(one_line(&e.to_string())))?;
-        if response.status().as_u16() == 429 {
-            return Err(SlackError::RateLimited);
-        }
+        let mut waits = 0;
+        let response = loop {
+            let response = self
+                .client
+                .get(format!("{}/{method}", self.base))
+                .bearer_auth(&self.token)
+                .query(params)
+                .send()
+                .map_err(|e| SlackError::Network(one_line(&e.to_string())))?;
+            if response.status().as_u16() != 429 {
+                break response;
+            }
+            match asked_to_wait(&response) {
+                Some(wait) if waits < WAITS => {
+                    waits += 1;
+                    std::thread::sleep(wait);
+                }
+                _ => return Err(SlackError::RateLimited),
+            }
+        };
         let value: Value = response.json().map_err(|e| SlackError::Network(one_line(&e.to_string())))?;
         if value.get("ok").and_then(Value::as_bool) == Some(true) {
             return Ok(value);
@@ -892,9 +919,14 @@ pub(crate) mod fake {
                 if status == 0 {
                     continue;
                 }
+                // "wait:N|…" answers with `Retry-After: N`.
+                let (extra, body) = match body.strip_prefix("wait:").and_then(|b| b.split_once('|')) {
+                    Some((n, rest)) => (format!("Retry-After: {n}\r\n"), rest.to_string()),
+                    None => (String::new(), body),
+                };
                 let mut w = stream;
                 let reply = format!(
-                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = w.write_all(reply.as_bytes());
@@ -1138,6 +1170,25 @@ mod tests {
         let people = db.list_participants(10).unwrap();
         assert!(people.iter().any(|p| p.participant.display_name == "U3"), "known by their id");
         assert_eq!(db.get_source(&source).unwrap().unwrap().status, "imported");
+    }
+
+    #[test]
+    fn asked_to_wait_a_moment_it_waits_and_reads_on() {
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = asked.clone();
+        let round = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let acme = fake::acme(round);
+        let (base, _) = fake::slack(Box::new(move |method, query| {
+            if method == "conversations.history" && count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                return (429, r#"wait:1|{"ok":false,"error":"ratelimited"}"#.into());
+            }
+            acme(method, query)
+        }));
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        let summary = sync(&db, &source, &SlackApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
+        assert!(!summary.partial, "{summary:?}");
+        assert_eq!(summary.inserted, 3);
     }
 
     #[test]
