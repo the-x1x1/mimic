@@ -60,6 +60,10 @@ pub(crate) struct Mail {
     /// `Auto-Submitted` header is not read as a machine's mail, and it is
     /// marked `sentOnItsOwn` so nothing reads it as the user's writing.
     pub(crate) sent_on_its_own: bool,
+    /// It came through a mailing list (`List-Id` or `List-Post`): a reply
+    /// goes to the list, however it is addressed, so nothing answers it by
+    /// itself (0.10.0-alpha.44, RFC 3834 §2).
+    pub(crate) list: bool,
 }
 
 impl CommunicationSource for MboxSource {
@@ -254,6 +258,7 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         to: get("to").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
         cc: get("cc").map(|v| super::outgoing::parse_address_list(&v)).unwrap_or_default(),
         sent_on_its_own: false,
+        list: get("list-id").is_some() || get("list-post").is_some(),
     })
 }
 
@@ -423,6 +428,11 @@ pub(crate) fn thread(mut mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
                                 if !list.is_empty() {
                                     meta.insert(key.into(), json!(list));
                                 }
+                            }
+                            // Through a mailing list: a reply goes to everyone
+                            // on it, so none goes by itself (`autoreply::LIST`).
+                            if m.list {
+                                meta.insert("list".into(), json!(true));
                             }
                             // Read by the dashboard to leave the thread out of
                             // what is waiting; absent means a person wrote it.
@@ -699,6 +709,38 @@ mod tests {
         let person = all.iter().find(|m| m.external_id == "p1@example.com").unwrap();
         assert_eq!(news.metadata["automated"], serde_json::json!("newsletter"));
         assert!(person.metadata.get("automated").is_none(), "a person's mail carries no marker at all");
+    }
+
+    #[test]
+    fn mail_through_a_list_says_so_and_a_persons_does_not() {
+        let mbox = concat!(
+            "From ada@example.com Mon Feb 02 08:00:00 2026\n",
+            "From: Ada <ada@example.com>\n",
+            "To: Choir <choir@lists.example>\n",
+            "Subject: rehearsal moved\n",
+            "Date: Mon, 2 Feb 2026 08:00:00 +0000\n",
+            "Message-ID: <c1@example.com>\n",
+            "List-Id: Choir <choir.lists.example>\n",
+            "List-Post: <mailto:choir@lists.example>\n",
+            "\n",
+            "anyone free tuesday instead?\n",
+            "\n",
+            "From ada@example.com Mon Feb 02 09:00:00 2026\n",
+            "From: Ada <ada@example.com>\n",
+            "Subject: lunch\n",
+            "Date: Mon, 2 Feb 2026 09:00:00 +0000\n",
+            "Message-ID: <p1@example.com>\n",
+            "\n",
+            "lunch on thursday?\n",
+        );
+        let (_dir, path) = write(mbox);
+        let convos = import(&path);
+        let all: Vec<_> = convos.iter().flat_map(|c| &c.messages).collect();
+        let list = all.iter().find(|m| m.external_id == "c1@example.com").unwrap();
+        let person = all.iter().find(|m| m.external_id == "p1@example.com").unwrap();
+        assert_eq!(list.metadata["list"], serde_json::json!(true));
+        assert!(list.metadata.get("automated").is_none(), "somewhere to post: a person on a list wrote it");
+        assert!(person.metadata.get("list").is_none());
     }
 
     #[test]

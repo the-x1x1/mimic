@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Button, Card, Field, InlineError } from "@mimic/ui";
 import {
@@ -56,17 +56,31 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   const setCopiedAway = useAnywhere((s) => s.setCopied);
 
   // Opened from anywhere (the shortcut, `anywhere.rs`): what was copied is
-  // the message being answered, and a draft for something else goes.
+  // the message being answered, and a draft for something else goes —
+  // recorded as regenerated, as one replaced here is, not left pending.
   const location = useLocation();
   const pasted = (location.state as { pasted?: unknown } | null)?.pasted;
+  const current = useRef<Draft | null>(null);
   useEffect(() => {
-    if (typeof pasted !== "string") return;
+    current.current = draft;
+  }, [draft]);
+  const handled = useRef<string | null>(null);
+  const resolveAsync = resolve.mutateAsync;
+  useEffect(() => {
+    if (typeof pasted !== "string" || handled.current === location.key) return;
+    // Each time it is opened this way, even on the same words; once each.
+    handled.current = location.key;
+    const replaced = current.current;
+    if (replaced && replaced.outcome === null) {
+      void resolveAsync({ draftId: replaced.id, outcome: "regenerated", finalText: null }).catch(
+        () => undefined,
+      );
+    }
     setIncoming(pasted);
     setDraft(null);
     setEdited("");
     setFromAnywhere(true);
-    // Each time it is opened this way, even on the same words.
-  }, [location.key, pasted]);
+  }, [location.key, pasted, resolveAsync]);
 
   const request: ComposeRequest = useMemo(
     () => ({

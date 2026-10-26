@@ -2,6 +2,26 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.44] — 2026-10-26
+
+Replying by myself, checked harder.
+
+### Changed
+
+- I don't reply by myself to mail I read more than a day ago, or that reached me days after it was sent — a backlog, however it came to be allowed — nor to mail that came through a mailing list, where a reply goes to everyone on it.
+- When a reply I sent by myself may or may not have gone, a notification says so and where to look. With hours set, the one for a reply I'm holding says it goes within them.
+
+### Fixed
+
+- A held reply waited for your mailbox to be read again, but a check that began before its hold ended counted, so an answer you sent from your phone in between could be missed. Only a check that began after the hold ended counts now, and every rule is checked again on what it read.
+- Rules you change while held replies are going apply to the rest at once, and a reply whose mailbox's sending address changed while it was held waits for you.
+- Pressing Send on a reply I'm holding to send by myself says so, rather than that it has already gone.
+- A reply you approve goes only to an address the Send panel offered for it.
+- Some mail servers repeat how many messages the inbox holds each time I wait on them; I took that for new mail and checked again and again. Only a change counts now, and a server that keeps ending its wait at once is left alone for a growing while.
+- A watch on a mailbox the server turns down — a changed password, or a sign-in refused twice — now asks for a check, which says so under Your mail and in a notification, instead of trying quietly every few minutes.
+- After a watch that had been working drops, I try again within half a minute, not after the long pause left from earlier failures; and a check asked for while one is running is queued, so mail that arrived during it isn't left for the schedule.
+- A draft for a message copied from anywhere, replaced when you copy in another, is recorded as passed over rather than left waiting.
+
 ## [0.10.0-alpha.43] — 2026-10-26
 
 Replying for you, brought up to date.

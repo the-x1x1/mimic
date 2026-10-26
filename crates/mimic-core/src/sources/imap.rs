@@ -165,6 +165,12 @@ pub struct ImapSourceConfig {
     pub marks: BTreeMap<String, FolderMark>,
     #[serde(default)]
     pub last_checked_at: Option<String>,
+    /// When the last check that read the mailbox through began — not when
+    /// it ended, and not one that failed or was stopped (0.10.0-alpha.44):
+    /// everything sent before then is in what was read, so a reply held
+    /// for a check knows whether the user answered first (`autoreply`).
+    #[serde(default)]
+    pub last_read_at: Option<String>,
     /// How replies go out through this mailbox, as the user set it
     /// (0.10.0-alpha.23). `None` for one connected before then, or never set:
     /// `sending_account` falls back to its provider's known server.
@@ -426,10 +432,11 @@ impl<S: Read + Write> Session<S> {
             .collect())
     }
 
-    /// Begin `IDLE` (RFC 2177): send it, and wait for the go-ahead. True when
-    /// the server said on the way that mail arrived. Nothing is read or
-    /// changed by idling: the caller checks the mailbox.
-    pub fn idle_start(&mut self) -> Result<bool, ImapError> {
+    /// Begin `IDLE` (RFC 2177): send it, and wait for the go-ahead, keeping
+    /// `count` to what the server says on the way. True when that says mail
+    /// arrived. Nothing is read or changed by idling: the caller checks the
+    /// mailbox.
+    pub fn idle_start(&mut self, count: &mut Count) -> Result<bool, ImapError> {
         self.tag += 1;
         let tag = format!("m{}", self.tag);
         let tagged = format!("{tag} ");
@@ -448,13 +455,20 @@ impl<S: Read + Write> Session<S> {
             if let Some(rest) = line.text.strip_prefix(&tagged) {
                 return Err(ImapError::Refused(refusal(rest)));
             }
-            arrived |= says_arrived(&line.text);
+            arrived |= count.hears(&line.text);
         }
     }
 
-    /// Wait in `IDLE` until the server says mail arrived (`* n EXISTS`),
-    /// `deadline` passes, or `should_stop`.
-    pub fn idle_wait(&mut self, deadline: Instant, should_stop: &dyn Fn() -> bool) -> Result<IdleWait, ImapError> {
+    /// Wait in `IDLE` until the server says mail arrived (a count above
+    /// `count`, kept up to date meanwhile), `deadline` passes, or
+    /// `should_stop`. A count it had already, or one lower, is not news:
+    /// some servers say it each time a wait begins.
+    pub fn idle_wait(
+        &mut self,
+        deadline: Instant,
+        should_stop: &dyn Fn() -> bool,
+        count: &mut Count,
+    ) -> Result<IdleWait, ImapError> {
         let tagged = format!("m{} ", self.tag);
         loop {
             let Some(line) = self.line_by(deadline, should_stop)? else { return Ok(IdleWait::Quiet) };
@@ -465,15 +479,15 @@ impl<S: Read + Write> Session<S> {
                     Err(ImapError::Refused(refusal(rest)))
                 };
             }
-            if says_arrived(&line.text) {
+            if count.hears(&line.text) {
                 return Ok(IdleWait::Arrived);
             }
         }
     }
 
-    /// End `IDLE`: `DONE`, and the server's tagged end. True when the server
-    /// said meanwhile that mail arrived.
-    pub fn idle_done(&mut self) -> Result<bool, ImapError> {
+    /// End `IDLE`: `DONE`, and the server's tagged end, keeping `count` to
+    /// what it says meanwhile. True when that says mail arrived.
+    pub fn idle_done(&mut self, count: &mut Count) -> Result<bool, ImapError> {
         let tagged = format!("m{} ", self.tag);
         super::transcript::note("imap >", "DONE");
         self.stream.write_all(b"DONE\r\n")?;
@@ -490,7 +504,7 @@ impl<S: Read + Write> Session<S> {
                     Err(ImapError::Refused(refusal(rest)))
                 };
             }
-            arrived |= says_arrived(&line.text);
+            arrived |= count.hears(&line.text);
         }
     }
 
@@ -711,10 +725,33 @@ fn literal_len(text: &str) -> Option<usize> {
         .and_then(|n| n.trim_end_matches('+').parse::<usize>().ok())
 }
 
-/// Whether an untagged line says a message arrived in the open folder.
-fn says_arrived(text: &str) -> bool {
-    let t = text.to_ascii_uppercase();
-    t.starts_with("* ") && t.ends_with(" EXISTS")
+/// How many messages the open folder holds, kept from what the server says
+/// (0.10.0-alpha.44): `* n EXISTS` is the count, and each `* n EXPUNGE` one
+/// fewer (RFC 3501 §7.4.1, no new count follows one). Mail arrived when a
+/// count is above the one before — not when it is the same, which some
+/// servers repeat each time a wait begins, nor after a message was removed
+/// and another came, which a count compared with the first alone would miss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Count(pub u32);
+
+impl Count {
+    /// Take in one untagged line; true when it says mail arrived.
+    fn hears(&mut self, text: &str) -> bool {
+        let Some((n, word)) = text.trim().strip_prefix("* ").and_then(|t| t.split_once(' ')) else {
+            return false;
+        };
+        if word.eq_ignore_ascii_case("EXISTS") {
+            let Ok(n) = n.parse::<u32>() else { return false };
+            let more = n > self.0;
+            self.0 = n;
+            more
+        } else if word.eq_ignore_ascii_case("EXPUNGE") && n.parse::<u32>().is_ok() {
+            self.0 = self.0.saturating_sub(1);
+            false
+        } else {
+            false
+        }
+    }
 }
 
 /// An IMAP quoted string. CR and LF cannot appear in one, and a password
@@ -933,33 +970,39 @@ impl Connection {
         with_session!(self, s => s.capabilities())
     }
 
-    /// Wait in `IDLE` (RFC 2177) for mail to arrive in the open folder: until
-    /// the server says it did, `wait` has passed, or `should_stop`; then
-    /// `DONE`, and the server's end of it. True when mail arrived.
+    /// Wait in `IDLE` (RFC 2177) in the open folder: until the server says
+    /// mail arrived (`Count`, kept up to date), `wait` has passed, or
+    /// `should_stop`; then `DONE`, and the server's end of it. Whether mail
+    /// arrived, and whether the server ended the wait itself.
     ///
     /// The wait reads without blocking, with a short pause between reads, so
     /// a stop is noticed while nothing arrives. Not a read timeout: Windows
     /// says a socket whose read timed out is in an indeterminate state and
     /// shouldn't be used again. Sending `IDLE` and `DONE`, and reading the
     /// answers, block as every other command does.
-    pub fn idle(&mut self, wait: Duration, should_stop: &dyn Fn() -> bool) -> Result<bool, ImapError> {
+    pub fn idle(
+        &mut self,
+        wait: Duration,
+        should_stop: &dyn Fn() -> bool,
+        count: &mut Count,
+    ) -> Result<(bool, bool), ImapError> {
         let until = Instant::now() + wait;
-        let mut arrived = with_session!(self, s => s.idle_start())?;
+        let mut arrived = with_session!(self, s => s.idle_start(count))?;
         if !arrived {
             self.socket().set_nonblocking(true)?;
-            let waited = with_session!(self, s => s.idle_wait(until, should_stop));
+            let waited = with_session!(self, s => s.idle_wait(until, should_stop, count));
             let restored = self.socket().set_nonblocking(false);
             let waited = waited?;
             restored?;
             match waited {
                 // The server ended it: there is nothing to end.
-                IdleWait::Ended => return Ok(true),
+                IdleWait::Ended => return Ok((false, true)),
                 IdleWait::Arrived => arrived = true,
                 IdleWait::Quiet => {}
             }
         }
-        let said = with_session!(self, s => s.idle_done())?;
-        Ok(arrived || said)
+        let said = with_session!(self, s => s.idle_done(count))?;
+        Ok((arrived || said, false))
     }
 
     fn socket(&self) -> &TcpStream {
@@ -1051,9 +1094,11 @@ fn watch_inner(
         conn.logout();
         return Ok(Watched::NoIdle);
     }
-    conn.examine(folder)?;
+    let (_, exists) = conn.examine(folder)?;
+    let mut count = Count(exists);
     listening(true);
     let started = Instant::now();
+    let mut quick = 0;
     loop {
         if should_stop() {
             conn.logout();
@@ -1064,11 +1109,30 @@ fn watch_inner(
             conn.logout();
             return Ok(Watched::Renew);
         }
-        if conn.idle(left.min(times.renew), should_stop)? {
+        let round = Instant::now();
+        let (came, ended) = conn.idle(left.min(times.renew), should_stop, &mut count)?;
+        if came {
             arrived();
+        }
+        // A server that ends every wait at once would have it begun again
+        // without a pause: a few in a row and the watch is given up, for the
+        // caller's growing pause.
+        if ended && round.elapsed() < QUICK_ROUND {
+            quick += 1;
+            if quick >= QUICK_ROUNDS {
+                conn.logout();
+                return Err(ImapError::Protocol("the server keeps ending its wait at once".into()));
+            }
+        } else {
+            quick = 0;
         }
     }
 }
+
+/// A wait in `IDLE` the server ends sooner than this is one ended at once;
+/// `QUICK_ROUNDS` of them in a row end the watch.
+const QUICK_ROUND: Duration = Duration::from_secs(2);
+const QUICK_ROUNDS: u32 = 5;
 
 /// Put a copy of a reply Mimic sent in the mailbox's Sent folder, marked as
 /// read, for a provider that doesn't keep one itself (`smtp::keeps_sent`):
@@ -1173,6 +1237,7 @@ pub fn sync(
         }
     };
     db.set_source_status(source_id, "importing", None)?;
+    let began = crate::ids::now_rfc3339();
     // What was said to the server is kept with a failure, to show why
     // (`transcript`: never a password, a token or a message).
     let (result, said) =
@@ -1180,6 +1245,9 @@ pub fn sync(
     // Every attempt is recorded, successful or not, so the schedule waits a
     // whole interval before the next one rather than retrying every minute.
     config.last_checked_at = Some(crate::ids::now_rfc3339());
+    if result.is_ok() {
+        config.last_read_at = Some(began);
+    }
     // How replies go out, and what they are signed with, may have been
     // changed while this check ran; that is the user's, and is kept rather
     // than written over with what was read at the start.
@@ -1964,6 +2032,7 @@ mod tests {
             sent_folder: None,
             marks: BTreeMap::new(),
             last_checked_at: None,
+            last_read_at: None,
             sending: None,
             signature: None,
         };
@@ -2234,6 +2303,16 @@ mod tests {
     /// its first IDLE says a message arrived after a moment; later ones say
     /// nothing until DONE. Records what it was sent.
     fn idle_server(can_idle: bool) -> (u16, std::sync::mpsc::Receiver<Vec<String>>) {
+        idle_server_saying(can_idle, "* 4 EXISTS", false)
+    }
+
+    /// An IDLE server that says `first` in the first wait (the folder holds
+    /// 3), or ends every wait at once.
+    fn idle_server_saying(
+        can_idle: bool,
+        first: &'static str,
+        ends_at_once: bool,
+    ) -> (u16, std::sync::mpsc::Receiver<Vec<String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -2267,12 +2346,15 @@ mod tests {
                         format!("* CAPABILITY IMAP4rev1{idle} AUTH=XOAUTH2\r\n{tag} OK done\r\n")
                     } else if upper.starts_with("EXAMINE") {
                         format!("* 3 EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n{tag} OK [READ-ONLY] done\r\n")
+                    } else if upper == "IDLE" && ends_at_once {
+                        w.write_all(format!("+ idling\r\n{tag} OK IDLE terminated\r\n").as_bytes()).unwrap();
+                        continue;
                     } else if upper == "IDLE" {
                         idles += 1;
                         w.write_all(b"+ idling\r\n").unwrap();
                         if idles == 1 {
                             std::thread::sleep(Duration::from_millis(300));
-                            w.write_all(b"* 4 EXISTS\r\n").unwrap();
+                            w.write_all(format!("{first}\r\n").as_bytes()).unwrap();
                         } else {
                             w.write_all(b"* OK Still here\r\n").unwrap();
                         }
@@ -2335,6 +2417,57 @@ mod tests {
         assert!(commands.iter().any(|c| c.ends_with("EXAMINE \"INBOX\"")), "{commands:?}");
         assert_eq!(commands.iter().filter(|c| c.ends_with(" IDLE")).count(), 2, "{commands:?}");
         assert_eq!(commands.iter().filter(|c| c.as_str() == "DONE").count(), 2, "every IDLE is ended: {commands:?}");
+    }
+
+    #[test]
+    fn a_server_that_says_the_count_it_had_is_not_mail_arriving() {
+        let (port, _seen) = idle_server_saying(true, "* 3 EXISTS", false);
+        let arrivals = std::cell::Cell::new(0);
+        let started = Instant::now();
+        let should_stop = || started.elapsed() > Duration::from_millis(1200);
+        let mut arrived = || arrivals.set(arrivals.get() + 1);
+        let times = Watching { renew: Duration::from_secs(20), session: Duration::from_secs(60) };
+        let watched = watch(&here(port), "INBOX", &pw("x"), times, &should_stop, &|_| {}, &mut arrived).unwrap();
+        assert_eq!(watched, Watched::Stopped);
+        assert_eq!(arrivals.get(), 0, "3 was what the folder held");
+    }
+
+    #[test]
+    fn mail_that_comes_after_one_was_removed_is_mail_arriving() {
+        // 3 held; one removed (2), then one came (3): the same count as at
+        // first, and new mail all the same.
+        let (port, _seen) = idle_server_saying(true, "* 2 EXPUNGE\r\n* 3 EXISTS", false);
+        let arrivals = std::cell::Cell::new(0);
+        let started = Instant::now();
+        let should_stop = || started.elapsed() > Duration::from_millis(1200);
+        let mut arrived = || arrivals.set(arrivals.get() + 1);
+        let times = Watching { renew: Duration::from_secs(20), session: Duration::from_secs(60) };
+        watch(&here(port), "INBOX", &pw("x"), times, &should_stop, &|_| {}, &mut arrived).unwrap();
+        assert_eq!(arrivals.get(), 1);
+    }
+
+    #[test]
+    fn the_count_is_kept_from_what_the_server_says() {
+        let mut count = Count(3);
+        assert!(!count.hears("* 3 EXISTS"), "the same count");
+        assert!(!count.hears("* 1 EXPUNGE"));
+        assert_eq!(count, Count(2));
+        assert!(count.hears("* 3 exists"), "one more than after the removal");
+        assert!(!count.hears("* 1 EXISTS"), "fewer is not news");
+        assert_eq!(count, Count(1));
+        assert!(!count.hears("* OK Still here"));
+        assert!(!count.hears("* 4 FETCH (FLAGS (\\Seen))"));
+        assert_eq!(count, Count(1));
+    }
+
+    #[test]
+    fn a_server_that_ends_every_wait_at_once_is_left_for_the_callers_pause() {
+        let (port, seen) = idle_server_saying(true, "", true);
+        let times = Watching { renew: Duration::from_secs(20), session: Duration::from_secs(60) };
+        let e = watch(&here(port), "INBOX", &pw("x"), times, &|| false, &|_| {}, &mut || {}).unwrap_err();
+        assert!(matches!(e, ImapError::Protocol(_)), "{e}");
+        let commands = seen.recv().unwrap();
+        assert_eq!(commands.iter().filter(|c| c.ends_with(" IDLE")).count() as u32, QUICK_ROUNDS, "{commands:?}");
     }
 
     #[test]
@@ -2898,6 +3031,7 @@ mod tests {
             sent_folder: None,
             marks: BTreeMap::new(),
             last_checked_at: None,
+            last_read_at: None,
             sending: None,
             signature: None,
         };
@@ -2985,6 +3119,7 @@ mod tests {
             sent_folder: None,
             marks: BTreeMap::new(),
             last_checked_at: None,
+            last_read_at: None,
             sending: None,
             signature: None,
         };

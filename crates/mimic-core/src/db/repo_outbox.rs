@@ -14,6 +14,10 @@ use crate::ids::{new_id, now_rfc3339};
 
 /// Why a reply is not sent again: it is being sent, is waiting to be, or was.
 pub const ALREADY_SENDING: &str = "That reply is already on its way, or has gone, so it wasn't sent again.";
+/// A reply to it is held to go by itself: the user's own waits until that
+/// one is stopped, so two never go.
+pub const HELD_BY_ITSELF: &str =
+    "I'm holding a reply to this to send by myself. Stop it first if you'd rather send your own.";
 
 /// Said of a reply the user said didn't go, after it may have.
 pub const DID_NOT_GO: &str = "You looked in your Sent folder, and it didn't go.";
@@ -194,6 +198,7 @@ impl Db {
                 match live.as_deref() {
                     None => {}
                     Some("unsure") => return Err(DbError::Invalid(MAY_HAVE_GONE.into())),
+                    Some("held") => return Err(DbError::Invalid(HELD_BY_ITSELF.into())),
                     Some(_) => return Err(DbError::Invalid(ALREADY_SENDING.into())),
                 }
             }
@@ -335,7 +340,9 @@ impl Db {
     pub fn take_held_outgoing(&self, id: &str, now: &str) -> DbResult<bool> {
         let n = self.conn().execute(
             "UPDATE outbox SET status = 'sending', updated_at = ?2
-             WHERE id = ?1 AND status = 'held' AND send_after <= ?2",
+             WHERE id = ?1 AND status = 'held' AND send_after <= ?2
+               AND (draft_id IS NULL
+                    OR EXISTS (SELECT 1 FROM drafts WHERE id = outbox.draft_id AND outcome IS NULL))",
             params![id, now],
         )?;
         Ok(n == 1)
@@ -354,10 +361,7 @@ impl Db {
     /// Stop every held reply: replying by itself was turned off. Returns how
     /// many.
     pub fn stop_all_held_outgoing(&self, why: &str) -> DbResult<usize> {
-        Ok(self.conn().execute(
-            "UPDATE outbox SET status = 'canceled', error = ?1, updated_at = ?2 WHERE status = 'held'",
-            params![why, now_rfc3339()],
-        )?)
+        Ok(stop_all_held_in(&self.conn(), why)?)
     }
 
     /// Let a held reply go at the next look, rather than when its hold ends.
@@ -465,6 +469,15 @@ impl Db {
             params![INTERRUPTED, now_rfc3339()],
         )?)
     }
+}
+
+/// Stop every held reply, on a connection or in a transaction already open
+/// (`Db::set_setting_stopping_held`).
+pub(super) fn stop_all_held_in(conn: &rusqlite::Connection, why: &str) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE outbox SET status = 'canceled', error = ?1, updated_at = ?2 WHERE status = 'held'",
+        params![why, now_rfc3339()],
+    )
 }
 
 #[cfg(test)]

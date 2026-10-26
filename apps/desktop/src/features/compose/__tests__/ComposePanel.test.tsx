@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GenerationContext, type Draft } from "@mimic/contracts";
 import { contractFixture } from "@mimic/test-fixtures";
@@ -119,6 +119,41 @@ describe("writing something new", () => {
       });
       native.stepAside.mockResolvedValue(true);
       native.generateDraft.mockResolvedValue(draft("d1", "yes, see you at 7"));
+    });
+
+    it("records a draft for one message as passed over when another is copied in", async () => {
+      function CopyAnother() {
+        const navigate = useNavigate();
+        return (
+          <button type="button" onClick={() => navigate("/write", { state: { pasted: "or 8?" } })}>
+            Copy another
+          </button>
+        );
+      }
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter
+            initialEntries={[{ pathname: "/write", state: { pasted: "are we still on for 7?" } }]}
+          >
+            <ComposePanel />
+            <CopyAnother />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      const write = await screen.findByRole("button", { name: "Write a draft" });
+      await waitFor(() => expect(write).toBeEnabled());
+      fireEvent.click(write);
+      expect(await screen.findByDisplayValue("yes, see you at 7")).toBeInTheDocument();
+      expect(native.resolveDraft).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy another" }));
+      expect(await screen.findByDisplayValue("or 8?")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d1", "regenerated", null),
+      );
+      expect(native.resolveDraft).toHaveBeenCalledTimes(1);
+      expect(screen.queryByDisplayValue("yes, see you at 7")).not.toBeInTheDocument();
     });
 
     async function draftFromAnywhere() {

@@ -307,6 +307,11 @@ impl Db {
         Ok(self.conn().query_row(&format!("SELECT {COLS} FROM messages WHERE id = ?1"), [id], map).optional()?)
     }
 
+    /// When Mimic read a message: not when it says it was sent.
+    pub fn message_imported_at(&self, id: &str) -> DbResult<Option<String>> {
+        Ok(self.conn().query_row("SELECT imported_at FROM messages WHERE id = ?1", [id], |r| r.get(0)).optional()?)
+    }
+
     /// Keyset page of the user's own messages, optionally narrowed to one
     /// channel or one conversation partner. `after` is the id returned as
     /// `next` by the previous page; pass `None` for the first page.

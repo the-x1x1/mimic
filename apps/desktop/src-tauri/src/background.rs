@@ -205,16 +205,27 @@ pub fn replies_ready(drafted: usize) -> Option<(String, String)> {
     })
 }
 
-/// What replying by itself just did, as notifications: held, sent, failed.
-pub fn replied_by_itself(run: &mimic_core::autoreply::Run, hold_minutes: i64) -> Vec<(String, String)> {
+/// What replying by itself just did, as notifications: held, sent, failed,
+/// and sent but perhaps not received.
+pub fn replied_by_itself(
+    run: &mimic_core::autoreply::Run,
+    rules: &mimic_core::autoreply::Rules,
+) -> Vec<(String, String)> {
     let mut out = Vec::new();
     if run.held > 0 {
         let (it, them) = if run.held == 1 { ("it", "itself") } else { ("them", "themselves") };
         let mut body = replies(run.held);
         body[..1].make_ascii_uppercase();
+        let hold = rules.hold_minutes;
+        // With hours set, the hold may end outside them and the reply wait
+        // for them to begin (`autoreply::first_within`).
+        let when = match rules.hours {
+            Some(_) => format!("after at least {hold} minutes, within the hours you chose"),
+            None => format!("in {hold} minutes"),
+        };
         out.push((
             "Going by itself soon".to_string(),
-            format!("{body} will go by {them} in {hold_minutes} minutes. You can stop {it} on the home screen."),
+            format!("{body} will go by {them} {when}. You can stop {it} on the home screen."),
         ));
     }
     if run.sent > 0 {
@@ -229,6 +240,15 @@ pub fn replied_by_itself(run: &mimic_core::autoreply::Run, hold_minutes: i64) ->
         out.push((
             "A reply didn't go".to_string(),
             format!("{what} didn't go. What I've sent, under Your mail, says why."),
+        ));
+    }
+    if run.unsure > 0 {
+        let what = if run.unsure == 1 { "A reply I sent by myself" } else { "Replies I sent by myself" };
+        out.push((
+            "A reply may have gone".to_string(),
+            format!(
+                "{what} may or may not have gone: the connection was lost as it went. Look in your Sent folder; What I've sent, under Your mail, asks what you found."
+            ),
         ));
     }
     out
@@ -255,19 +275,28 @@ mod tests {
             replies_ready(3).unwrap().1,
             "I've written 3 replies. They're on the home screen for you to look over and send."
         );
-        let run = mimic_core::autoreply::Run { held: 1, sent: 2, stopped: 1, failed: 1, ..Default::default() };
-        let said = replied_by_itself(&run, 10);
+        use mimic_core::autoreply::{Hours, Rules, Run};
+        let ten = Rules { hold_minutes: 10, ..Rules::default() };
+        let run = Run { held: 1, sent: 2, stopped: 1, failed: 1, unsure: 1, ..Default::default() };
+        let said = replied_by_itself(&run, &ten);
         assert_eq!(
             said.iter().map(|(_, b)| b.as_str()).collect::<Vec<_>>(),
             vec![
                 "A reply will go by itself in 10 minutes. You can stop it on the home screen.",
                 "I sent 2 replies for you. What I've sent is under Your mail.",
                 "A reply I meant to send by myself didn't go. What I've sent, under Your mail, says why.",
+                "A reply I sent by myself may or may not have gone: the connection was lost as it went. Look in your Sent folder; What I've sent, under Your mail, asks what you found.",
             ]
         );
-        let held = replied_by_itself(&mimic_core::autoreply::Run { held: 2, ..Default::default() }, 5);
+        let five = Rules { hold_minutes: 5, ..Rules::default() };
+        let held = replied_by_itself(&Run { held: 2, ..Default::default() }, &five);
         assert_eq!(held[0].1, "2 replies will go by themselves in 5 minutes. You can stop them on the home screen.");
-        assert!(replied_by_itself(&mimic_core::autoreply::Run { stopped: 3, ..Default::default() }, 10).is_empty());
+        let in_hours = Rules { hours: Some(Hours { from: 9, to: 17 }), ..five };
+        assert_eq!(
+            replied_by_itself(&Run { held: 1, ..Default::default() }, &in_hours)[0].1,
+            "A reply will go by itself after at least 5 minutes, within the hours you chose. You can stop it on the home screen."
+        );
+        assert!(replied_by_itself(&Run { stopped: 3, ..Default::default() }, &ten).is_empty());
     }
 
     #[test]
