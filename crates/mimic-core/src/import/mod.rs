@@ -230,9 +230,10 @@ fn joins_by_message_id(connector: &str) -> bool {
 
 /// Connectors whose message ids are the same in every source of theirs —
 /// one Telegram chat exported, then the whole account; two of Meta's
-/// downloads (0.10.0-alpha.61) — so a conversation is joined, and a message
+/// downloads (0.10.0-alpha.61); this month's phone backup after last
+/// month's (0.10.0-alpha.62) — so a conversation is joined, and a message
 /// kept once, across them, as mail is by its Message-ID.
-pub const SAME_IDS_CONNECTORS: [&str; 2] = ["telegram", "meta"];
+pub const SAME_IDS_CONNECTORS: [&str; 3] = ["telegram", "meta", "sms"];
 
 fn same_ids(connector: &str) -> Option<String> {
     SAME_IDS_CONNECTORS.contains(&connector).then(|| connector.to_string())

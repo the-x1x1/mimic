@@ -94,9 +94,9 @@ export function OnboardingFlow() {
         {welcome ? (
           <Card title="Start with what you already have">
             <p>
-              Import a WhatsApp chat, a Telegram export, your Messenger or Instagram messages, a
-              Discord data package, an email export (.mbox), or a Mimic JSON file. You can start
-              with one conversation and add more later.
+              Import a WhatsApp chat, a Telegram export, your Messenger or Instagram messages, your
+              Android text messages, a Discord data package, an email export (.mbox), or a Mimic
+              JSON file. You can start with one conversation and add more later.
             </p>
             <p className="muted small">
               Mimic learns your writing style from messages you wrote. It does not yet import PDFs,
