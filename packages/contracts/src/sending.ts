@@ -1,0 +1,127 @@
+import { z } from "zod";
+
+/**
+ * Sending replies through the user's own mailbox (0.10.0-alpha.23): how a
+ * mailbox sends (`sources::smtp::SmtpAccount`), who a reply goes to before
+ * it goes (`sending::ReplyEnvelope`), and what was sent (`db::OutboxEntry`).
+ */
+
+/** `tls` is encrypted from the start (465); `startTls` encrypts first thing (587); `plain` is this computer only. */
+export const SmtpSecurity = z.enum(["tls", "startTls", "plain"]);
+export type SmtpSecurity = z.infer<typeof SmtpSecurity>;
+
+export const SmtpAccount = z.object({
+  host: z.string(),
+  port: z.number().int(),
+  security: SmtpSecurity,
+  /** Who it signs in as: the mailbox's own username. */
+  username: z.string(),
+  /** The address replies go out from. */
+  fromAddress: z.string(),
+});
+export type SmtpAccount = z.infer<typeof SmtpAccount>;
+
+/** How a mailbox sends: as the user set it, or its provider's known server. */
+export const MailboxSending = z.object({
+  sending: SmtpAccount.nullable(),
+  setByUser: z.boolean(),
+});
+export type MailboxSending = z.infer<typeof MailboxSending>;
+
+export const SendingMailbox = z.object({
+  sourceId: z.string(),
+  name: z.string(),
+  /** Null when it can't send; `whyNot` says why. */
+  fromAddress: z.string().nullable(),
+  server: z.string().nullable(),
+  whyNot: z.string().nullable(),
+});
+export type SendingMailbox = z.infer<typeof SendingMailbox>;
+
+/** Everything the Send panel shows before anything goes. */
+export const ReplyEnvelope = z.object({
+  draftId: z.string(),
+  /** Every connected mailbox, the one the message came in to first. */
+  mailboxes: z.array(SendingMailbox),
+  /** The one it goes through unless the user picks another. */
+  mailbox: z.string().nullable(),
+  to: z.array(z.string()),
+  /** The person's other addresses, to send to instead. */
+  otherAddresses: z.array(z.string()),
+  subject: z.string(),
+  /** Why it can't be sent from here at all. */
+  whyNot: z.string().nullable(),
+});
+export type ReplyEnvelope = z.infer<typeof ReplyEnvelope>;
+
+/** What the user approved, sent exactly as given. */
+export interface SendRequest {
+  draftId: string;
+  text: string;
+  sourceId: string;
+  to: string[];
+  subject: string;
+}
+
+export const SendHow = z.enum(["approved", "autonomous"]);
+export type SendHow = z.infer<typeof SendHow>;
+export const SendStatus = z.enum(["held", "sending", "sent", "unsure", "failed", "canceled"]);
+export type SendStatus = z.infer<typeof SendStatus>;
+
+/** One reply Mimic sent, is sending, or holds to send. */
+export const OutboxEntry = z.object({
+  id: z.string(),
+  draftId: z.string().nullable(),
+  sourceId: z.string(),
+  conversationId: z.string().nullable(),
+  answersMessageId: z.string().nullable(),
+  participantId: z.string().nullable(),
+  fromAddress: z.string(),
+  to: z.array(z.string()),
+  cc: z.array(z.string()),
+  subject: z.string(),
+  body: z.string(),
+  messageId: z.string(),
+  how: SendHow,
+  status: SendStatus,
+  sendAfter: z.string(),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  sentAt: z.string().nullable(),
+});
+export type OutboxEntry = z.infer<typeof OutboxEntry>;
+
+/** The address list as one would write it on an envelope. */
+export function listAddresses(addresses: readonly string[]): string {
+  if (addresses.length <= 2) return addresses.join(" and ");
+  return `${addresses.slice(0, -1).join(", ")} and ${addresses.at(-1) ?? ""}`;
+}
+
+/**
+ * Where a reply stands, in one sentence: sent, going, waiting to go, stopped,
+ * or why it didn't go. A reply that may have gone says to look before sending
+ * it again.
+ */
+export function describeOutboxEntry(e: OutboxEntry): string {
+  const to = listAddresses(e.to);
+  switch (e.status) {
+    case "sent":
+      return e.how === "autonomous" ? `I sent this to ${to} by myself.` : `Sent to ${to}.`;
+    case "sending":
+      return `Sending to ${to}…`;
+    case "held":
+      return `Waiting to go to ${to}. You can stop it until then.`;
+    case "canceled":
+      return `Stopped before it went to ${to}.`;
+    case "unsure":
+      return `May have gone to ${to} — I couldn't tell. Look in your Sent folder.`;
+    case "failed":
+      return e.error ? `Didn't go to ${to}: ${e.error}` : `Didn't go to ${to}.`;
+  }
+}
+
+/** Codes a send can fail with, and what each means for the Send button. */
+export function sendMayHaveGone(code: string | undefined): boolean {
+  return code === "send_unsure";
+}

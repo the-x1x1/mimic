@@ -9,6 +9,7 @@ import {
   type Dashboard,
   type DashboardThread,
   type Draft,
+  type ReplyEnvelope,
   type ThreadMark,
   type Toward,
   SituationChoice,
@@ -23,6 +24,7 @@ import {
 } from "@mimic/contracts";
 import { useDashboard, useMarkThread, useStartAssistDrafts } from "@/hooks/useDashboard";
 import { useGenerateDraft, useResolveDraft, useWriteAnother } from "@/hooks/useCompose";
+import { useReplyEnvelope } from "@/hooks/useSending";
 import { useSituations } from "@/hooks/useVoice";
 import { formatRelative } from "@/lib/format";
 import { toast } from "@/state/toast";
@@ -30,6 +32,7 @@ import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { SentFolderNotice } from "@/features/identity/AddAddressForm";
 import { ThreadMessages } from "./ThreadMessages";
+import { SendPanel } from "./SendPanel";
 
 /**
  * The one screen: who is waiting, what they said, and what Mimic would say
@@ -37,8 +40,9 @@ import { ThreadMessages } from "./ThreadMessages";
  *
  * Two claims it must never make. It is not an inbox — every message on it
  * arrived through an import, and the first sentence says so before it says
- * anything else. And a draft is a draft: using one copies it and records what
- * you sent. Nothing here sends.
+ * anything else. And a draft is a draft: nothing goes until the user sends
+ * it — from their own mailbox, after seeing who it goes to (`SendPanel`), or
+ * copied and sent themselves — and what they sent is what is recorded.
  *
  * What is waiting leaves out mail that looks automated, threads that have gone
  * quiet (older than the window in Settings) and threads the user said need no
@@ -67,7 +71,7 @@ export function RepliesPage() {
             {data.awaiting.every((t) => t.draft !== null)
               ? "I've written a reply for each one, in your words."
               : "Tell me roughly what you want to say, and I'll put it in your words."}{" "}
-            Read it, change anything you like, then send it yourself &mdash; I never send anything.
+            Read it and change anything you like. Nothing goes until you send it.
           </p>
         ) : null}
         <LeftOutLine data={data} showing={showLeftOut} onToggle={() => setShowLeftOut((v) => !v)} />
@@ -681,11 +685,13 @@ function KeptOnTheList({
 }
 
 /**
- * Use it, change it, or drop it. "Use this" copies the text and records that
- * you sent it as written; changing it records what you changed, which is the
- * only thing that teaches Mimic anything. Neither sends: Mimic has no send
- * path, deliberately, and adding one is a decision to make on purpose rather
- * than by accident.
+ * Send it, use it, change it, or drop it. "Send" shows who it goes to,
+ * through which mailbox and under what subject, and sends it from the user's
+ * own mailbox only once they say so (`SendPanel`); "Use this" copies the text
+ * for them to send themselves. Either records what was sent — and what was
+ * changed, which is the only thing that teaches Mimic anything. Send is
+ * offered only when a connected mailbox can send and Mimic has an address
+ * for the person; otherwise the line under the draft says why.
  *
  * Beside the draft, any other ways of saying it the user asked for: each is
  * one model call, asked for one at a time and named by how it differs. Using
@@ -706,6 +712,12 @@ export function DraftReview({
 }) {
   const resolve = useResolveDraft();
   const another = useWriteAnother();
+  const envelope = useReplyEnvelope(draft.id);
+  // Sendable only when it can go somewhere: nothing is offered that can't.
+  const sendable =
+    envelope.data && envelope.data.whyNot === null && envelope.data.mailbox !== null
+      ? envelope.data
+      : null;
   // Written here: shown at once, before the screen reads them back.
   const [written, setWritten] = useState<Draft[]>([]);
   const [putAside, setPutAside] = useState<ReadonlySet<string>>(() => new Set());
@@ -748,7 +760,7 @@ export function DraftReview({
     // that request, so nothing is learned from it (`sent_drafts_for_learning`).
     toast.success(
       edited && adjustmentOf(d) === null ? "Copied. I noticed what you changed." : "Copied.",
-      "Paste it into your email and send it — I don't send anything myself.",
+      "Paste it into your email and send it from there.",
     );
     onDone();
   }
@@ -799,6 +811,8 @@ export function DraftReview({
           focus={focus?.id === draft.id ? focus.n : 0}
           onUse={(text) => quietly(use(draft, text))}
           onDrop={others.length > 0 ? undefined : () => quietly(drop(draft))}
+          envelope={sendable}
+          onSent={onDone}
         />
         {others.map((d) => (
           <DraftWay
@@ -809,6 +823,8 @@ export function DraftReview({
             focus={focus?.id === d.id ? focus.n : 0}
             onUse={(text) => quietly(use(d, text))}
             onDrop={() => quietly(drop(d))}
+            envelope={sendable}
+            onSent={onDone}
           />
         ))}
       </div>
@@ -895,13 +911,18 @@ export function DraftReview({
         {draft.intent
           ? "Written from what you told me you wanted to say."
           : "You didn't tell me what you wanted to say, so this comes from their message and how you usually write — worth a read before you use it."}{" "}
-        &ldquo;Use this&rdquo; copies it so you can paste it into your email. I never send anything.
+        {sendable
+          ? "Send shows you who it goes to before it goes; “Use this” copies it for you to send yourself."
+          : `“Use this” copies it so you can paste it into your email.${envelope.data?.whyNot ? ` ${envelope.data.whyNot}` : ""}`}
       </p>
     </div>
   );
 }
 
-/** One way of saying it: the words, changed if the user likes, and using it. */
+/**
+ * One way of saying it: the words, changed if the user likes, and sending or
+ * using it.
+ */
 function DraftWay({
   draft,
   label,
@@ -909,6 +930,8 @@ function DraftWay({
   focus,
   onUse,
   onDrop,
+  envelope = null,
+  onSent,
 }: {
   draft: Draft;
   label: string;
@@ -918,9 +941,13 @@ function DraftWay({
   onUse: (text: string) => void;
   /** Absent for the first draft beside others: "None of these" puts that aside. */
   onDrop?: () => void;
+  /** Where a reply would go, when it can be sent from here. */
+  envelope?: ReplyEnvelope | null;
+  onSent?: () => void;
 }) {
   const [text, setText] = useState(draft.generatedText);
   const [editing, setEditing] = useState(false);
+  const [sending, setSending] = useState(false);
   const heading = useId();
   const adjusted = adjustmentOf(draft);
   const headingRef = useRef<HTMLDivElement>(null);
@@ -952,18 +979,40 @@ function DraftWay({
         <p className="letter letter--mine">{text}</p>
       )}
       <div className="thread__actions">
-        <Button variant="primary" onClick={() => onUse(text)} disabled={busy}>
+        {envelope ? (
+          <Button
+            variant="primary"
+            onClick={() => setSending(true)}
+            disabled={busy || sending || !text.trim()}
+          >
+            Send
+          </Button>
+        ) : null}
+        <Button
+          variant={envelope ? "secondary" : "primary"}
+          onClick={() => onUse(text)}
+          disabled={busy || sending}
+        >
           Use this
         </Button>
-        <Button onClick={() => setEditing((v) => !v)}>
+        <Button onClick={() => setEditing((v) => !v)} disabled={sending}>
           {editing ? "Done changing" : "Change it"}
         </Button>
         {onDrop ? (
-          <Button variant="ghost" onClick={onDrop} disabled={busy}>
+          <Button variant="ghost" onClick={onDrop} disabled={busy || sending}>
             Not this one
           </Button>
         ) : null}
       </div>
+      {envelope && sending ? (
+        <SendPanel
+          draft={draft}
+          text={text}
+          envelope={{ ...envelope, draftId: draft.id }}
+          onSent={() => onSent?.()}
+          onCancel={() => setSending(false)}
+        />
+      ) : null}
     </div>
   );
 }

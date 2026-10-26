@@ -7,6 +7,7 @@ pub mod jobs;
 pub mod localmodel;
 pub mod people;
 pub mod providers;
+pub mod sending;
 pub mod settings;
 pub mod sources;
 pub mod updater;

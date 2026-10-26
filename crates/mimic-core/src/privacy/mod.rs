@@ -43,6 +43,9 @@ pub struct DeletionReport {
     /// for a case was written from the conversation before it and from
     /// examples across the user's mail, so any of it may be theirs.
     pub evaluations: usize,
+    /// Replies Mimic sent, or held to send, to them or through it: what each
+    /// said is theirs as much as the user's.
+    pub sent: usize,
 }
 
 impl Db {
@@ -137,6 +140,12 @@ impl Db {
                 participant_id,
             )?;
             report.evaluations = count0(&conn, "SELECT COUNT(*) FROM evaluations")?;
+            // Removed by cascade, with the person and with their conversations.
+            report.sent = count(
+                &conn,
+                &format!("SELECT COUNT(*) FROM outbox WHERE participant_id = ?1 OR conversation_id IN ({solo_list})"),
+                participant_id,
+            )?;
         }
         if !commit {
             return Ok(report);
@@ -203,6 +212,8 @@ impl Db {
                     source_id,
                 )?,
                 evaluations: count0(&conn, "SELECT COUNT(*) FROM evaluations")?,
+                // Removed by cascade with the source.
+                sent: count(&conn, "SELECT COUNT(*) FROM outbox WHERE source_id = ?1", source_id)?,
                 ..Default::default()
             }
         };
@@ -288,11 +299,13 @@ impl Db {
                 voice_preferences: count0(&conn, "SELECT COUNT(*) FROM voice_preferences")?,
                 drafts: count0(&conn, "SELECT COUNT(*) FROM drafts")?,
                 evaluations: count0(&conn, "SELECT COUNT(*) FROM evaluations")?,
+                sent: count0(&conn, "SELECT COUNT(*) FROM outbox")?,
                 ..Default::default()
             }
         };
         self.transaction(|tx| {
             for table in [
+                "outbox",
                 "representative_examples",
                 "voice_profiles",
                 "voice_preferences",

@@ -153,6 +153,14 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     if interrupted > 0 {
         tracing::warn!(target: "jobs", interrupted, requeued, "recovered interrupted jobs");
     }
+    // A reply that was being handed over when Mimic stopped may or may not
+    // have gone: it is marked as failed, saying so, and never sent again on
+    // its own.
+    match db.recover_outbox() {
+        Ok(0) => {}
+        Ok(n) => tracing::warn!(target: "sending", interrupted = n, "replies interrupted while being sent"),
+        Err(e) => tracing::warn!(target: "sending", error = %e, "could not look for interrupted sends"),
+    }
     // Mail read before one of the user's addresses was declared, by versions
     // before 0.10.0-alpha.8, may still be filed under someone who is nothing
     // but the user. Nothing is running yet, so nothing holds them.

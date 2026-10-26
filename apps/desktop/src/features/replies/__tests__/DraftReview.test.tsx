@@ -37,12 +37,12 @@ function renderReview(d: Draft) {
 }
 
 describe("reviewing a prepared draft", () => {
-  it("offers approve, modify and reject, and never claims to send", () => {
+  it("offers approve, modify and reject, and no Send without a mailbox that can send", () => {
     renderReview(draft());
     expect(screen.getByText("Use this")).toBeInTheDocument();
     expect(screen.getByText("Change it")).toBeInTheDocument();
     expect(screen.getByText("Not this one")).toBeInTheDocument();
-    expect(screen.getByText(/I never send anything/)).toBeInTheDocument();
+    expect(screen.getByText(/copies it so you can paste it into your email/)).toBeInTheDocument();
     expect(screen.queryByText(/^Send$/)).toBeNull();
   });
 

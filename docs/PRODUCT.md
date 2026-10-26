@@ -48,15 +48,23 @@ Five screens.
 
 ## Autonomy
 
-Three modes are designed. One is implemented, one is half-built, one is deliberately not started.
+Three modes are designed. One is implemented, one is half-built, and the third is being built (0.10.0-alpha.24).
 
-**MANUAL** — implemented. Mimic drafts; the user reads, edits and sends by hand, in whatever app they actually use. Mimic never has send access, and the learning loop depends on the user telling it what they sent.
+**MANUAL** — implemented. Mimic drafts; the user reads, edits and sends. Since 0.10.0-alpha.23 they can send from Mimic: **Send** shows who the reply goes to, which of their mailboxes it goes out of and its subject, and nothing goes until **Send it** — from their own address, through their own provider's server, threaded under the message it answers, to that person only. **Use this** still copies it for them to send in whatever app they use. Either way the learning loop reads what was sent.
 
 **ASSISTED** — partly implemented (0.8.0-alpha.1, watching since 0.10.0-alpha.3). Mimic notices threads it could answer — a conversation whose last message from a person came from someone else and was never replied to, unless it looks automated from its headers or the user said it needs no reply (0.10.0-alpha.4), or its last message is older than the waiting window the user chose (0.10.0-alpha.7) — and prepares drafts for them, which wait on the home screen for use, change or drop. The user still sends, by hand, elsewhere.
 
 Two things make this safe to have on: it is off until switched on in Settings, because with it on a model sees incoming messages nobody handed it; and it is bounded — ten threads per run, one draft per message, cancellable between threads. With a mailbox connected, each check is followed by a run, so "in advance" means "as mail arrives"; without one it still means "after the next import".
 
-**TRUSTED** — designed, deliberately not implemented. Mimic sends low-stakes replies itself within rules the user sets. This is not being built now, and the reason is not technical: a product that can send as you needs a much stronger account of what it will not send, how a mistake is caught, and what "low-stakes" means, than this product currently has. The data model does not need to change to support it later, which is the only preparation appropriate at this stage.
+**TRUSTED** — being built (0.10.0-alpha.24). Mimic replies by itself, within rules the user sets. It was held back because a product that sends as you needs an account of what it will not send, how a mistake is caught and what it may answer; the owner decided on 2026-10-25 to build it, and this is that account:
+
+- **Off until the user turns it on**, in Settings, for a mailbox — and, if they want it narrower, only for the people they name. Turning it on says in words what it will do. One switch turns all of it off, and anything waiting to go is stopped with it.
+- **It answers only what the home screen would show as waiting**: never mail that looks automated, never a thread gone quiet or marked as needing no reply, never someone writing from a no-reply address, never a mailing list. It answers a message once, and never twice in a row without a new message from them.
+- **Nothing goes at once.** A reply is held for a while (ten minutes unless changed) on the home screen, where it can be read, changed into one the user sends themselves, or stopped; then it goes.
+- **A daily limit** (ten unless changed) on replies sent by itself, across every mailbox; past it, replies wait for the user.
+- **It says what it is to other programs** (`Auto-Submitted: auto-replied`), so another automatic responder doesn't answer it and start a loop.
+- **Everything it sent is listed**, under Your mail, saying it went by itself.
+- What it wrote by itself is not read as how the user writes: the user didn't write or approve it.
 
 ## Positioning
 

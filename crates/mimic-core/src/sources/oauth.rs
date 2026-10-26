@@ -62,14 +62,17 @@ pub struct Provider {
 impl Provider {
     /// Outlook.com, Hotmail and Microsoft 365, through the tenant that takes
     /// both personal and work or school accounts. The scope is IMAP access
-    /// as the user, and `offline_access` for a refresh token.
+    /// as the user, sending as the user over SMTP (0.10.0-alpha.23: one
+    /// token, from one resource, does both), and `offline_access` for a
+    /// refresh token.
     pub fn microsoft() -> Self {
         Provider {
             key: "microsoft",
             name: "Microsoft",
             authorize_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".into(),
             token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
-            scope: "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
+            scope:
+                "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
             imap_host: "outlook.office365.com",
             imap_port: 993,
         }
@@ -692,7 +695,7 @@ mod tests {
         for part in [
             "response_type=code",
             "redirect_uri=http%3A%2F%2Flocalhost%3A4321",
-            "scope=https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All%20offline_access",
+            "scope=https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All%20https%3A%2F%2Foutlook.office.com%2FSMTP.Send%20offline_access",
             "state=st4te",
             "code_challenge_method=S256",
             "login_hint=c%40outlook.com",

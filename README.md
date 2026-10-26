@@ -66,13 +66,13 @@ The authoritative, per-feature truth table is [docs/PROJECT_STATUS.md](docs/PROJ
 5. **Analyze.** Mimic measures your own messages: length, punctuation, capitalization, how you open and close, the phrases you repeat, how quickly you reply. This is arithmetic over your text — no model is involved.
 6. **The one screen.** Mimic opens on whoever is waiting on a reply, with what they wrote and what Mimic would say back, and use / change / drop beside each one. Ask for it shorter, longer, more casual or more professional and each other way is written beside the first, to choose between.
 7. **Writing something new** lives behind “Write something new”: pick who it is going to, say what you want to say in shorthand, and read the draft. Beside it, always: what it was based on.
-8. **Tell Mimic what you actually sent.** It compares its draft with your version and records the difference. This is the only way it improves, and it never sends anything for you.
+8. **Send it, or tell Mimic what you sent.** With a mailbox connected, **Send** shows who it goes to and through which mailbox, and sends it from your own address only when you say so. **Use this** copies it to send yourself. Either way Mimic compares its draft with what went and records the difference. This is the only way it improves.
 
 Only import communication you own or have permission to process.
 
 ## What Mimic will not do
 
-It will not send a message. It has no send access to anything. Every draft is a draft, and you move it into whatever app you actually use.
+It will not send a message you haven't approved. A reply goes only when you press Send it, from your own mailbox, to the person shown; replies sent by themselves are being built, and will be off until you turn them on.
 
 It will not show you a number it has not measured. A rate that has not been computed says "not measured yet"; a rate of zero means zero. There is no accuracy score. Mimic can measure how close its drafts come to what you actually wrote, on conversations it held back, next to a generic reply and your most common one — and it shows each measure on its own, because adding them up would make a number nobody defined.
 

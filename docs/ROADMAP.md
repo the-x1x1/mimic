@@ -64,9 +64,13 @@ Done in 0.10.0-alpha.5: senders that have only ever sent automated mail are left
 
 Done in 0.10.0-alpha.7: threads whose last message is older than a window the user chooses (30 days unless changed) are left out of what is waiting as gone quiet, counted and shown on request, for the list and for assisted drafting alike.
 
-## Phase 7 — Trusted mode
+## Phase 7 — Sending, and Trusted mode
 
-Designed, deliberately not scheduled. See `docs/PRODUCT.md`. The blocker is not implementation.
+Scheduled by the owner on 2026-10-25. See `docs/PRODUCT.md` for what each will and will not do.
+
+Done in 0.10.0-alpha.23: replies the user approves are sent from their own mailbox (`sources::smtp`, `sources::outgoing`, `crate::sending`), recorded before and after in `outbox`, never sent twice and never again after a send that may have gone; how each mailbox sends is its provider's usual server or one set under Your mail, checked by signing in first. Not done: never run against a real mail server; no copy put in a Sent folder the provider doesn't fill; no reply to everyone on a thread.
+
+Next, 0.10.0-alpha.24: Trusted mode — replies sent by themselves under the rules in `docs/PRODUCT.md`: off by default, per mailbox and per person, held before they go, a daily limit, nothing automated or already answered, `Auto-Submitted`, one switch to stop it all. Then signing in with Google, a Sent copy where the provider keeps none, and mail arriving within a minute.
 
 ## Phase 8 — Advanced personalization
 

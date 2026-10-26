@@ -23,6 +23,8 @@ pub mod mime;
 pub mod mimic_json;
 pub mod normalize;
 pub mod oauth;
+pub mod outgoing;
+pub mod smtp;
 pub mod whatsapp;
 
 #[derive(Debug, thiserror::Error)]

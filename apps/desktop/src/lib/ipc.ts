@@ -49,6 +49,11 @@ import {
   VoiceOverview,
   VoicePreference,
   CommandError,
+  MailboxSending,
+  OutboxEntry,
+  ReplyEnvelope,
+  type SendRequest,
+  type SmtpAccount,
   type Adjustment,
   type ComposeRequest,
   type ImapAccount,
@@ -314,6 +319,21 @@ export const ipc = {
     call("add_draft_preference", DraftFeedback, { draftId, note }),
   recentDrafts: (limit = 25) => call("list_recent_drafts", Draft.array(), { limit }),
   draftOutcomes: () => call("get_draft_outcomes", DraftOutcomes),
+
+  /** Who a reply to this draft goes to, how and through what, or why it can't be sent from here. */
+  replyEnvelope: (draftId: string) => call("reply_envelope", ReplyEnvelope, { draftId }),
+  /** Send a reply exactly as approved. Fails with `send_unsure` when it may have gone. */
+  sendReply: (request: SendRequest) => call("send_reply", OutboxEntry, { request }),
+  /** What Mimic sent or holds to send, newest first. */
+  sent: (limit = 25) => call("list_sent", OutboxEntry.array(), { limit }),
+  /** The user looked: a reply that may have gone didn't, so its draft can be sent again. */
+  replyDidNotGo: (outboxId: string) => call("reply_did_not_go", OutboxEntry, { outboxId }),
+  mailboxSending: (sourceId: string) => call("get_mailbox_sending", MailboxSending, { sourceId }),
+  /** Checked first — signed in to, nothing sent — and kept only if that worked. */
+  setMailboxSending: (sourceId: string, sending: SmtpAccount) =>
+    call("set_mailbox_sending", MailboxSending, { sourceId, sending }),
+  resetMailboxSending: (sourceId: string) =>
+    call("reset_mailbox_sending", MailboxSending, { sourceId }),
 
   providerState: () => call("get_provider_state", ProviderState),
   setActiveProvider: (providerId: string) => call("set_active_provider", z_void, { providerId }),
