@@ -199,6 +199,8 @@ export const ipc = {
   startWithWindows: () => call("get_start_with_windows", z_bool),
   /** Start Mimic at sign-in, or stop; resolves to what Windows then says. */
   setStartWithWindows: (on: boolean) => call("set_start_with_windows", z_bool, { on }),
+  /** Get out of the way so what was copied can be pasted: true when hidden, false when minimised. */
+  stepAside: () => call("step_aside", z_bool),
 
   connectors: () => call("list_connectors", ConnectorInfo.array()),
   sources: () => call("list_sources", Source.array()),

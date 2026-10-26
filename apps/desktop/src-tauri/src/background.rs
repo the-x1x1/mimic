@@ -83,6 +83,37 @@ pub fn hide_on_close(window: &tauri::WebviewWindow) {
     });
 }
 
+/// How Mimic gets out of the way after a reply is copied from it
+/// (0.10.0-alpha.35): hidden while its icon is in the notification area, to
+/// come back from there or by the shortcut; otherwise minimised, since a
+/// hidden window with no icon couldn't be found again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Aside {
+    Hidden,
+    Minimized,
+}
+
+pub fn aside(has_icon: bool) -> Aside {
+    if has_icon {
+        Aside::Hidden
+    } else {
+        Aside::Minimized
+    }
+}
+
+/// Step aside, so the window the user came from is in front again and what
+/// they copied can be pasted there.
+pub fn step_aside(app: &AppHandle) -> tauri::Result<Aside> {
+    let how = aside(HAS_ICON.load(Ordering::SeqCst));
+    if let Some(window) = app.get_webview_window("main") {
+        match how {
+            Aside::Hidden => window.hide()?,
+            Aside::Minimized => window.minimize()?,
+        }
+    }
+    Ok(how)
+}
+
 /// The icon in the notification area: a click opens Mimic; its menu opens
 /// or quits it.
 pub fn tray(app: &AppHandle) -> tauri::Result<()> {
@@ -206,6 +237,12 @@ pub fn replied_by_itself(run: &mimic_core::autoreply::Run, hold_minutes: i64) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stepping_aside_hides_only_where_the_icon_can_bring_it_back() {
+        assert_eq!(aside(true), Aside::Hidden);
+        assert_eq!(aside(false), Aside::Minimized);
+    }
 
     #[test]
     fn notifications_say_how_many_and_where_to_look() {
