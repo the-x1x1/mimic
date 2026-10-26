@@ -211,6 +211,70 @@ export function mailboxAuth(source: {
   return parsed.success ? (parsed.data.account.auth ?? "password") : "password";
 }
 
+/**
+ * A token Mimic can read a Slack workspace's direct messages with: a user
+ * token (`xoxp-`), the user's own. A bot's (`xoxb-`) can't read them.
+ */
+export function isSlackUserToken(token: string): boolean {
+  const t = token.trim();
+  return t.startsWith("xoxp-") && t.length > 20 && /^[\x21-\x7e]+$/.test(t);
+}
+
+/** A connected Slack workspace, from its stored settings (0.10.0-alpha.64). */
+export function slackWorkspace(source: {
+  connector: string;
+  config: Record<string, unknown>;
+}): { team: string; user: string; lastCheckedAt: string | null } | null {
+  if (source.connector !== "slack") return null;
+  const parsed = z
+    .object({
+      team: z.string(),
+      user: z.string(),
+      lastCheckedAt: z.string().nullable().optional(),
+    })
+    .safeParse(source.config);
+  return parsed.success
+    ? {
+        team: parsed.data.team,
+        user: parsed.data.user,
+        lastCheckedAt: parsed.data.lastCheckedAt ?? null,
+      }
+    : null;
+}
+
+/**
+ * What a Slack app made for Mimic asks for, as a manifest to paste into
+ * "Create New App → From a manifest": user scopes only, no bot, and a token
+ * that doesn't expire. `chat:write` is there for sending a reply the user
+ * approves; nothing is sent yet.
+ */
+export const SLACK_USER_SCOPES = [
+  "im:history",
+  "im:read",
+  "mpim:history",
+  "mpim:read",
+  "users:read",
+  "users:read.email",
+  "chat:write",
+] as const;
+
+export const SLACK_MANIFEST = JSON.stringify(
+  {
+    display_information: {
+      name: "Mimic",
+      description: "Reads my direct messages so Mimic can draft replies in my voice.",
+    },
+    oauth_config: { scopes: { user: SLACK_USER_SCOPES } },
+    settings: {
+      org_deploy_enabled: false,
+      socket_mode_enabled: false,
+      token_rotation_enabled: false,
+    },
+  },
+  null,
+  2,
+);
+
 /** What connecting found, before anything is read. */
 export const ImapProbe = z.object({
   folders: z.array(z.string()),

@@ -25,6 +25,7 @@ pub mod mimic_json;
 pub mod normalize;
 pub mod oauth;
 pub mod outgoing;
+pub mod slack;
 pub mod sms;
 pub mod smtp;
 pub mod telegram;

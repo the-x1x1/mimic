@@ -10,11 +10,13 @@ The original files the user imported from are never modified and never moved.
 
 ## What leaves the computer
 
-Five things, all of them the user's choice and all of them visible in the interface.
+These things, all of them the user's choice and all of them visible in the interface.
 
 **Drafting.** The provider selected in Settings receives the assembled prompt: the message being replied to, the intent the user typed, a handful of their own past messages, the recipient's display name and relationship, and the measured description of how they write. When that provider is the local one, this does not leave the machine at all, and the top bar says "Local model". When it is a hosted provider, the top bar says "Sends to Claude" and the Settings description spells out exactly what is transmitted.
 
 **A connected mailbox.** When the user connects one, Mimic logs in to _their_ mail server over TLS, with the app password they gave it or the Microsoft or Google sign-in below, and reads — the inbox and the sent folder, with `EXAMINE` and `BODY.PEEK[]`, so nothing is marked as read, moved or deleted. What travels is the login and the requests for mail; what comes back stays on this computer. It checks on the schedule in Settings (every 15 minutes by default, or only when asked), and the home screen says that it does. While checking is on, it also keeps one connection open to each mailbox whose server allows it, which only waits for the server to say mail arrived (`IDLE`) and then asks for a check; that connection sends no request for mail and reads nothing. Until a mailbox is connected, nothing arrives on its own, and the screens say that instead.
+
+**A connected Slack workspace.** When the user connects one (0.10.0-alpha.64), Mimic asks Slack's Web API (`https://slack.com/api`) with the token the user made in their own Slack app, in the `Authorization` header and never in an address: whose token it is (`auth.test`), the user's direct and group messages (`users.conversations`), each one's messages after the last one read (`conversations.history`), and the name and email of each person who wrote or was named (`users.info`). Nothing is posted, marked or changed in Slack, and channels are not read. What comes back stays on this computer. It checks on the same schedule as mail.
 
 **Who handles your mail.** When an address typed into Connect a mailbox is at a domain Mimic knows no provider for, leaving the field asks this computer's own DNS resolver for the domain's mail exchangers (0.10.0-alpha.34), the question the computer asks before connecting to any server there. Only the domain is asked about, and the answer is used to fill in the server and nothing else; nothing is kept.
 
@@ -64,7 +66,7 @@ None of these are recoverable. `Db::open` writes a database backup before a sche
 
 ## Credentials
 
-Provider API keys, mailbox app passwords and a Microsoft or Google mailbox's sign-in (each under `imap:<source id>`) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. A build for macOS would seal them with a key kept in your login Keychain (there is no such build yet, and that code has never run on a Mac). Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth. The hour-long access token a sign-in is traded for is kept in memory only and never written.
+Provider API keys, mailbox app passwords and a Microsoft or Google mailbox's sign-in (each under `imap:<source id>`), and a Slack workspace's token (under `slack:<source id>`, 0.10.0-alpha.64) are stored in `credentials/secrets.json`, each sealed to your Windows account with DPAPI, so a copy of the file cannot be opened without your Windows password. A program running as you, an administrator of the computer, or on a work account your organisation's IT, can still unseal them, and the Privacy card says so. A build for macOS would seal them with a key kept in your login Keychain (there is no such build yet, and that code has never run on a Mac). Other builds keep them unsealed in an owner-only file and say that instead; see `docs/MODEL_PROVIDERS.md`. Credentials are never in the database, never in a log, and stripped from diagnostics at every depth. The hour-long access token a sign-in is traded for is kept in memory only and never written.
 
 ## Sending
 

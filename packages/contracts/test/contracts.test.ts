@@ -987,6 +987,29 @@ describe("connecting a mailbox", () => {
     expect(mailboxAuth(imap({ username: "c@gmail.com" }))).toBe("password");
     expect(mailboxAuth({ connector: "mbox", config: {} })).toBeNull();
   });
+
+  it("knows a Slack user token and reads a connected workspace", async () => {
+    const { isSlackUserToken, slackWorkspace, SLACK_MANIFEST, SLACK_USER_SCOPES } =
+      await import("../src");
+    expect(isSlackUserToken("  xoxp-1111111111-2222222222-abcdefabcdef ")).toBe(true);
+    expect(isSlackUserToken("xoxb-1111111111-2222222222-abcdefabcdef")).toBe(false);
+    expect(isSlackUserToken("xoxp-short")).toBe(false);
+    expect(isSlackUserToken("xoxp-1111111111 2222222222-abcdef")).toBe(false);
+    const config = { teamId: "T1", team: "Acme", userId: "U1", user: "c", marks: {} };
+    expect(slackWorkspace({ connector: "slack", config })).toEqual({
+      team: "Acme",
+      user: "c",
+      lastCheckedAt: null,
+    });
+    expect(slackWorkspace({ connector: "imap", config })).toBeNull();
+    const manifest = JSON.parse(SLACK_MANIFEST) as {
+      oauth_config: { scopes: { user: string[]; bot?: string[] } };
+      settings: { token_rotation_enabled: boolean };
+    };
+    expect(manifest.oauth_config.scopes.user).toEqual([...SLACK_USER_SCOPES]);
+    expect(manifest.oauth_config.scopes.bot).toBeUndefined();
+    expect(manifest.settings.token_rotation_enabled).toBe(false);
+  });
 });
 
 describe("saved passwords are described as they are kept", () => {

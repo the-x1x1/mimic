@@ -126,6 +126,8 @@ pub fn run() {
             commands::sources::probe_mailbox,
             commands::sources::connect_mailbox,
             commands::sources::set_mailbox_password,
+            commands::slack::connect_slack,
+            commands::slack::set_slack_token,
             commands::sources::mail_sign_in_available,
             commands::sources::mail_exchangers,
             commands::background::step_aside,

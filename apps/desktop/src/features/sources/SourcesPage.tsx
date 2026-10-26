@@ -1,10 +1,17 @@
 import { useState } from "react";
 import { Badge, Button, Card, EmptyState } from "@mimic/ui";
-import { CHANNEL_LABELS, mailboxAuth, type Channel } from "@mimic/contracts";
+import {
+  CHANNEL_LABELS,
+  mailboxAuth,
+  slackWorkspace,
+  type Channel,
+  type Source,
+} from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
 import { useDeleteSource, useSources, useStartImport } from "@/hooks/useSources";
 import { AddSourceDialog } from "./AddSourceDialog";
 import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
+import { ConnectSlackDialog, SlackToken } from "./ConnectSlackDialog";
 import { MailboxPassword, MailboxSignInAgain } from "./MailboxPassword";
 import { MailboxSending } from "./MailboxSending";
 import { SentList } from "./SentList";
@@ -19,12 +26,25 @@ const STATUS_TONE: Record<string, "success" | "warning" | "danger" | "neutral"> 
   new: "neutral",
 };
 
+/** Under a source's name: where it is read from, and when last, for a live one. */
+function whereFrom(s: Source): string {
+  if (s.connector === "imap") {
+    const host = (s.config as { account?: { host?: string } }).account?.host ?? "mailbox";
+    const checked = (s.config as { lastCheckedAt?: string | null }).lastCheckedAt ?? null;
+    return `${String(host)} · checked ${formatRelative(checked)}`;
+  }
+  const slack = slackWorkspace(s);
+  if (slack) return `Slack, as ${slack.user} · checked ${formatRelative(slack.lastCheckedAt)}`;
+  return s.location ?? s.connector;
+}
+
 export function SourcesPage() {
   const sources = useSources();
   const startImport = useStartImport();
   const remove = useDeleteSource();
   const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [connectingSlack, setConnectingSlack] = useState(false);
   const hasMailbox = (sources.data ?? []).some((s) => s.connector === "imap");
 
   return (
@@ -39,6 +59,7 @@ export function SourcesPage() {
         actions={
           <div className="row gap-2">
             <Button onClick={() => setConnecting(true)}>Connect a mailbox</Button>
+            <Button onClick={() => setConnectingSlack(true)}>Connect Slack</Button>
             <Button variant="primary" onClick={() => setAdding(true)}>
               Add a file
             </Button>
@@ -56,6 +77,7 @@ export function SourcesPage() {
                 Add a file
               </Button>
               <Button onClick={() => setConnecting(true)}>Connect a mailbox (optional)</Button>
+              <Button onClick={() => setConnectingSlack(true)}>Connect Slack (optional)</Button>
             </div>
           }
         />
@@ -77,11 +99,7 @@ export function SourcesPage() {
                 <tr key={s.id}>
                   <td>
                     <div>{s.name}</div>
-                    <div className="muted small mono">
-                      {s.connector === "imap"
-                        ? `${String((s.config as { account?: { host?: string } }).account?.host ?? "mailbox")} · checked ${formatRelative((s.config as { lastCheckedAt?: string | null }).lastCheckedAt ?? null)}`
-                        : (s.location ?? s.connector)}
-                    </div>
+                    <div className="muted small mono">{whereFrom(s)}</div>
                     {s.lastError ? (
                       <div className="danger small">{String(s.lastError.message)}</div>
                     ) : null}
@@ -105,7 +123,7 @@ export function SourcesPage() {
                         onClick={() => startImport.mutate(s.id)}
                         disabled={s.status === "importing" || startImport.isPending}
                       >
-                        {s.connector === "imap"
+                        {s.connector === "imap" || s.connector === "slack"
                           ? "Check now"
                           : s.messageCount > 0
                             ? "Import again"
@@ -123,6 +141,8 @@ export function SourcesPage() {
                       />
                     ) : s.connector === "imap" ? (
                       <MailboxPassword sourceId={s.id} name={s.name} />
+                    ) : s.connector === "slack" ? (
+                      <SlackToken sourceId={s.id} name={s.name} />
                     ) : null}
                   </td>
                 </tr>
@@ -142,6 +162,7 @@ export function SourcesPage() {
 
       {adding ? <AddSourceDialog onClose={() => setAdding(false)} /> : null}
       {connecting ? <ConnectMailboxDialog onClose={() => setConnecting(false)} /> : null}
+      {connectingSlack ? <ConnectSlackDialog onClose={() => setConnectingSlack(false)} /> : null}
     </div>
   );
 }
