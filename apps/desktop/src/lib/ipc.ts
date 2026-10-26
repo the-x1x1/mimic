@@ -265,6 +265,10 @@ export const ipc = {
   connectTeams: () => call("connect_teams", Source),
   /** Sign a connected Teams account in again, as the same account. */
   signInTeamsAgain: (sourceId: string) => call("sign_in_teams_again", Source, { sourceId }),
+  /** Try a Slack workspace as a check would, sending nothing: what was found. */
+  testSlack: (sourceId: string) => call("test_slack", z_string, { sourceId }),
+  /** Try a Teams account as a check would, sending nothing: what was found. */
+  testTeams: (sourceId: string) => call("test_teams", z_string, { sourceId }),
   /** A connected workspace's token, given again for the same account. */
   setSlackToken: (sourceId: string, token: string) =>
     call("set_slack_token", Source, { sourceId, token }),

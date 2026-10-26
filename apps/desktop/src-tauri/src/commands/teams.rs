@@ -80,6 +80,41 @@ pub async fn connect_teams(
     Ok(state.db.get_source(&source.id)?.unwrap_or(source))
 }
 
+/// Try a connected Teams account as a check would, sending nothing
+/// (0.10.0-alpha.69): its sign-in, who it is, and its chats.
+#[tauri::command]
+pub async fn test_teams(state: State<'_, SharedState>, source_id: String) -> CommandResult<String> {
+    let source = state
+        .db
+        .get_source(&source_id)?
+        .filter(|s| s.connector == teams::CONNECTOR)
+        .ok_or_else(|| CommandError::new("not_found", "That Teams account isn't connected any more."))?;
+    let config: teams::TeamsSourceConfig = serde_json::from_value(source.config)
+        .map_err(|_| CommandError::new("unreadable", "I can't read its settings; remove it and connect it again."))?;
+    let access = state.teams_access.clone();
+    let (me, chats) = tauri::async_runtime::spawn_blocking(move || {
+        let token = access.token(&source_id).map_err(|why| CommandError::new("teams", why))?;
+        let found = GraphApi::new(&token).and_then(|api| api.check());
+        if matches!(found, Err(teams::TeamsError::SignIn(_))) {
+            access.forget(&source_id);
+        }
+        found.map_err(teams_error)
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", e.to_string()))??;
+    if !config.is(&me) {
+        return Err(CommandError::new(
+            "not_this",
+            format!("Its sign-in is {}'s, not the account you connected.", me.name),
+        ));
+    }
+    Ok(if chats == 0 {
+        format!("Signed in as {}; there are no chats to read yet. Nothing was sent.", me.name)
+    } else {
+        format!("Read your chats as {}. Nothing was sent.", me.name)
+    })
+}
+
 /// Sign a connected Teams account in again — Microsoft asked for it, or the
 /// saved sign-in can't be unlocked here — as the same account, keeping
 /// everything read through it.

@@ -13,15 +13,19 @@ interface Tried {
 /**
  * Try every part of replying for you now, sending nothing (0.10.0-alpha.51):
  * for each mailbox, signing in to read (folders looked at, no message
- * opened) and to send (signed in, nothing sent), then whether the model that
- * writes replies answers. One after another, so a slow server doesn't hide
- * which part failed.
+ * opened) and to send (signed in, nothing sent); each Slack workspace and
+ * Teams account, as a check reads it (0.10.0-alpha.69); then whether the
+ * model that writes replies answers. One after another, so a slow server
+ * doesn't hide which part failed.
  */
 export function CheckEverything({
   mailboxes,
+  chats = [],
   ready,
 }: {
   mailboxes: { id: string; name: string }[];
+  /** Slack workspaces and Teams accounts. */
+  chats?: { id: string; name: string; connector: "slack" | "teams" }[];
   /** Whether the mailboxes are known yet: until then, a check would leave them out. */
   ready: boolean;
 }) {
@@ -55,6 +59,15 @@ export function CheckEverything({
         });
       } catch (e) {
         note({ what: `Sending from ${m.name}`, ok: false, said: (e as Error).message });
+      }
+    }
+    for (const c of chats) {
+      try {
+        const said =
+          c.connector === "slack" ? await ipc.testSlack(c.id) : await ipc.testTeams(c.id);
+        note({ what: `Reading ${c.name}`, ok: true, said });
+      } catch (e) {
+        note({ what: `Reading ${c.name}`, ok: false, said: (e as Error).message });
       }
     }
     try {

@@ -70,6 +70,34 @@ pub async fn connect_slack(state: State<'_, SharedState>, token: String) -> Comm
     Ok(state.db.get_source(&source.id)?.unwrap_or(source))
 }
 
+/// Try a connected workspace as a check would, sending nothing
+/// (0.10.0-alpha.69): its token, one direct message, its newest message and
+/// who the user is. A sentence saying what was found, or why not.
+#[tauri::command]
+pub async fn test_slack(state: State<'_, SharedState>, source_id: String) -> CommandResult<String> {
+    use mimic_core::providers::SecretStore;
+    let source = state
+        .db
+        .get_source(&source_id)?
+        .filter(|s| s.connector == slack::CONNECTOR)
+        .ok_or_else(|| CommandError::new("not_found", "That workspace isn't connected any more."))?;
+    let token = state
+        .secrets
+        .get(&slack::secret_key(&source_id))
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| CommandError::new("slack", "I don't have a token for it. Give me one with New token."))?;
+    let config: slack::SlackSourceConfig = serde_json::from_value(source.config)
+        .map_err(|_| CommandError::new("unreadable", "I can't read its settings; remove it and connect it again."))?;
+    let me = checked(&token).await?;
+    if !config.is(&me) {
+        return Err(CommandError::new(
+            "not_this",
+            format!("Its token is {}'s in {}, not the account you connected.", me.user, me.team),
+        ));
+    }
+    Ok(format!("Read your direct messages in {} as {}. Nothing was sent.", me.team, me.user))
+}
+
 /// Give a connected workspace a new token — for the same account in the same
 /// workspace — keeping everything read through it.
 #[tauri::command]

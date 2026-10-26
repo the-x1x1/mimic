@@ -128,6 +128,8 @@ pub fn run() {
             commands::sources::set_mailbox_password,
             commands::slack::connect_slack,
             commands::slack::set_slack_token,
+            commands::slack::test_slack,
+            commands::teams::test_teams,
             commands::teams::connect_teams,
             commands::teams::sign_in_teams_again,
             commands::sources::mail_sign_in_available,

@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.69] — 2026-10-26
+
+Slack and Teams in Replying for you.
+
+### Changed
+
+- **Replying for you** in Settings lists the Slack workspaces and Teams accounts you've connected, and **Check it all now** tries each of them too — reading as a check would, sending nothing — and says what it found.
+
 ## [0.10.0-alpha.68] — 2026-10-26
 
 Replying in Teams.

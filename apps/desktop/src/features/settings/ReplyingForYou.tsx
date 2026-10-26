@@ -71,6 +71,12 @@ export function ReplyingForYou() {
   const autoReply = useAutoReply();
   const atSignIn = useQuery({ queryKey: qk.startWithWindows, queryFn: ipc.startWithWindows });
   const mailboxes = (sources.data ?? []).filter((s) => s.connector === "imap");
+  // Slack workspaces (0.10.0-alpha.64) and Teams accounts (.67).
+  const chats = (sources.data ?? []).flatMap((s) =>
+    s.connector === "slack" || s.connector === "teams"
+      ? [{ id: s.id, name: s.name, connector: s.connector as "slack" | "teams" }]
+      : [],
+  );
   const prepared = settings.data?.["assist.autoDraft"];
   const keepRunning = settings.data?.["app.keepRunning"];
   const notify = settings.data?.["notify.enabled"];
@@ -97,13 +103,20 @@ export function ReplyingForYou() {
           }
         >
           {mailboxes.length === 0
-            ? "No mailbox is connected, so there's nothing to reply to or from."
+            ? chats.length === 0
+              ? "No mailbox is connected, so there's nothing to reply to or from."
+              : "No mailbox is connected."
             : mailboxes.length === 1
               ? "A mailbox is connected."
               : `${mailboxes.length} mailboxes are connected.`}
         </Step>
         {mailboxes.map((m) => (
           <MailboxCanSend key={m.id} sourceId={m.id} name={m.name} />
+        ))}
+        {chats.map((c) => (
+          <Step key={c.id} done={true}>
+            {`${c.name} is connected: replies to it go in as you, from here.`}
+          </Step>
         ))}
         <Step
           done={prepared ?? null}
@@ -167,6 +180,7 @@ export function ReplyingForYou() {
       </ul>
       <CheckEverything
         mailboxes={mailboxes.map((m) => ({ id: m.id, name: m.name }))}
+        chats={chats}
         ready={sources.data !== undefined}
       />
     </Card>
