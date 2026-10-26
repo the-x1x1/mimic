@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.50] — 2026-10-26
+
+Replying by myself says everything it checks.
+
+### Changed
+
+- What Settings says before you turn on replying by myself now covers everything I check since alpha.44: that I check again when a reply goes, under your rules as they are then; that I only answer mail I read the same day; what in a reply's words keeps it for you; and that you can rehearse first.
+
 ## [0.10.0-alpha.49] — 2026-10-26
 
 I read a reply before it goes by itself.
