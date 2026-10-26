@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.27] — 2026-10-26
+
+Mail as it arrives.
+
+### Added
+
+- **New mail is read as it arrives**, not at the next check. Most mail servers can say when a message comes in, and I keep one quiet connection to each of your mailboxes to hear it; then I read the mailbox as usual. That connection only listens: it doesn't read your mail or change anything. A reply waiting on a fresh check goes sooner too.
+- A server that can't say is checked on the schedule, as before. Turning checking off in Settings stops the listening too.
+
 ## [0.10.0-alpha.26] — 2026-10-26
 
 Sign in with Google.

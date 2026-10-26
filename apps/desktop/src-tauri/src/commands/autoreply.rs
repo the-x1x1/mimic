@@ -96,7 +96,9 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
     }
 }
 
-fn queue_check(state: &SharedState, source_id: &str) {
+/// Ask for a mailbox to be checked, unless one is already queued or running,
+/// or the mailbox is failing (that waits for the user).
+pub(crate) fn queue_check(state: &SharedState, source_id: &str) {
     use mimic_core::sources::imap;
     let failing = state.db.get_source(source_id).ok().flatten().is_none_or(|s| s.status == "failed");
     let queued = state

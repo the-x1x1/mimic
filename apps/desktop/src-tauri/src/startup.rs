@@ -191,6 +191,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         mail_credentials,
         sign_in: Default::default(),
         replying: AtomicBool::new(false),
+        watchers: Default::default(),
     })
 }
 
@@ -402,6 +403,9 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 crate::commands::autoreply::look(&app2, &st).await;
+                // And mailboxes watched for mail as it arrives, started and
+                // stopped as they are connected, removed, fail or are let be.
+                crate::watching::look(&st);
             }
         });
     }

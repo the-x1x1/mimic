@@ -42,7 +42,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -312,12 +312,7 @@ impl<S: Read + Write> Session<S> {
             };
             let raw: Vec<u8> = self.buf.drain(..pos + 2).collect();
             let text = String::from_utf8_lossy(&raw[..pos]).into_owned();
-            // A literal: "... {1234}" at the end of the line, then 1234 bytes.
-            let literal_len = text
-                .strip_suffix('}')
-                .and_then(|t| t.rfind('{').map(|i| &t[i + 1..]))
-                .and_then(|n| n.trim_end_matches('+').parse::<usize>().ok());
-            match literal_len {
+            match literal_len(&text) {
                 Some(n) => {
                     let brace = text.rfind('{').unwrap_or(text.len());
                     line.text.push_str(&text[..brace]);
@@ -349,6 +344,140 @@ impl<S: Read + Write> Session<S> {
                     return Ok(line);
                 }
             }
+        }
+    }
+
+    /// Read what has arrived: false when nothing has — the stream would have
+    /// blocked (it doesn't, while waiting in `IDLE`) or its read timed out.
+    fn fill_some(&mut self) -> Result<bool, ImapError> {
+        let mut chunk = [0u8; 16 * 1024];
+        match self.stream.read(&mut chunk) {
+            Ok(0) => Err(ImapError::Io("the server closed the connection".into())),
+            Ok(n) => {
+                self.buf.extend_from_slice(&chunk[..n]);
+                Ok(true)
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Whether a whole response line, literals and all, is waiting to be read.
+    fn has_whole_line(&self) -> bool {
+        let mut at = 0usize;
+        loop {
+            let Some(p) = self.buf[at..].windows(2).position(|w| w == b"\r\n") else { return false };
+            match literal_len(&String::from_utf8_lossy(&self.buf[at..at + p])) {
+                None => return true,
+                Some(n) => {
+                    at = at.saturating_add(p + 2).saturating_add(n);
+                    if at > self.buf.len() {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The next response line as it arrives, or none once `deadline` passes
+    /// or `should_stop` says so, both looked at between reads.
+    fn line_by(&mut self, deadline: Instant, should_stop: &dyn Fn() -> bool) -> Result<Option<Line>, ImapError> {
+        loop {
+            if self.has_whole_line() {
+                return self.read_line().map(Some);
+            }
+            if should_stop() || Instant::now() >= deadline {
+                return Ok(None);
+            }
+            if self.buf.len() > MAX_MESSAGE_BYTES {
+                return Err(ImapError::Protocol("a response line with no end".into()));
+            }
+            if !self.fill_some()? {
+                std::thread::sleep(IDLE_PAUSE);
+            }
+        }
+    }
+
+    /// What the server says it can do (`CAPABILITY`), upper-cased.
+    pub fn capabilities(&mut self) -> Result<Vec<String>, ImapError> {
+        let lines = self.command("CAPABILITY")?;
+        Ok(lines
+            .iter()
+            .filter_map(|l| l.text.strip_prefix("* CAPABILITY "))
+            .flat_map(|r| r.split_whitespace().map(str::to_ascii_uppercase).collect::<Vec<_>>())
+            .collect())
+    }
+
+    /// Begin `IDLE` (RFC 2177): send it, and wait for the go-ahead. True when
+    /// the server said on the way that mail arrived. Nothing is read or
+    /// changed by idling: the caller checks the mailbox.
+    pub fn idle_start(&mut self) -> Result<bool, ImapError> {
+        self.tag += 1;
+        let tag = format!("m{}", self.tag);
+        let tagged = format!("{tag} ");
+        self.stream.write_all(format!("{tag} IDLE\r\n").as_bytes())?;
+        self.stream.flush()?;
+        let deadline = Instant::now() + TIMEOUT;
+        let mut arrived = false;
+        loop {
+            let line = self
+                .line_by(deadline, &|| false)?
+                .ok_or_else(|| ImapError::Io("the server didn't answer IDLE".into()))?;
+            if line.text.starts_with('+') {
+                return Ok(arrived);
+            }
+            if let Some(rest) = line.text.strip_prefix(&tagged) {
+                return Err(ImapError::Refused(refusal(rest)));
+            }
+            arrived |= says_arrived(&line.text);
+        }
+    }
+
+    /// Wait in `IDLE` until the server says mail arrived (`* n EXISTS`),
+    /// `deadline` passes, or `should_stop`.
+    pub fn idle_wait(&mut self, deadline: Instant, should_stop: &dyn Fn() -> bool) -> Result<IdleWait, ImapError> {
+        let tagged = format!("m{} ", self.tag);
+        loop {
+            let Some(line) = self.line_by(deadline, should_stop)? else { return Ok(IdleWait::Quiet) };
+            if let Some(rest) = line.text.strip_prefix(&tagged) {
+                return if rest.to_ascii_uppercase().starts_with("OK") {
+                    Ok(IdleWait::Ended)
+                } else {
+                    Err(ImapError::Refused(refusal(rest)))
+                };
+            }
+            if says_arrived(&line.text) {
+                return Ok(IdleWait::Arrived);
+            }
+        }
+    }
+
+    /// End `IDLE`: `DONE`, and the server's tagged end. True when the server
+    /// said meanwhile that mail arrived.
+    pub fn idle_done(&mut self) -> Result<bool, ImapError> {
+        let tagged = format!("m{} ", self.tag);
+        self.stream.write_all(b"DONE\r\n")?;
+        self.stream.flush()?;
+        let deadline = Instant::now() + TIMEOUT;
+        let mut arrived = false;
+        loop {
+            let line =
+                self.line_by(deadline, &|| false)?.ok_or_else(|| ImapError::Io("the server didn't end IDLE".into()))?;
+            if let Some(rest) = line.text.strip_prefix(&tagged) {
+                return if rest.to_ascii_uppercase().starts_with("OK") {
+                    Ok(arrived)
+                } else {
+                    Err(ImapError::Refused(refusal(rest)))
+                };
+            }
+            arrived |= says_arrived(&line.text);
         }
     }
 
@@ -557,6 +686,19 @@ impl<S: Read + Write> Session<S> {
     }
 }
 
+/// A literal's length, when a response line ends with one: `... {1234}`.
+fn literal_len(text: &str) -> Option<usize> {
+    text.strip_suffix('}')
+        .and_then(|t| t.rfind('{').map(|i| &t[i + 1..]))
+        .and_then(|n| n.trim_end_matches('+').parse::<usize>().ok())
+}
+
+/// Whether an untagged line says a message arrived in the open folder.
+fn says_arrived(text: &str) -> bool {
+    let t = text.to_ascii_uppercase();
+    t.starts_with("* ") && t.ends_with(" EXISTS")
+}
+
 /// An IMAP quoted string. CR and LF cannot appear in one, and a password
 /// containing them is refused rather than allowed to end the command early.
 fn quote(s: &str) -> Result<String, ImapError> {
@@ -703,6 +845,126 @@ impl Connection {
     }
     pub fn logout(&mut self) {
         with_session!(self, s => s.logout())
+    }
+    pub fn capabilities(&mut self) -> Result<Vec<String>, ImapError> {
+        with_session!(self, s => s.capabilities())
+    }
+
+    /// Wait in `IDLE` (RFC 2177) for mail to arrive in the open folder: until
+    /// the server says it did, `wait` has passed, or `should_stop`; then
+    /// `DONE`, and the server's end of it. True when mail arrived.
+    ///
+    /// The wait reads without blocking, with a short pause between reads, so
+    /// a stop is noticed while nothing arrives. Not a read timeout: Windows
+    /// says a socket whose read timed out is in an indeterminate state and
+    /// shouldn't be used again. Sending `IDLE` and `DONE`, and reading the
+    /// answers, block as every other command does.
+    pub fn idle(&mut self, wait: Duration, should_stop: &dyn Fn() -> bool) -> Result<bool, ImapError> {
+        let until = Instant::now() + wait;
+        let mut arrived = with_session!(self, s => s.idle_start())?;
+        if !arrived {
+            self.socket().set_nonblocking(true)?;
+            let waited = with_session!(self, s => s.idle_wait(until, should_stop));
+            let restored = self.socket().set_nonblocking(false);
+            let waited = waited?;
+            restored?;
+            match waited {
+                // The server ended it: there is nothing to end.
+                IdleWait::Ended => return Ok(true),
+                IdleWait::Arrived => arrived = true,
+                IdleWait::Quiet => {}
+            }
+        }
+        let said = with_session!(self, s => s.idle_done())?;
+        Ok(arrived || said)
+    }
+
+    fn socket(&self) -> &TcpStream {
+        match self {
+            Connection::Tls(s) => &s.stream.sock,
+            Connection::Plain(s) => &s.stream,
+        }
+    }
+}
+
+// ----------------------------------------------------------------- watching
+
+/// How long a wait in `IDLE` pauses between reads that found nothing, and so
+/// how soon it notices a stop.
+const IDLE_PAUSE: Duration = Duration::from_millis(100);
+
+/// How a wait in `IDLE` ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdleWait {
+    /// The server said mail arrived.
+    Arrived,
+    /// The wait was over, or told to stop.
+    Quiet,
+    /// The server ended the `IDLE` itself.
+    Ended,
+}
+
+/// How long a watch waits in one `IDLE`, and how long it keeps one
+/// connection.
+#[derive(Debug, Clone, Copy)]
+pub struct Watching {
+    /// One `IDLE` is ended and begun again after this: far inside the 29
+    /// minutes RFC 2177 allows, and inside the few minutes after which a home
+    /// router may forget a quiet connection.
+    pub renew: Duration,
+    /// A watch ends after this, for the caller to connect again with a
+    /// credential that is still good: a sign-in's access token lasts about an
+    /// hour, and a server may close a connection signed in with one that ran out.
+    pub session: Duration,
+}
+
+impl Watching {
+    pub const USUAL: Watching = Watching { renew: Duration::from_secs(4 * 60), session: Duration::from_secs(45 * 60) };
+}
+
+/// How a watch ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Watched {
+    /// `should_stop` said so.
+    Stopped,
+    /// `Watching.session` passed: connect again.
+    Renew,
+    /// The server can't say when mail arrives (no `IDLE`): the schedule is all there is.
+    NoIdle,
+}
+
+/// Watch a folder for new mail (IMAP `IDLE`, RFC 2177), calling `arrived`
+/// each time the server says some came, so a check can be queued at once
+/// rather than at the next scheduled one. It opens the folder with `EXAMINE`
+/// and reads nothing: no message, no flag — the check does the reading.
+pub fn watch(
+    account: &ImapAccount,
+    folder: &str,
+    credential: &Credential,
+    times: Watching,
+    should_stop: &dyn Fn() -> bool,
+    arrived: &mut dyn FnMut(),
+) -> Result<Watched, ImapError> {
+    let mut conn = Connection::open(account, credential)?;
+    if !conn.capabilities()?.iter().any(|c| c == "IDLE") {
+        conn.logout();
+        return Ok(Watched::NoIdle);
+    }
+    conn.examine(folder)?;
+    let started = Instant::now();
+    loop {
+        if should_stop() {
+            conn.logout();
+            return Ok(Watched::Stopped);
+        }
+        let left = times.session.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            conn.logout();
+            return Ok(Watched::Renew);
+        }
+        if conn.idle(left.min(times.renew), should_stop)? {
+            arrived();
+        }
     }
 }
 
@@ -1828,6 +2090,136 @@ mod tests {
         );
         let (unregistered, _) = credentials(vec![(secret_key("s1"), "g-rt".into())], &url, Some("ms-client"));
         assert!(unregistered.credential(Auth::Google, "s1").unwrap_err().contains("can't sign in to this mailbox"));
+    }
+
+    /// A server to watch: takes any LOGIN, says whether it can IDLE, and in
+    /// its first IDLE says a message arrived after a moment; later ones say
+    /// nothing until DONE. Records what it was sent.
+    fn idle_server(can_idle: bool) -> (u16, std::sync::mpsc::Receiver<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { break };
+                // Each line as it is written: the client waits on them.
+                stream.set_nodelay(true).unwrap();
+                let mut seen = Vec::new();
+                let mut w = stream.try_clone().unwrap();
+                let mut r = BufReader::new(stream);
+                w.write_all(b"* OK ready\r\n").unwrap();
+                let mut idles = 0;
+                loop {
+                    let mut line = String::new();
+                    if r.read_line(&mut line).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let line = line.trim_end().to_string();
+                    seen.push(line.clone());
+                    let (tag, cmd) = line.split_once(' ').unwrap();
+                    let upper = cmd.to_ascii_uppercase();
+                    if upper.starts_with("LOGOUT") {
+                        w.write_all(format!("* BYE\r\n{tag} OK bye\r\n").as_bytes()).unwrap();
+                        break;
+                    }
+                    let reply = if upper.starts_with("LOGIN") {
+                        format!("{tag} OK logged in\r\n")
+                    } else if upper == "CAPABILITY" {
+                        let idle = if can_idle { " IDLE" } else { "" };
+                        format!("* CAPABILITY IMAP4rev1{idle} AUTH=XOAUTH2\r\n{tag} OK done\r\n")
+                    } else if upper.starts_with("EXAMINE") {
+                        format!("* 3 EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n{tag} OK [READ-ONLY] done\r\n")
+                    } else if upper == "IDLE" {
+                        idles += 1;
+                        w.write_all(b"+ idling\r\n").unwrap();
+                        if idles == 1 {
+                            std::thread::sleep(Duration::from_millis(300));
+                            w.write_all(b"* 4 EXISTS\r\n").unwrap();
+                        } else {
+                            w.write_all(b"* OK Still here\r\n").unwrap();
+                        }
+                        let mut done = String::new();
+                        if r.read_line(&mut done).unwrap_or(0) == 0 {
+                            break;
+                        }
+                        seen.push(done.trim_end().to_string());
+                        format!("{tag} OK IDLE terminated\r\n")
+                    } else {
+                        format!("{tag} BAD unknown\r\n")
+                    };
+                    w.write_all(reply.as_bytes()).unwrap();
+                }
+                let _ = tx.send(seen);
+            }
+        });
+        (port, rx)
+    }
+
+    fn here(port: u16) -> ImapAccount {
+        ImapAccount {
+            host: "127.0.0.1".into(),
+            port,
+            username: "c@example.com".into(),
+            security: Security::Plain,
+            auth: Auth::Password,
+        }
+    }
+
+    /// Only these are ever sent while watching: nothing that reads a message
+    /// or changes anything.
+    fn only_watching(commands: &[String]) {
+        for c in commands {
+            let verb = c.split_whitespace().nth(1).unwrap_or(c).to_ascii_uppercase();
+            assert!(["LOGIN", "CAPABILITY", "EXAMINE", "IDLE", "DONE", "LOGOUT"].contains(&verb.as_str()), "{c}");
+        }
+    }
+
+    #[test]
+    fn a_watched_inbox_says_when_mail_arrives_reads_nothing_and_stops_when_asked() {
+        let (port, seen) = idle_server(true);
+        let arrivals = std::cell::Cell::new(0);
+        let started = Instant::now();
+        let should_stop = || arrivals.get() >= 1 && started.elapsed() > Duration::from_millis(1500);
+        let mut arrived = || arrivals.set(arrivals.get() + 1);
+        let times = Watching { renew: Duration::from_secs(20), session: Duration::from_secs(60) };
+        let watched = watch(&here(port), "INBOX", &pw("x"), times, &should_stop, &mut arrived).unwrap();
+        assert_eq!(watched, Watched::Stopped);
+        assert_eq!(arrivals.get(), 1, "the one message that arrived, once");
+        assert!(
+            started.elapsed() < Duration::from_millis(1500) + Duration::from_secs(3),
+            "a stop is noticed while idle"
+        );
+        let commands = seen.recv().unwrap();
+        only_watching(&commands);
+        assert!(commands.iter().any(|c| c.ends_with("EXAMINE \"INBOX\"")), "{commands:?}");
+        assert_eq!(commands.iter().filter(|c| c.ends_with(" IDLE")).count(), 2, "{commands:?}");
+        assert_eq!(commands.iter().filter(|c| c.as_str() == "DONE").count(), 2, "every IDLE is ended: {commands:?}");
+    }
+
+    #[test]
+    fn a_watch_is_renewed_and_ends_for_a_fresh_connection() {
+        let (port, seen) = idle_server(true);
+        let arrivals = std::cell::Cell::new(0);
+        let mut arrived = || arrivals.set(arrivals.get() + 1);
+        let times = Watching { renew: Duration::from_millis(200), session: Duration::from_secs(2) };
+        let started = Instant::now();
+        let watched = watch(&here(port), "INBOX", &pw("x"), times, &|| false, &mut arrived).unwrap();
+        assert_eq!(watched, Watched::Renew);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(arrivals.get(), 1);
+        let commands = seen.recv().unwrap();
+        only_watching(&commands);
+        assert!(commands.iter().filter(|c| c.ends_with(" IDLE")).count() >= 3, "renewed: {commands:?}");
+    }
+
+    #[test]
+    fn a_server_that_cannot_say_when_mail_arrives_is_left_to_the_schedule() {
+        let (port, seen) = idle_server(false);
+        let watched = watch(&here(port), "INBOX", &pw("x"), Watching::USUAL, &|| false, &mut || {}).unwrap();
+        assert_eq!(watched, Watched::NoIdle);
+        let commands = seen.recv().unwrap();
+        only_watching(&commands);
+        assert!(!commands.iter().any(|c| c.contains("EXAMINE") || c.contains("IDLE")), "{commands:?}");
     }
 
     #[test]
