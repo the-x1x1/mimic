@@ -14,6 +14,7 @@ export function AnywhereSection() {
   const chosen = settings.data?.["anywhere.shortcut"] ?? "";
   const pressEnter = settings.data?.["anywhere.pressEnter"] === true;
   const draftAtOnce = settings.data?.["anywhere.draftAtOnce"] !== false;
+  const copyForMe = settings.data?.["anywhere.copyForMe"] === true;
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -49,6 +50,26 @@ export function AnywhereSection() {
           ))}
         </select>
       </label>
+      <label className="row gap-2">
+        <input
+          type="checkbox"
+          checked={copyForMe}
+          onChange={(e) => {
+            setError(null);
+            ipc
+              .setSetting("anywhere.copyForMe", e.target.checked)
+              .catch((err: unknown) => setError((err as Error).message));
+          }}
+        />
+        <span>Copy what I&rsquo;ve selected when I press the shortcut</span>
+      </label>
+      {copyForMe ? (
+        <p className="muted small">
+          Select the message and press the shortcut. Once you&rsquo;ve let go of its keys, I press
+          Ctrl+Insert in that window &mdash; copy, in every app, and never Ctrl+C, which stops what
+          a terminal is running. If nothing is selected, I use what you copied last.
+        </p>
+      ) : null}
       <label className="row gap-2">
         <input
           type="checkbox"

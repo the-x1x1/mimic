@@ -70,6 +70,16 @@ describe("answering a message from anywhere", () => {
     );
   });
 
+  it("copies what is selected only once that is turned on, and says how", async () => {
+    native.setSetting.mockResolvedValue({});
+    renderIt();
+    const box = await screen.findByRole("checkbox", { name: /Copy what I.ve selected/ });
+    expect(box).not.toBeChecked();
+    expect(screen.queryByText(/Ctrl\+Insert/)).toBeNull();
+    fireEvent.click(box);
+    await waitFor(() => expect(native.setSetting).toHaveBeenCalledWith("anywhere.copyForMe", true));
+  });
+
   it("says so when another app already has the shortcut", async () => {
     native.setSetting.mockRejectedValue(
       new Error("Another app is already using Ctrl+Shift+Alt+R. Pick another, or turn it off."),

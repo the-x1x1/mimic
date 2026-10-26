@@ -39,6 +39,14 @@ pub const PRESS_ENTER: &str = "anywhere.pressEnter";
 /// for a reply.
 pub const DRAFT_AT_ONCE: &str = "anywhere.draftAtOnce";
 
+/// Whether the shortcut copies what is selected before reading the
+/// clipboard (0.10.0-alpha.71), so selecting the message is enough. Off by
+/// default: it presses keys in another app. It presses Ctrl+Insert, which
+/// copies in Windows' apps, browsers and terminals alike — never Ctrl+C,
+/// which in a terminal stops what is running — and only once the
+/// shortcut's own keys are let go, so nothing else is pressed with it.
+pub const COPY_FOR_ME: &str = "anywhere.copyForMe";
+
 /// The shortcuts offered, as the screen names them and as the plugin reads
 /// them. Each takes three modifiers, so none is one an app is likely to use
 /// already, none is one of Windows' own (most of those take the Windows key),
@@ -97,14 +105,34 @@ const MOST_TITLE: usize = 200;
 /// The shortcut was pressed: bring Mimic forward with Write open on what the
 /// clipboard holds, remembering the window it was pressed in, and that
 /// window's title (0.10.0-alpha.52), which often names who the message is
-/// from. Neither goes anywhere but the screen.
+/// from. Neither goes anywhere but the screen. With `COPY_FOR_ME` on, what is
+/// selected there is copied first, off the shortcut's own thread, since it
+/// waits on the keyboard.
 pub fn pressed(app: &AppHandle) {
+    use tauri::Manager;
+    let copy = app
+        .try_state::<SharedState>()
+        .and_then(|state| state.db.get_setting::<bool>(COPY_FOR_ME).ok().flatten())
+        .unwrap_or(false);
+    if !copy {
+        take(app, false);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || take(&app, true));
+}
+
+fn take(app: &AppHandle, copy: bool) {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     let from = window::front_elsewhere();
     CAME_FROM.store(from, Ordering::SeqCst);
     let whole: String = if from == 0 { String::new() } else { window::title(from) };
     *CAME_FROM_TITLE.lock().unwrap_or_else(|p| p.into_inner()) = whole.clone();
     let title: String = whole.trim().chars().take(MOST_TITLE).collect();
+    // Only in another app's window, and only when it is still in front.
+    if copy && from != 0 {
+        copy_selection(from);
+    }
     let text = app.clipboard().read_text().unwrap_or_default();
     let text: String = text.trim().chars().take(MOST).collect();
     crate::bring_to_front(app);
@@ -131,6 +159,41 @@ const VK_RETURN: u16 = 0x0D;
 const ENTER: [(u16, bool); 2] = [(VK_RETURN, false), (VK_RETURN, true)];
 /// How long a paste has to land before Enter.
 const ENTER_AFTER: Duration = Duration::from_millis(250);
+
+/// Ctrl+Insert: copy, in every Windows app, and never an interrupt.
+const VK_INSERT: u16 = 0x2D;
+const COPY: [(u16, bool); 4] = [(VK_CONTROL, false), (VK_INSERT, false), (VK_INSERT, true), (VK_CONTROL, true)];
+/// The shortcut's own keys, which must be up before anything is pressed.
+const VK_SHIFT: u16 = 0x10;
+const VK_MENU: u16 = 0x12;
+const HELD: [u16; 3] = [VK_SHIFT, VK_CONTROL, VK_MENU];
+/// How long to wait for them to be let go, and then for the copy to land.
+const LET_GO: Duration = Duration::from_millis(1000);
+const COPIED_WITHIN: Duration = Duration::from_millis(500);
+
+/// Copy what is selected in `from`: once the shortcut's keys are up, and
+/// only while `from` is in front — else nothing is pressed, and the
+/// clipboard is read as it is. Waits for the clipboard to change, briefly.
+fn copy_selection(from: isize) {
+    let until = Instant::now() + LET_GO;
+    while window::any_down(&HELD) {
+        if Instant::now() >= until {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if !may_paste(from, window::front()) {
+        return;
+    }
+    let before = window::clipboard_count();
+    if !window::press(&COPY) {
+        return;
+    }
+    let until = Instant::now() + COPIED_WITHIN;
+    while window::clipboard_count() == before && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
 
 /// Only into the window the message came from, once it is the one in front.
 fn may_paste(target: isize, front: isize) -> bool {
@@ -236,8 +299,9 @@ pub fn paste_back(app: &AppHandle, text: &str, send: bool) -> Result<Option<&'st
 /// Windows' windows, by their handles as numbers.
 #[cfg(windows)]
 mod window {
+    use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+        GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
@@ -287,6 +351,18 @@ mod window {
         unsafe { SetForegroundWindow(w as _) };
     }
 
+    /// Whether any of these keys is held down now.
+    pub fn any_down(keys: &[u16]) -> bool {
+        // SAFETY: any virtual-key code may be asked about.
+        keys.iter().any(|&k| (unsafe { GetAsyncKeyState(i32::from(k)) } as u16) & 0x8000 != 0)
+    }
+
+    /// The clipboard's count of changes: a copy moves it on.
+    pub fn clipboard_count() -> u32 {
+        // SAFETY: no arguments.
+        unsafe { GetClipboardSequenceNumber() }
+    }
+
     /// Press and let go of keys, as the keyboard would. True when Windows
     /// took them all.
     pub fn press(keys: &[(u16, bool)]) -> bool {
@@ -298,7 +374,9 @@ mod window {
                     ki: KEYBDINPUT {
                         wVk: key,
                         wScan: 0,
-                        dwFlags: if up { KEYEVENTF_KEYUP } else { 0 },
+                        // Insert is on the extended keys, not the keypad's.
+                        dwFlags: (if up { KEYEVENTF_KEYUP } else { 0 })
+                            | (if key == super::VK_INSERT { KEYEVENTF_EXTENDEDKEY } else { 0 }),
                         time: 0,
                         dwExtraInfo: 0,
                     },
@@ -327,6 +405,12 @@ mod window {
         String::new()
     }
     pub fn bring(_: isize) {}
+    pub fn any_down(_: &[u16]) -> bool {
+        false
+    }
+    pub fn clipboard_count() -> u32 {
+        0
+    }
     pub fn press(_: &[(u16, bool)]) -> bool {
         false
     }
@@ -345,6 +429,17 @@ pub fn start(app: &AppHandle, state: &SharedState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copying_for_the_user_presses_ctrl_insert_and_lets_every_key_go() {
+        const VK_C: u16 = 0x43;
+        assert!(COPY.iter().any(|&(k, _)| k == VK_INSERT));
+        assert!(!COPY.iter().any(|&(k, _)| k == VK_C), "never Ctrl+C, an interrupt in a terminal");
+        for &(key, _) in &COPY {
+            assert!(COPY.contains(&(key, true)), "{key:#x} let go");
+        }
+        assert!(HELD.contains(&VK_SHIFT) && HELD.contains(&VK_CONTROL) && HELD.contains(&VK_MENU));
+    }
 
     #[test]
     fn only_the_shortcuts_offered_are_listened_for() {
