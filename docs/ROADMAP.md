@@ -39,7 +39,7 @@ Not done, and why:
 
 ## Phase 4 — Connectors
 
-- Done in 0.10.0-alpha.3: IMAP, read-only, inbox and sent, with a per-folder watermark and a schedule. Done in 0.10.0-alpha.14: signing in with Microsoft (OAuth 2.0 with PKCE, `AUTHENTICATE XOAUTH2`), which Outlook.com and Hotmail require, and every Microsoft 365 mailbox has since 2022–23. Still open: signing in with Google, and a first real connection to each major provider.
+- Done in 0.10.0-alpha.3: IMAP, read-only, inbox and sent, with a per-folder watermark and a schedule. Done in 0.10.0-alpha.14: signing in with Microsoft (OAuth 2.0 with PKCE, `AUTHENTICATE XOAUTH2`), which Outlook.com and Hotmail require, and every Microsoft 365 mailbox has since 2022–23. Done in 0.10.0-alpha.26: signing in with Google, for Gmail and Google Workspace. Still open: a first real connection to each major provider.
 - Done in 0.10.0-alpha.12: mail in the sent folder, or labelled `Sent` in a Gmail export, from an address the user didn't give is asked about by name. Done in 0.10.0-alpha.15: a file named as the Sent folder (a Thunderbird or Apple Mail export is one mbox per folder, and its name is the only clue) is read as one, and importing a file again gives mail read by an earlier version the readings it lacked. Still open: a connected mailbox's mail from before the reading, and exports that say nothing about the folder.
 - Platform exports. Done in 0.10.0-alpha.19: WhatsApp — a chat from Export chat, as a text file or a zip, with the user saying which name in it is theirs (`sources::whatsapp`). Done in 0.10.0-alpha.20: Discord — the data package, which holds only what the user wrote, so it teaches how they write and not how they reply (`sources::discord`). Still open: iMessage, Signal, Slack, and a real export of each.
 - Incremental sync for file sources (IMAP has it).
@@ -74,7 +74,9 @@ Done in 0.10.0-alpha.24: Trusted mode (`crate::autoreply`) — replies sent by t
 
 Done in 0.10.0-alpha.25: a copy of each reply in the Sent folder where the provider keeps none; mail checked every 2 minutes at most, and at once when a held reply is waiting on a check.
 
-Next: signing in with Google, and other places messages arrive (Slack, Telegram, Teams).
+Done in 0.10.0-alpha.26: signing in with Google.
+
+Next: other places messages arrive (Slack, Telegram, Teams).
 
 ## Phase 8 — Advanced personalization
 

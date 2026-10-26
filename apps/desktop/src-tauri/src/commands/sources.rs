@@ -207,23 +207,35 @@ fn add_mailbox(
     Ok(state.db.get_source(&source.id)?.unwrap_or(source))
 }
 
-/// Whether this copy of Mimic can sign in to a mailbox with Microsoft
-/// (Outlook.com, Hotmail, Microsoft 365): it needs Mimic's client id with
-/// Microsoft, compiled in.
-#[tauri::command]
-pub async fn mail_sign_in_available() -> CommandResult<bool> {
-    Ok(oauth::microsoft_client_id().is_some())
+/// Which providers this copy of Mimic can sign in to a mailbox with: each
+/// needs Mimic's client id with that provider, compiled in.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailSignIns {
+    /// Outlook.com, Hotmail, Microsoft 365.
+    pub microsoft: bool,
+    /// Gmail and Google Workspace (0.10.0-alpha.26).
+    pub google: bool,
 }
 
-/// Where a Microsoft mailbox is, for the address signed in to.
-fn microsoft_account(email: &str) -> ImapAccount {
-    let provider = oauth::Provider::microsoft();
+#[tauri::command]
+pub async fn mail_sign_in_available() -> CommandResult<MailSignIns> {
+    Ok(MailSignIns { microsoft: Auth::Microsoft.client_id().is_some(), google: Auth::Google.client_id().is_some() })
+}
+
+/// The provider a sign-in is with: Microsoft or Google, never a password.
+fn provider_of(auth: Auth) -> CommandResult<oauth::Provider> {
+    auth.provider().ok_or_else(|| CommandError::new("invalid", "That isn't a way of signing in."))
+}
+
+/// Where a mailbox signed in to with `provider` is, for the address signed in to.
+fn signed_in_account(auth: Auth, provider: &oauth::Provider, email: &str) -> ImapAccount {
     ImapAccount {
         host: provider.imap_host.into(),
         port: provider.imap_port,
         username: email.trim().to_string(),
         security: Security::Tls,
-        auth: Auth::Microsoft,
+        auth,
     }
 }
 
@@ -264,18 +276,19 @@ fn sign_in_error(e: OAuthError) -> CommandError {
     }
 }
 
-/// Mimic's client id with Microsoft, or the refusal that says this copy
-/// can't sign in.
-fn microsoft_client() -> CommandResult<&'static str> {
-    oauth::microsoft_client_id()
-        .ok_or_else(|| CommandError::new("not_configured", OAuthError::NotConfigured("Microsoft").to_string()))
+/// Mimic's client id with the provider, or the refusal that says this copy
+/// can't sign in with it.
+fn client_for(auth: Auth, provider: &oauth::Provider) -> CommandResult<&'static str> {
+    auth.client_id()
+        .ok_or_else(|| CommandError::new("not_configured", OAuthError::NotConfigured(provider.name).to_string()))
 }
 
-/// Sign in with Microsoft in the user's browser: stoppable with
+/// Sign in with the provider in the user's browser: stoppable with
 /// `cancel_mail_sign_in`, and given up after five minutes.
-async fn microsoft_sign_in(
+async fn browser_sign_in(
     app: &tauri::AppHandle,
     signing_in: &std::sync::Arc<SigningIn>,
+    provider: oauth::Provider,
     client: &'static str,
     email: &str,
 ) -> CommandResult<oauth::Tokens> {
@@ -286,7 +299,7 @@ async fn microsoft_sign_in(
             app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
         };
         let stop = || waiting.stopped();
-        oauth::sign_in(&oauth::Provider::microsoft(), client, Some(&hint), &open, &stop)
+        oauth::sign_in(&provider, client, Some(&hint), &open, &stop)
     })
     .await
     .map_err(|e| CommandError::new("internal", e.to_string()))?
@@ -312,32 +325,37 @@ async fn probe_signed_in(account: ImapAccount, access_token: String) -> CommandR
         })
 }
 
-fn no_refresh_token() -> CommandError {
+fn no_refresh_token(provider: &oauth::Provider) -> CommandError {
     CommandError::new(
         "sign_in",
-        "Microsoft signed you in, but gave me no way to stay signed in, so I couldn't keep checking this mailbox.",
+        format!(
+            "{} signed you in, but gave me no way to stay signed in, so I couldn't keep checking this mailbox.",
+            provider.name
+        ),
     )
 }
 
-/// Sign in to a mailbox with Microsoft in the browser, and look around it,
-/// without importing anything. What the sign-in brought back is held in
-/// memory until `connect_signed_in_mailbox`, and nowhere else.
+/// Sign in to a mailbox with Microsoft or Google (`with`) in the browser,
+/// and look around it, without importing anything. What the sign-in brought
+/// back is held in memory until `connect_signed_in_mailbox`, and nowhere else.
 #[tauri::command]
 pub async fn sign_in_to_mailbox(
     app: tauri::AppHandle,
     state: State<'_, SharedState>,
     email: String,
+    with: Auth,
 ) -> CommandResult<ImapProbe> {
     let email = email.trim().to_string();
     if !email.contains('@') {
         return Err(CommandError::new("invalid", "That doesn't look like an email address."));
     }
-    let client = microsoft_client()?;
+    let provider = provider_of(with)?;
+    let client = client_for(with, &provider)?;
     let signing_in = SigningIn::begin(state.inner())?;
     *state.sign_in.pending.lock().unwrap_or_else(|p| p.into_inner()) = None;
-    let tokens = microsoft_sign_in(&app, &signing_in, client, &email).await?;
-    let refresh_token = tokens.refresh_token.clone().ok_or_else(no_refresh_token)?;
-    let probe = probe_signed_in(microsoft_account(&email), tokens.access_token.clone()).await?;
+    let tokens = browser_sign_in(&app, &signing_in, provider.clone(), client, &email).await?;
+    let refresh_token = tokens.refresh_token.clone().ok_or_else(|| no_refresh_token(&provider))?;
+    let probe = probe_signed_in(signed_in_account(with, &provider, &email), tokens.access_token.clone()).await?;
     // Stopped while the mailbox was being looked at: the dialog is gone, so
     // nothing is held for it. Decided under the lock `cancel_mail_sign_in`
     // takes, so a stop can't land between the look and the keeping.
@@ -345,7 +363,7 @@ pub async fn sign_in_to_mailbox(
     if signing_in.stopped() {
         return Err(sign_in_error(OAuthError::Canceled));
     }
-    *pending = Some(crate::app_state::PendingSignIn { email, refresh_token, probe: probe.clone() });
+    *pending = Some(crate::app_state::PendingSignIn { auth: with, email, refresh_token, probe: probe.clone() });
     Ok(probe)
 }
 
@@ -362,7 +380,9 @@ pub async fn connect_signed_in_mailbox(
     let Some(signed_in) = pending.filter(|p| p.email.eq_ignore_ascii_case(email.trim())) else {
         return Err(CommandError::new("sign_in", "I no longer have that sign-in. Sign in again."));
     };
-    add_mailbox(&state, microsoft_account(&signed_in.email), signed_in.probe, is_mine, &signed_in.refresh_token)
+    let provider = provider_of(signed_in.auth)?;
+    let account = signed_in_account(signed_in.auth, &provider, &signed_in.email);
+    add_mailbox(&state, account, signed_in.probe, is_mine, &signed_in.refresh_token)
 }
 
 /// Stop a sign-in waiting on the browser, and forget one that is waiting to
@@ -375,8 +395,8 @@ pub async fn cancel_mail_sign_in(state: State<'_, SharedState>) -> CommandResult
     Ok(())
 }
 
-/// Sign a connected Microsoft mailbox in again — Microsoft asked for it, or
-/// the saved sign-in can't be unlocked on this Windows account — without
+/// Sign a connected Microsoft or Google mailbox in again — the provider
+/// asked for it, or the saved sign-in can't be unlocked on this Windows account — without
 /// removing it and everything read from it. The new sign-in is tried on the
 /// mailbox first, and kept only if it opens it.
 #[tauri::command]
@@ -393,13 +413,14 @@ pub async fn sign_in_mailbox_again(
     let config: imap::ImapSourceConfig = serde_json::from_value(source.config.clone()).map_err(|_| {
         CommandError::new("mailbox", "I can't read this mailbox's settings; remove it and connect it again.")
     })?;
-    if config.account.auth != Auth::Microsoft {
+    let auth = config.account.auth;
+    let Some(provider) = auth.provider() else {
         return Err(CommandError::new("mailbox", "This mailbox uses a password. Give it a new one instead."));
-    }
-    let client = microsoft_client()?;
+    };
+    let client = client_for(auth, &provider)?;
     let signing_in = SigningIn::begin(state.inner())?;
-    let tokens = microsoft_sign_in(&app, &signing_in, client, &config.account.username).await?;
-    let refresh_token = tokens.refresh_token.clone().ok_or_else(no_refresh_token)?;
+    let tokens = browser_sign_in(&app, &signing_in, provider.clone(), client, &config.account.username).await?;
+    let refresh_token = tokens.refresh_token.clone().ok_or_else(|| no_refresh_token(&provider))?;
     probe_signed_in(config.account.clone(), tokens.access_token.clone()).await?;
     // Stopped while the mailbox was being looked at: the old sign-in stays.
     if signing_in.stopped() {
@@ -523,4 +544,14 @@ pub async fn pick_source_folder(app: tauri::AppHandle, title: Option<String>) ->
         let _ = tx.send(p.map(|f| f.to_string()));
     });
     Ok(rx.await.unwrap_or(None))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn which_providers_this_copy_signs_in_with_matches_its_fixture() {
+        let json = serde_json::to_value(super::MailSignIns { microsoft: false, google: true }).unwrap();
+        assert_eq!(json, serde_json::json!({ "microsoft": false, "google": true }));
+        crate::fixtures::check_fixture("mail_sign_ins.json", &json);
+    }
 }

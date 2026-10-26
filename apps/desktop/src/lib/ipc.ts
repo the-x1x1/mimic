@@ -51,6 +51,7 @@ import {
   CommandError,
   AutoReplyState,
   MailboxSending,
+  MailSignIns,
   OutboxEntry,
   ReplyEnvelope,
   type AutoReplyRules,
@@ -60,6 +61,7 @@ import {
   type ComposeRequest,
   type ImapAccount,
   type SearchWho,
+  type SignInWith,
   type ThreadMark,
   type Toward,
 } from "@mimic/contracts";
@@ -213,19 +215,20 @@ export const ipc = {
    */
   setMailboxPassword: (sourceId: string, password: string) =>
     call("set_mailbox_password", Source, { sourceId, password }),
-  /** Whether this copy of Mimic can sign in to a mailbox with Microsoft. */
-  mailSignInAvailable: () => call("mail_sign_in_available", z_bool),
+  /** Which providers this copy of Mimic can sign in to a mailbox with. */
+  mailSignInAvailable: () => call("mail_sign_in_available", MailSignIns),
   /**
-   * Sign in with Microsoft in the browser, and look at the mailbox without
-   * importing anything. Resolves once the browser has come back.
+   * Sign in with Microsoft or Google in the browser, and look at the mailbox
+   * without importing anything. Resolves once the browser has come back.
    */
-  signInToMailbox: (email: string) => call("sign_in_to_mailbox", ImapProbe, { email }),
+  signInToMailbox: (email: string, signInWith: SignInWith) =>
+    call("sign_in_to_mailbox", ImapProbe, { email, with: signInWith }),
   /** Connect the mailbox just signed in to. */
   connectSignedInMailbox: (email: string, isMine: boolean) =>
     call("connect_signed_in_mailbox", Source, { email, isMine }),
   /** Stop a sign-in waiting on the browser, and forget one not yet connected. */
   cancelMailSignIn: () => call("cancel_mail_sign_in", z_void),
-  /** Sign a connected Microsoft mailbox in again, keeping everything read from it. */
+  /** Sign a connected Microsoft or Google mailbox in again, keeping everything read from it. */
   signInMailboxAgain: (sourceId: string) => call("sign_in_mailbox_again", Source, { sourceId }),
   deleteSource: (sourceId: string) => call("delete_source", DeletionReport, { sourceId }),
   pickSourceFile: (title: string, extensions: string[]) =>

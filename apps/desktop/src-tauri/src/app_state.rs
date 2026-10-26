@@ -49,6 +49,8 @@ pub struct MailSignIn {
 
 /// A mailbox signed in to and looked at, not yet connected.
 pub struct PendingSignIn {
+    /// Who it was signed in with: Microsoft or Google.
+    pub auth: mimic_core::sources::imap::Auth,
     pub email: String,
     pub refresh_token: String,
     pub probe: mimic_core::sources::imap::ImapProbe,

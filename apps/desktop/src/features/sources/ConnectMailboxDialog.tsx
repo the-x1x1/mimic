@@ -4,9 +4,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button, Field, InlineError } from "@mimic/ui";
 import {
   MICROSOFT_UNAVAILABLE,
+  SIGN_IN_NAMES,
   guessMailHost,
   type ImapAccount,
   type ImapProbe,
+  type SignInWith,
 } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
@@ -30,7 +32,8 @@ function wasStopped(e: unknown): boolean {
  * does not say why. Outlook.com, Hotmail and Microsoft 365 take no password
  * at all: those sign in with Microsoft in the browser, when this copy of
  * Mimic was built able to — and when it wasn't, the dialog says so and offers
- * nothing that would fail.
+ * nothing that would fail. Gmail and Google Workspace sign in with Google the
+ * same way when this copy can, and an app password still works for them.
  */
 export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
@@ -38,7 +41,11 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const [host, setHost] = useState("");
   const [port, setPort] = useState(993);
   const [password, setPassword] = useState("");
-  const [workMicrosoft, setWorkMicrosoft] = useState(false);
+  // Ticked under Server settings: an address at the user's own domain whose
+  // mail is Microsoft 365's or Google Workspace's.
+  const [workAccount, setWorkAccount] = useState<SignInWith | null>(null);
+  // Gmail with an app password, though it could sign in with Google.
+  const [withPassword, setWithPassword] = useState(false);
   const [probe, setProbe] = useState<ImapProbe | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"checking" | "connecting" | "signing-in" | null>(null);
@@ -46,11 +53,20 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   // Said only when the store reports it: until then, and on a build that
   // does not seal, the note claims nothing it cannot back.
   const protection = useProviderState().data?.credentials.protection;
-  const signInAvailable = useMailSignIn().data;
-  const canSignIn = signInAvailable === true;
+  const signIns = useMailSignIn().data;
 
   const known = guessMailHost(username);
-  const microsoft = known?.signIn === "microsoft" || workMicrosoft;
+  // How this mailbox will sign in: a known provider's way when it takes
+  // nothing else, or when this copy can and the user didn't choose a
+  // password; for any other address, the way ticked under Server settings
+  // (offered only for an address no provider is known for).
+  const signingInWith: SignInWith | null = known?.signIn
+    ? known.noPassword || (signIns?.[known.signIn] === true && !withPassword)
+      ? known.signIn
+      : null
+    : workAccount;
+  const canSignIn = signingInWith !== null && signIns?.[signingInWith] === true;
+  const provider = signingInWith ? SIGN_IN_NAMES[signingInWith] : null;
   const account: ImapAccount = {
     host: host.trim() || known?.host || "",
     port: host.trim() ? port : (known?.port ?? port),
@@ -68,7 +84,7 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
 
   /** A sign-in brought back for another address, or abandoned, is forgotten. */
   function forgetSignIn() {
-    if (microsoft && (busy === "signing-in" || probe)) void ipc.cancelMailSignIn();
+    if (signingInWith && (busy === "signing-in" || probe)) void ipc.cancelMailSignIn();
   }
 
   function close() {
@@ -89,12 +105,12 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
-  async function signIn() {
+  async function signIn(signInWith: SignInWith) {
     setError(null);
     setProbe(null);
     setBusy("signing-in");
     try {
-      setProbe(await ipc.signInToMailbox(account.username));
+      setProbe(await ipc.signInToMailbox(account.username, signInWith));
     } catch (e) {
       if (!wasStopped(e)) setError((e as Error).message);
     } finally {
@@ -106,7 +122,7 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     setBusy("connecting");
     try {
-      if (microsoft) {
+      if (signingInWith) {
         await ipc.connectSignedInMailbox(account.username, isMine);
       } else {
         await ipc.connectMailbox(account, password, isMine);
@@ -137,8 +153,9 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
         <Dialog.Content className="dialog dialog--wide">
           <Dialog.Title className="dialog__title">Connect a mailbox</Dialog.Title>
           <Dialog.Description className="neutral">
-            I&rsquo;ll read your inbox and your sent mail, and check for new mail every so often. I
-            only ever read: nothing gets marked as read, moved, deleted or sent.
+            I&rsquo;ll read your inbox and your sent mail, and check for new mail every so often.
+            Reading changes nothing: nothing gets marked as read, moved or deleted. I send only a
+            reply you&rsquo;ve said can go.
           </Dialog.Description>
 
           <Field label="Your email address" htmlFor="mb-user">
@@ -156,17 +173,40 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
             />
           </Field>
 
-          {microsoft ? (
+          {signingInWith ? (
             canSignIn ? (
-              <p className="muted small">
-                {known?.signIn === "microsoft"
-                  ? known.help
-                  : "Microsoft accounts — Outlook, Hotmail and Microsoft 365 — sign in with Microsoft."}{" "}
-                I never see your password; what lets me stay signed in is kept instead. {kept} If
-                your organisation hasn&rsquo;t allowed apps like this, Microsoft will say so when
-                you sign in.
-              </p>
-            ) : signInAvailable === false ? (
+              <div className="stack gap-1">
+                <p className="muted small">
+                  {signingInWith === "microsoft"
+                    ? known?.signIn === "microsoft"
+                      ? known.help
+                      : "Microsoft accounts — Outlook, Hotmail and Microsoft 365 — sign in with Microsoft."
+                    : known?.signIn === "google"
+                      ? "Gmail signs in with Google in your browser: no app password needed."
+                      : "Google accounts — Gmail and Google Workspace — sign in with Google."}{" "}
+                  I never see your password; what lets me stay signed in is kept instead. {kept}{" "}
+                  {signingInWith === "microsoft"
+                    ? "If your organisation hasn’t allowed apps like this, Microsoft will say so when you sign in."
+                    : "Google asks you to allow full access to your mail — the only permission it offers mail programs — and may warn that it hasn’t checked Mimic. I use it to read your mail and send the replies you let go."}
+                </p>
+                {known?.signIn === "google" ? (
+                  <div className="row">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        forgetSignIn();
+                        setWithPassword(true);
+                        setProbe(null);
+                      }}
+                    >
+                      Use an app password instead
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ) : signIns && signingInWith === "microsoft" && !signIns.microsoft ? (
               <p className="danger small">{MICROSOFT_UNAVAILABLE}</p>
             ) : null
           ) : (
@@ -189,10 +229,30 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                   ? known.help
                   : "Look for “app passwords” in your account's security settings."}{" "}
                 {kept}{" "}
-                {canSignIn
-                  ? "A Microsoft 365 work or school account, or any other Microsoft address, takes no password at all: say so under Server settings, and sign in with Microsoft."
-                  : "Microsoft 365 accounts, and work accounts that allow only single sign-on, can't be connected with a password — export your mail instead."}
+                {known
+                  ? null
+                  : signIns?.microsoft
+                    ? "A Microsoft 365 work or school account, or any other Microsoft address, takes no password at all: say so under Server settings, and sign in with Microsoft."
+                    : "Microsoft 365 accounts, and work accounts that allow only single sign-on, can't be connected with a password — export your mail instead."}{" "}
+                {!known && signIns?.google
+                  ? "A Google Workspace account can sign in with Google instead: say so under Server settings."
+                  : null}
               </p>
+              {known?.signIn === "google" && signIns?.google ? (
+                <div className="row">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setWithPassword(false);
+                      setProbe(null);
+                    }}
+                  >
+                    Sign in with Google instead
+                  </Button>
+                </div>
+              ) : null}
             </>
           )}
 
@@ -200,27 +260,30 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
             <summary className="muted small">
               {known ? `Server: ${known.host}` : "Server settings"}
             </summary>
-            {known?.signIn === "microsoft" ? null : (
+            {known?.signIn ? null : (
               <>
-                {canSignIn ? (
-                  <label className="row gap-2">
-                    <input
-                      type="checkbox"
-                      checked={workMicrosoft}
-                      disabled={busy !== null}
-                      onChange={(e) => {
-                        forgetSignIn();
-                        setWorkMicrosoft(e.target.checked);
-                        setProbe(null);
-                      }}
-                    />
-                    <span>
-                      This is a Microsoft account (Outlook, Hotmail or Microsoft 365): sign in with
-                      Microsoft
-                    </span>
-                  </label>
-                ) : null}
-                {workMicrosoft ? null : (
+                {(["microsoft", "google"] as const).map((w) =>
+                  signIns?.[w] ? (
+                    <label key={w} className="row gap-2">
+                      <input
+                        type="checkbox"
+                        checked={workAccount === w}
+                        disabled={busy !== null}
+                        onChange={(e) => {
+                          forgetSignIn();
+                          setWorkAccount(e.target.checked ? w : null);
+                          setProbe(null);
+                        }}
+                      />
+                      <span>
+                        {w === "microsoft"
+                          ? "This is a Microsoft account (Outlook, Hotmail or Microsoft 365): sign in with Microsoft"
+                          : "This is a Google account (Gmail or Google Workspace): sign in with Google"}
+                      </span>
+                    </label>
+                  ) : null,
+                )}
+                {workAccount ? null : (
                   <>
                     <div className="row gap-2">
                       <Field label="IMAP server" htmlFor="mb-host">
@@ -303,7 +366,7 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
               <Button variant="primary" onClick={connect} disabled={busy !== null}>
                 {busy === "connecting" ? "Connecting…" : "Connect and start reading"}
               </Button>
-            ) : microsoft ? (
+            ) : signingInWith ? (
               busy === "signing-in" ? (
                 <Button variant="ghost" onClick={() => void ipc.cancelMailSignIn()}>
                   Stop signing in
@@ -311,10 +374,10 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
               ) : (
                 <Button
                   variant="primary"
-                  onClick={signIn}
+                  onClick={() => void signIn(signingInWith)}
                   disabled={!canSignIn || !account.username.includes("@") || busy !== null}
                 >
-                  Sign in with Microsoft
+                  Sign in with {provider}
                 </Button>
               )
             ) : (

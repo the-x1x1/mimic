@@ -147,9 +147,22 @@ export function describeImport(s: ImportSummary): string {
   return parts.join(", ");
 }
 
-/** How a mailbox signs in: an app password, or a sign-in with Microsoft. */
-export const MailboxAuth = z.enum(["password", "microsoft"]);
+/** How a mailbox signs in: an app password, or a sign-in with Microsoft or Google. */
+export const MailboxAuth = z.enum(["password", "microsoft", "google"]);
 export type MailboxAuth = z.infer<typeof MailboxAuth>;
+
+/** A provider a mailbox signs in with, in the browser. */
+export type SignInWith = Exclude<MailboxAuth, "password">;
+
+/** The provider's name, as the screen says it. */
+export const SIGN_IN_NAMES: Record<SignInWith, string> = {
+  microsoft: "Microsoft",
+  google: "Google",
+};
+
+/** Which providers this copy of Mimic can sign in to a mailbox with. */
+export const MailSignIns = z.object({ microsoft: z.boolean(), google: z.boolean() });
+export type MailSignIns = z.infer<typeof MailSignIns>;
 
 /** How to reach a mailbox. The password is sent separately and never stored here. */
 export const ImapAccount = z.object({
@@ -186,36 +199,55 @@ export type ImapProbe = z.infer<typeof ImapProbe>;
 /**
  * Server settings for the providers most people use. Most want an app
  * password for IMAP, not the account password; the dialog says so. Microsoft
- * takes no password at all: those sign in with Microsoft (`signIn`), when
- * this copy of Mimic was built able to.
+ * takes no password at all (`noPassword`): those sign in with Microsoft
+ * (`signIn`), when this copy of Mimic was built able to. Gmail takes either:
+ * a sign-in with Google when this copy can, or an app password.
  */
 const MICROSOFT =
   "Outlook.com and Hotmail no longer let apps like this sign in with a password. You sign in with Microsoft in your browser instead.";
+
+const OUTLOOK: KnownMailHost = {
+  host: "outlook.office365.com",
+  port: 993,
+  help: MICROSOFT,
+  signIn: "microsoft",
+  noPassword: true,
+};
 
 /** Said when this copy of Mimic can't sign in with Microsoft. */
 export const MICROSOFT_UNAVAILABLE =
   "Outlook.com and Hotmail no longer let apps like this sign in with a password, and this copy of Mimic isn't set up to sign in with Microsoft. For now, bring your mail in as an .mbox file: add the account to Thunderbird, then export the inbox and sent folders as mbox.";
 
-export const KNOWN_MAIL_HOSTS: Record<
-  string,
-  { host: string; port: number; help: string; signIn?: "microsoft" }
-> = {
+export interface KnownMailHost {
+  host: string;
+  port: number;
+  /** Where the provider makes an app password, or how it signs in. */
+  help: string;
+  /** The provider's own sign-in, which Mimic can use when built able to. */
+  signIn?: SignInWith;
+  /** It takes no password of any kind: only its sign-in. */
+  noPassword?: true;
+}
+
+export const KNOWN_MAIL_HOSTS: Record<string, KnownMailHost> = {
   "gmail.com": {
     host: "imap.gmail.com",
     port: 993,
     help: "Google Account → Security → 2-Step Verification → App passwords.",
+    signIn: "google",
   },
   "googlemail.com": {
     host: "imap.gmail.com",
     port: 993,
     help: "Google Account → Security → 2-Step Verification → App passwords.",
+    signIn: "google",
   },
   // Microsoft stopped accepting passwords of any kind for IMAP on personal
   // accounts in September 2024; these sign in with Microsoft instead.
-  "outlook.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, signIn: "microsoft" },
-  "hotmail.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, signIn: "microsoft" },
-  "live.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, signIn: "microsoft" },
-  "msn.com": { host: "outlook.office365.com", port: 993, help: MICROSOFT, signIn: "microsoft" },
+  "outlook.com": OUTLOOK,
+  "hotmail.com": OUTLOOK,
+  "live.com": OUTLOOK,
+  "msn.com": OUTLOOK,
   "icloud.com": {
     host: "imap.mail.me.com",
     port: 993,
@@ -258,7 +290,7 @@ const MICROSOFT_ELSEWHERE = new Set(
 );
 
 /** Server settings guessed from an address, or null when the domain is unknown. */
-export function guessMailHost(address: string) {
+export function guessMailHost(address: string): KnownMailHost | null {
   const domain = address.split("@")[1]?.trim().toLowerCase();
   if (!domain) return null;
   return (

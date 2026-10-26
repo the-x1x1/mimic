@@ -88,24 +88,31 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         let id = chosen.or_else(|| registry.default_id())?;
         registry.get(&id).ok()
     });
-    // A mailbox's password, or its Microsoft sign-in, is read from the secret
-    // store per run, so one changed or removed since the check was queued is
-    // honoured; a refresh token Microsoft replaces is saved back.
-    let mail_credentials = std::sync::Arc::new(mimic_core::sources::imap::Credentials::new(
-        {
-            let secrets = secrets.clone();
-            std::sync::Arc::new(move |key: &str| {
-                use mimic_core::providers::SecretStore;
-                secrets.get(key)
-            })
-        },
-        {
-            let secrets = secrets.clone();
-            std::sync::Arc::new(move |key: &str, value: &str| secrets.set(key, value).map_err(|e| e.to_string()))
-        },
-        mimic_core::sources::oauth::Provider::microsoft(),
-        mimic_core::sources::oauth::microsoft_client_id().map(str::to_string),
-    ));
+    // A mailbox's password, or its Microsoft or Google sign-in, is read from
+    // the secret store per run, so one changed or removed since the check was
+    // queued is honoured; a refresh token the provider replaces is saved back.
+    let mail_credentials = std::sync::Arc::new(
+        mimic_core::sources::imap::Credentials::new(
+            {
+                let secrets = secrets.clone();
+                std::sync::Arc::new(move |key: &str| {
+                    use mimic_core::providers::SecretStore;
+                    secrets.get(key)
+                })
+            },
+            {
+                let secrets = secrets.clone();
+                std::sync::Arc::new(move |key: &str, value: &str| secrets.set(key, value).map_err(|e| e.to_string()))
+            },
+            mimic_core::sources::oauth::Provider::microsoft(),
+            mimic_core::sources::oauth::microsoft_client_id().map(str::to_string),
+        )
+        .signing_in_with(
+            mimic_core::sources::imap::Auth::Google,
+            mimic_core::sources::oauth::Provider::google(),
+            mimic_core::sources::oauth::google_client_id().map(str::to_string),
+        ),
+    );
     // Reading what the user's messages are doing sends every one of them to
     // the model, so it is only ever handed one on this computer.
     let local_registry = providers.clone();

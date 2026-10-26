@@ -111,8 +111,12 @@ export function SourcesPage() {
                         Remove
                       </Button>
                     </div>
-                    {mailboxAuth(s) === "microsoft" ? (
-                      <MailboxSignInAgain sourceId={s.id} name={s.name} />
+                    {mailboxAuth(s) === "microsoft" || mailboxAuth(s) === "google" ? (
+                      <MailboxSignInAgain
+                        sourceId={s.id}
+                        name={s.name}
+                        signInWith={mailboxAuth(s) === "google" ? "google" : "microsoft"}
+                      />
                     ) : s.connector === "imap" ? (
                       <MailboxPassword sourceId={s.id} name={s.name} />
                     ) : null}
