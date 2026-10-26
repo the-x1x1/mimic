@@ -17,6 +17,8 @@ export const AutoReplyRules = z.object({
   who: AutoReplyWho,
   /** With `listed`, the people it may answer (participant ids). */
   people: z.array(z.string()),
+  /** People it never answers by itself, whatever `who` says (0.10.0-alpha.37). */
+  never: z.array(z.string()),
   /** How long a reply is held before it goes, in minutes. */
   holdMinutes: z.number().int(),
   /** Replies it may send by itself in a day. */
@@ -67,11 +69,14 @@ export function describeAutoReply(state: AutoReplyState): string {
   if (!state.running)
     return "On, but replies aren't being prepared in advance, so there's nothing to send.";
   if (r.mailboxes.length === 0) return "On, but for no mailbox yet, so nothing is sent.";
+  const chosen = r.people.filter((p) => !r.never.includes(p)).length;
   const who =
     r.who === "known"
-      ? "people you've written to yourself"
-      : r.people.length === 1
+      ? r.never.length === 0
+        ? "people you've written to yourself"
+        : `people you've written to yourself, except ${r.never.length === 1 ? "the one you named" : `the ${r.never.length.toLocaleString()} you named`}`
+      : chosen === 1
         ? "the one person you chose"
-        : `the ${r.people.length.toLocaleString()} people you chose`;
+        : `the ${chosen.toLocaleString()} people you chose`;
   return `On: I answer ${who}, holding each reply ${r.holdMinutes.toLocaleString()} minutes first, ${r.dailyLimit.toLocaleString()} a day at most.`;
 }

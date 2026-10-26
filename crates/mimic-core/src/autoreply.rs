@@ -102,6 +102,10 @@ pub struct Rules {
     pub who: Who,
     /// With `Who::Listed`, the people it may answer (participant ids).
     pub people: Vec<String>,
+    /// People it never answers, whatever `who` says (0.10.0-alpha.37):
+    /// those the user would rather answer themselves.
+    #[serde(default)]
+    pub never: Vec<String>,
     pub hold_minutes: i64,
     pub daily_limit: i64,
     /// When it was last turned on: only messages that arrived after are
@@ -117,6 +121,7 @@ impl Default for Rules {
             mailboxes: Vec::new(),
             who: Who::Known,
             people: Vec::new(),
+            never: Vec::new(),
             hold_minutes: DEFAULT_HOLD_MINUTES,
             daily_limit: DEFAULT_DAILY_LIMIT,
             enabled_at: None,
@@ -131,6 +136,7 @@ impl Rules {
         self.daily_limit = self.daily_limit.clamp(0, MAX_DAILY_LIMIT);
         self.mailboxes.dedup();
         self.people.dedup();
+        self.never.dedup();
         self
     }
 }
@@ -274,6 +280,9 @@ fn refusal(
     };
     if incoming.participant_id.as_deref() != Some(person) {
         return Ok(Some(NOT_THEIRS));
+    }
+    if rules.never.iter().any(|p| p == person) {
+        return Ok(Some(PERSON_OFF));
     }
     let allowed = match rules.who {
         Who::Listed => rules.people.iter().any(|p| p == person),
@@ -716,6 +725,24 @@ mod tests {
         let w = world(Behaviour::default());
         w.db.set_setting(crate::assist::SETTING, &false).unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+    }
+
+    #[test]
+    fn someone_named_never_is_not_answered_by_itself_whoever_else_is() {
+        let w = world(Behaviour::default());
+        set_rules(&w.db, Rules { never: vec![w.ada.clone()], ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "known, and named never");
+        set_rules(&w.db, Rules { who: Who::Listed, people: vec![w.ada.clone()], ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "listed too: never wins");
+
+        // Held, and then named: stopped when it would go, saying why.
+        let w = world(Behaviour::default());
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        set_rules(&w.db, Rules { never: vec![w.ada.clone()], ..rules(&w.db).unwrap() }).unwrap();
+        checked(&w);
+        assert_eq!(tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap().sent, 0);
+        let stopped = only_entry(&w.db);
+        assert_eq!((stopped.status, stopped.error.as_deref()), (SendStatus::Canceled, Some(PERSON_OFF)));
     }
 
     #[test]

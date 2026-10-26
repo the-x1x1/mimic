@@ -1458,6 +1458,7 @@ describe("replying by itself says what it will do", () => {
     mailboxes: ["s1"],
     who: "known" as const,
     people: [],
+    never: [],
     holdMinutes: 10,
     dailyLimit: 10,
     enabledAt: "2026-10-26T09:00:00.000Z",
@@ -1476,6 +1477,16 @@ describe("replying by itself says what it will do", () => {
     expect(
       describeAutoReply({
         rules: { ...rules, who: "listed", people: ["p1"] },
+        running: true,
+        lastDay: 0,
+      }),
+    ).toMatch(/the one person you chose/);
+    expect(
+      describeAutoReply({ rules: { ...rules, never: ["p1", "p2"] }, running: true, lastDay: 0 }),
+    ).toMatch(/^On: I answer people you've written to yourself, except the 2 you named,/);
+    expect(
+      describeAutoReply({
+        rules: { ...rules, who: "listed", people: ["p1", "p2"], never: ["p2"] },
         running: true,
         lastDay: 0,
       }),

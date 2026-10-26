@@ -18,6 +18,7 @@ const off: AutoReplyRules = {
   mailboxes: [],
   who: "known",
   people: [],
+  never: [],
   holdMinutes: 10,
   dailyLimit: 10,
   enabledAt: null,
@@ -37,7 +38,7 @@ const mailbox = {
   lastError: null,
 };
 
-function renderIt(rules: AutoReplyRules, running = false) {
+function renderIt(rules: AutoReplyRules, running = false, people: unknown[] = []) {
   native.autoReply.mockResolvedValue({ rules, running, lastDay: 0 } satisfies AutoReplyState);
   native.setAutoReply.mockImplementation(async (r: AutoReplyRules) => ({
     rules: r,
@@ -46,8 +47,8 @@ function renderIt(rules: AutoReplyRules, running = false) {
   }));
   native.sources.mockResolvedValue([mailbox]);
   native.people.mockResolvedValue({
-    people: [],
-    peopleTotal: 0,
+    people,
+    peopleTotal: people.length,
     automatedSendersTotal: 0,
     automatedSenders: [],
     showingAutomated: false,
@@ -92,6 +93,58 @@ describe("replying by myself", () => {
     await waitFor(() =>
       expect(native.setAutoReply).toHaveBeenLastCalledWith(
         expect.objectContaining({ enabled: false }),
+      ),
+    );
+  });
+
+  it("leaves out by name whomever the user would rather answer", async () => {
+    renderIt({ ...off, enabled: true, mailboxes: ["s1"] }, true, [
+      { participant: { id: "p-ada", displayName: "Ada Lovelace" } },
+      { participant: { id: "p-bob", displayName: "Bob" } },
+    ]);
+    const group = await screen.findByRole("group", { name: "Never by myself to" });
+    expect(within(group).getByText("No one yet.")).toBeInTheDocument();
+    fireEvent.change(within(group).getByRole("searchbox", { name: "Find someone to leave out" }), {
+      target: { value: "ada" },
+    });
+    fireEvent.click(await within(group).findByRole("checkbox", { name: "Ada Lovelace" }));
+    await waitFor(() =>
+      expect(native.setAutoReply).toHaveBeenCalledWith({
+        ...off,
+        enabled: true,
+        mailboxes: ["s1"],
+        never: ["p-ada"],
+      }),
+    );
+    expect(
+      await screen.findByText(/people you've written to yourself, except the one you named/),
+    ).toBeInTheDocument();
+  });
+
+  it("takes someone off the never list when they are chosen again, and lists anyone named", async () => {
+    renderIt(
+      {
+        ...off,
+        enabled: true,
+        mailboxes: ["s1"],
+        who: "listed",
+        people: [],
+        never: ["p-ada", "p-far"],
+      },
+      true,
+      [{ participant: { id: "p-ada", displayName: "Ada Lovelace" } }],
+    );
+    const group = await screen.findByRole("group", { name: "Never by myself to" });
+    expect(await within(group).findByRole("checkbox", { name: "Ada Lovelace" })).toBeChecked();
+    expect(within(group).getByRole("checkbox", { name: "Someone else you named" })).toBeChecked();
+    const chosen = screen
+      .getAllByRole("checkbox", { name: "Ada Lovelace" })
+      .find((b) => !group.contains(b));
+    expect(chosen).not.toBeChecked();
+    fireEvent.click(chosen as HTMLElement);
+    await waitFor(() =>
+      expect(native.setAutoReply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ people: ["p-ada"], never: ["p-far"] }),
       ),
     );
   });

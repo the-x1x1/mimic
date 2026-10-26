@@ -12,6 +12,8 @@ const native = vi.hoisted(() => ({
   resolveDraft: vi.fn(),
   writeAnotherDraft: vi.fn(),
   addDraftPreference: vi.fn(),
+  autoReply: vi.fn(),
+  setAutoReply: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -89,10 +91,27 @@ function renderReview() {
   );
 }
 
+const rules = {
+  enabled: true,
+  mailboxes: ["s1"],
+  who: "listed" as const,
+  people: ["p1", "p2"],
+  never: [],
+  holdMinutes: 10,
+  dailyLimit: 10,
+  enabledAt: "2026-10-26T09:00:00.000Z",
+};
+
 describe("a reply held to go by itself", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
     native.replyEnvelope.mockResolvedValue(envelope);
+    native.autoReply.mockResolvedValue({ rules, running: true, lastDay: 1 });
+    native.setAutoReply.mockImplementation(async (r: typeof rules) => ({
+      rules: r,
+      running: true,
+      lastDay: 1,
+    }));
   });
 
   it("says when it goes and to whom, and offers no Send of its own beside it", async () => {
@@ -114,5 +133,22 @@ describe("a reply held to go by itself", () => {
     await waitFor(() => expect(native.stopHeldReply).toHaveBeenCalledWith("o1"));
     fireEvent.click(within(box).getByRole("button", { name: "Send it now" }));
     await waitFor(() => expect(native.sendHeldReplyNow).toHaveBeenCalledWith("o1"));
+  });
+
+  it("can be stopped for good for its person", async () => {
+    native.stopHeldReply.mockResolvedValue({ ...held, status: "canceled" });
+    renderReview();
+    const box = await screen.findByRole("group", { name: "Held to send by itself" });
+    fireEvent.click(
+      await within(box).findByRole("button", { name: "Stop it, and never by myself to them" }),
+    );
+    await waitFor(() => expect(native.stopHeldReply).toHaveBeenCalledWith("o1"));
+    await waitFor(() =>
+      expect(native.setAutoReply).toHaveBeenCalledWith({
+        ...rules,
+        people: ["p2"],
+        never: ["p1"],
+      }),
+    );
   });
 });

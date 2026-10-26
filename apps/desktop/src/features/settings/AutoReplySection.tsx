@@ -18,7 +18,7 @@ export function AutoReplySection() {
   const [confirming, setConfirming] = useState(false);
   const [filter, setFilter] = useState("");
   const rules = state.data?.rules ?? null;
-  const people = usePeople(false, rules?.who === "listed");
+  const people = usePeople(false, rules !== null);
   const mailboxes = (sources.data ?? []).filter((s) => s.connector === "imap");
 
   if (!rules || !state.data) {
@@ -39,6 +39,16 @@ export function AutoReplySection() {
   const shown = (people.data?.people ?? []).filter((p) =>
     p.participant.displayName.toLowerCase().includes(filter.trim().toLowerCase()),
   );
+  // Left out by name: those named, until a search (with anyone it may
+  // answer) says whom to look for. Someone named but not among the people
+  // loaded here is still listed, to be taken off.
+  const names = new Map(
+    (people.data?.people ?? []).map((p) => [p.participant.id, p.participant.displayName]),
+  );
+  const leftOut =
+    filter.trim() && rules.who === "known"
+      ? shown.map((p) => ({ id: p.participant.id, name: p.participant.displayName }))
+      : rules.never.map((id) => ({ id, name: names.get(id) ?? "Someone else you named" }));
 
   return (
     <Card title="Replying by myself" id="by-myself">
@@ -137,6 +147,36 @@ export function AutoReplySection() {
           />
           <span>Only the people I choose</span>
         </label>
+        {rules.who === "known" || rules.never.length > 0 ? (
+          <div className="stack gap-1" role="group" aria-label="Never by myself to">
+            <span className="muted small">
+              Never by myself to these, whom you&rsquo;d rather answer yourself:
+            </span>
+            {rules.who === "known" ? (
+              <input
+                type="search"
+                aria-label="Find someone to leave out"
+                placeholder="Find someone"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            ) : null}
+            {leftOut.length === 0 && !filter.trim() ? (
+              <p className="muted small">No one yet.</p>
+            ) : null}
+            {leftOut.slice(0, 50).map((p) => (
+              <label key={p.id} className="row gap-2">
+                <input
+                  type="checkbox"
+                  checked={rules.never.includes(p.id)}
+                  disabled={save.isPending}
+                  onChange={(e) => change({ never: toggle(rules.never, p.id, e.target.checked) })}
+                />
+                <span>{p.name}</span>
+              </label>
+            ))}
+          </div>
+        ) : null}
         {rules.who === "listed" ? (
           <div className="stack gap-1">
             <input
@@ -150,10 +190,20 @@ export function AutoReplySection() {
               <label key={p.participant.id} className="row gap-2">
                 <input
                   type="checkbox"
-                  checked={rules.people.includes(p.participant.id)}
+                  checked={
+                    rules.people.includes(p.participant.id) &&
+                    !rules.never.includes(p.participant.id)
+                  }
                   disabled={save.isPending}
                   onChange={(e) =>
-                    change({ people: toggle(rules.people, p.participant.id, e.target.checked) })
+                    // Chosen again: off the never list too, or it would
+                    // stay ticked here and never be answered.
+                    change({
+                      people: toggle(rules.people, p.participant.id, e.target.checked),
+                      never: e.target.checked
+                        ? rules.never.filter((x) => x !== p.participant.id)
+                        : rules.never,
+                    })
                   }
                 />
                 <span>{p.participant.displayName}</span>
