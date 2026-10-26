@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.37] — 2026-10-26
+
+People you'd rather answer yourself.
+
+### Added
+
+- **Never by myself to these**, under Replying by myself in Settings: name anyone I shouldn't answer on my own — your manager, your family — and their messages always wait for you, whomever else I answer.
+- **Stop it, and never by myself to them**, on a reply I'm holding to send by myself: stops it, and puts them on that list in one go.
+
 ## [0.10.0-alpha.36] — 2026-10-26
 
 Your signature.

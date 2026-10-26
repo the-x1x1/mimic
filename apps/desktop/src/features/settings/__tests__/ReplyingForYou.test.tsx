@@ -34,6 +34,7 @@ const rules = (enabled: boolean) => ({
     mailboxes: [],
     who: "known",
     people: [],
+    never: [],
     holdMinutes: 10,
     dailyLimit: 10,
     enabledAt: null,
