@@ -891,6 +891,69 @@ describe("connecting a mailbox", () => {
     expect(guessMailHost("not an address")).toBeNull();
   });
 
+  it("knows Yahoo's, AOL's, Apple's and Zoho's other addresses", async () => {
+    const { guessMailHost } = await import("../src");
+    for (const a of ["c@ymail.com", "c@rocketmail.com", "c@yahoo.co.uk", "c@yahoo.com.au"]) {
+      expect(guessMailHost(a)?.host).toBe("imap.mail.yahoo.com");
+    }
+    expect(guessMailHost("c@yahoo.co.jp")).toBeNull();
+    expect(guessMailHost("c@mac.com")?.host).toBe("imap.mail.me.com");
+    expect(guessMailHost("c@aol.com")?.host).toBe("imap.aol.com");
+    expect(guessMailHost("c@zohomail.com")?.host).toBe("imap.zoho.com");
+  });
+
+  it("names whose servers a domain's mail exchangers are, and nothing looser", async () => {
+    const { mailHostFromExchangers, mailDomainOf } = await import("../src");
+    expect(
+      mailHostFromExchangers(["ASPMX.L.GOOGLE.COM.", "alt1.aspmx.l.google.com"]),
+    ).toMatchObject({
+      name: "Google Workspace",
+      host: "imap.gmail.com",
+      signIn: "google",
+    });
+    expect(mailHostFromExchangers(["smtp.google.com"])?.name).toBe("Google Workspace");
+    expect(mailHostFromExchangers(["formicaria-us.mail.protection.outlook.com"])).toMatchObject({
+      name: "Microsoft 365",
+      host: "outlook.office365.com",
+      signIn: "microsoft",
+      noPassword: true,
+    });
+    expect(mailHostFromExchangers(["mx.zoho.eu"])).toMatchObject({
+      name: "Zoho Mail",
+      host: "imap.zoho.eu",
+    });
+    expect(mailHostFromExchangers(["in1-smtp.messagingengine.com"])?.host).toBe(
+      "imap.fastmail.com",
+    );
+    expect(mailHostFromExchangers(["mx01.mail.icloud.com"])?.host).toBe("imap.mail.me.com");
+    expect(mailHostFromExchangers(["mailstore1.secureserver.net"])?.host).toBe(
+      "imap.secureserver.net",
+    );
+    expect(mailHostFromExchangers(["mx1.privateemail.com"])?.host).toBe("mail.privateemail.com");
+    // The first exchanger that is someone's says; anything that only looks like one doesn't.
+    expect(
+      mailHostFromExchangers([
+        "mx.hosting.example",
+        "x.mail.protection.outlook.com",
+        "aspmx.l.google.com",
+      ])?.name,
+    ).toBe("Microsoft 365");
+    for (const mx of [
+      "google.com.evil.example",
+      "notgoogle.com",
+      "mail.protection.outlook.com.example",
+    ]) {
+      expect(mailHostFromExchangers([mx])).toBeNull();
+    }
+    expect(mailHostFromExchangers([])).toBeNull();
+
+    expect(mailDomainOf("c@Formicaria.US")).toBe("formicaria.us");
+    expect(mailDomainOf("c@formicaria")).toBeNull();
+    expect(mailDomainOf("c@")).toBeNull();
+    expect(mailDomainOf("c@bad domain.com")).toBeNull();
+    expect(mailDomainOf("formicaria.us")).toBeNull();
+  });
+
   it("reads how a connected mailbox signs in from its settings", async () => {
     const { mailboxAuth } = await import("../src");
     const imap = (account: Record<string, unknown>) => ({ connector: "imap", config: { account } });

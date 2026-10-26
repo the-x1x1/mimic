@@ -6,6 +6,8 @@ import {
   MICROSOFT_UNAVAILABLE,
   SIGN_IN_NAMES,
   guessMailHost,
+  mailDomainOf,
+  mailHostFromExchangers,
   type ImapAccount,
   type ImapProbe,
   type SignInWith,
@@ -14,7 +16,7 @@ import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { toast } from "@/state/toast";
 import { useProviderState } from "@/hooks/useCompose";
-import { useMailSignIn } from "@/hooks/useSources";
+import { useMailExchangers, useMailSignIn } from "@/hooks/useSources";
 
 /** The command was stopped by the user: nothing to say about it. */
 function wasStopped(e: unknown): boolean {
@@ -34,6 +36,13 @@ function wasStopped(e: unknown): boolean {
  * Mimic was built able to — and when it wasn't, the dialog says so and offers
  * nothing that would fail. Gmail and Google Workspace sign in with Google the
  * same way when this copy can, and an app password still works for them.
+ *
+ * An address at a domain of its own — a business's, a family's — says
+ * nothing about whose servers its mail is on, so when no provider is known
+ * for it, leaving the address field asks this computer's resolver who
+ * handles its mail (`mail_exchangers`), and Google Workspace, Microsoft 365
+ * and a few others are recognised from that (`mailHostFromExchangers`) and
+ * treated as if the address were theirs.
  */
 export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
@@ -55,7 +64,15 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const protection = useProviderState().data?.credentials.protection;
   const signIns = useMailSignIn().data;
 
-  const known = guessMailHost(username);
+  const domain = mailDomainOf(username);
+  const listed = guessMailHost(username);
+  // The domain asked about on leaving the address field, while it is still
+  // the address's.
+  const [lookFor, setLookFor] = useState<string | null>(null);
+  const asking = !listed && lookFor !== null && lookFor === domain ? lookFor : null;
+  const exchangers = useMailExchangers(asking);
+  const found = asking && exchangers.data ? mailHostFromExchangers(exchangers.data) : null;
+  const known = listed ?? found;
   // How this mailbox will sign in: a known provider's way when it takes
   // nothing else, or when this copy can and the user didn't choose a
   // password; for any other address, the way ticked under Server settings
@@ -170,8 +187,18 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                 setUsername(e.target.value);
                 setProbe(null);
               }}
+              onBlur={(e) => setLookFor(mailDomainOf(e.target.value))}
             />
           </Field>
+          {asking && exchangers.isFetching ? (
+            <p className="muted small" role="status">
+              Looking up who handles mail for {asking}&hellip;
+            </p>
+          ) : found ? (
+            <p className="muted small" role="status">
+              Mail for {asking} is handled by {found.name}.
+            </p>
+          ) : null}
 
           {signingInWith ? (
             canSignIn ? (
@@ -181,7 +208,7 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                     ? known?.signIn === "microsoft"
                       ? known.help
                       : "Microsoft accounts — Outlook, Hotmail and Microsoft 365 — sign in with Microsoft."
-                    : known?.signIn === "google"
+                    : listed?.signIn === "google"
                       ? "Gmail signs in with Google in your browser: no app password needed."
                       : "Google accounts — Gmail and Google Workspace — sign in with Google."}{" "}
                   I never see your password; what lets me stay signed in is kept instead. {kept}{" "}

@@ -51,6 +51,7 @@ import {
   CommandError,
   AutoReplyState,
   MailboxSending,
+  MailExchangers,
   MailSignIns,
   OutboxEntry,
   ReplyEnvelope,
@@ -222,6 +223,8 @@ export const ipc = {
     call("set_mailbox_password", Source, { sourceId, password }),
   /** Which providers this copy of Mimic can sign in to a mailbox with. */
   mailSignInAvailable: () => call("mail_sign_in_available", MailSignIns),
+  /** Who handles mail for a domain: its mail exchangers, from this computer's resolver. */
+  mailExchangers: (domain: string) => call("mail_exchangers", MailExchangers, { domain }),
   /**
    * Sign in with Microsoft or Google in the browser, and look at the mailbox
    * without importing anything. Resolves once the browser has come back.

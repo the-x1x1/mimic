@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.34] — 2026-10-26
+
+Connecting a mailbox at your own domain.
+
+### Added
+
+- **Who handles your mail.** An address at a domain of your own — a business's, a family's — says nothing about whose servers its mail is on. When you type one into Connect a mailbox and move on, I ask this computer's DNS who handles mail for the domain, and when it's Google Workspace, Microsoft 365, Zoho, Fastmail, iCloud, GoDaddy or Namecheap I say so and set it up as theirs: Google Workspace signs in with Google (or takes an app password), Microsoft 365 with Microsoft. Anything else asks for the server, as before.
+- More addresses are known without asking: Yahoo's other domains (ymail.com, rocketmail.com, yahoo.co.uk and others), aol.com, mac.com and Zoho's, and the sending servers of Zoho in Europe, GoDaddy and Namecheap.
+
 ## [0.10.0-alpha.33] — 2026-10-26
 
 Copying in the others on a message.
