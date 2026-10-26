@@ -27,12 +27,14 @@ export const events = {
    * The answer-from-anywhere shortcut was pressed: what the clipboard held,
    * possibly nothing. It goes to Write and nowhere else.
    */
-  onPasted: (h: Handler<{ text: string }>) =>
+  onPasted: (h: Handler<{ text: string; title: string | null }>) =>
     on(
       "write://pasted",
       (r) => {
-        const text = (r as { text?: unknown } | null)?.text;
-        return typeof text === "string" ? { text } : null;
+        const got = r as { text?: unknown; title?: unknown } | null;
+        const text = got?.text;
+        const title = typeof got?.title === "string" && got.title.trim() ? got.title : null;
+        return typeof text === "string" ? { text, title } : null;
       },
       h,
     ),

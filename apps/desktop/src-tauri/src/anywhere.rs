@@ -73,15 +73,23 @@ pub fn listen(app: &AppHandle, choice: &str) -> Result<(), String> {
 /// Windows names it; zero for none, or for one of Mimic's own.
 static CAME_FROM: AtomicIsize = AtomicIsize::new(0);
 
+/// The longest window title passed on.
+const MOST_TITLE: usize = 200;
+
 /// The shortcut was pressed: bring Mimic forward with Write open on what the
-/// clipboard holds, remembering the window it was pressed in.
+/// clipboard holds, remembering the window it was pressed in, and that
+/// window's title (0.10.0-alpha.52), which often names who the message is
+/// from. Neither goes anywhere but the screen.
 pub fn pressed(app: &AppHandle) {
     use tauri_plugin_clipboard_manager::ClipboardExt;
-    CAME_FROM.store(window::front_elsewhere(), Ordering::SeqCst);
+    let from = window::front_elsewhere();
+    CAME_FROM.store(from, Ordering::SeqCst);
+    let title: String = if from == 0 { String::new() } else { window::title(from) };
+    let title: String = title.trim().chars().take(MOST_TITLE).collect();
     let text = app.clipboard().read_text().unwrap_or_default();
     let text: String = text.trim().chars().take(MOST).collect();
     crate::bring_to_front(app);
-    let _ = app.emit("write://pasted", serde_json::json!({ "text": text }));
+    let _ = app.emit("write://pasted", serde_json::json!({ "text": text, "title": title }));
 }
 
 /// Why a reply was copied rather than pasted.
@@ -148,7 +156,8 @@ mod window {
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
+        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
+        SetForegroundWindow,
     };
 
     /// The window in front.
@@ -174,6 +183,19 @@ mod window {
     pub fn exists(w: isize) -> bool {
         // SAFETY: any handle may be asked about.
         unsafe { IsWindow(w as _) != 0 }
+    }
+
+    /// A window's title; empty for none, or for a handle that isn't one.
+    pub fn title(w: isize) -> String {
+        // SAFETY: any handle may be asked about; the buffer is as long as
+        // the length asked for, and one more for the terminating zero.
+        let len = unsafe { GetWindowTextLengthW(w as _) };
+        if len <= 0 {
+            return String::new();
+        }
+        let mut buf = vec![0u16; len as usize + 1];
+        let got = unsafe { GetWindowTextW(w as _, buf.as_mut_ptr(), buf.len() as i32) };
+        String::from_utf16_lossy(&buf[..got.max(0) as usize])
     }
 
     pub fn bring(w: isize) {
@@ -217,6 +239,9 @@ mod window {
     pub fn exists(_: isize) -> bool {
         false
     }
+    pub fn title(_: isize) -> String {
+        String::new()
+    }
     pub fn bring(_: isize) {}
     pub fn press(_: &[(u16, bool)]) -> bool {
         false
@@ -259,5 +284,6 @@ mod tests {
     #[test]
     fn a_window_that_is_not_one_is_not_one() {
         assert!(!window::exists(0));
+        assert_eq!(window::title(0), "", "and has no title");
     }
 }

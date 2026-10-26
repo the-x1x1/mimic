@@ -22,6 +22,7 @@ import {
 } from "@/hooks/useCompose";
 import { ipc } from "@/lib/ipc";
 import { useAnywhere } from "@/state/anywhere";
+import { personFromTitle } from "./fromTitle";
 import { toast } from "@/state/toast";
 
 /**
@@ -52,6 +53,8 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   const [draft, setDraft] = useState<Draft | null>(null);
   const [edited, setEdited] = useState<string>("");
   const [fromAnywhere, setFromAnywhere] = useState(false);
+  // Whom the window's title named, when it was chosen for the user.
+  const [guessed, setGuessed] = useState<string | null>(null);
   const copiedAway = useAnywhere((s) => s.copied);
   const setCopiedAway = useAnywhere((s) => s.setCopied);
 
@@ -65,6 +68,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     current.current = draft;
   }, [draft]);
   const handled = useRef<string | null>(null);
+  const lastGuess = useRef<string | null>(null);
   const resolveAsync = resolve.mutateAsync;
   useEffect(() => {
     if (typeof pasted !== "string" || handled.current === location.key) return;
@@ -80,7 +84,37 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     setDraft(null);
     setEdited("");
     setFromAnywhere(true);
+    // Whom the last window named was for the last message, not this one.
+    const before = lastGuess.current;
+    if (before) setParticipantId((id) => (id === before ? "" : id));
+    lastGuess.current = null;
+    setGuessed(null);
   }, [location.key, pasted, resolveAsync]);
+
+  // Who it's from, when the title of the window it was copied in names one
+  // person on the list (0.10.0-alpha.52): chosen for them once the list is
+  // in, and said while it stays chosen.
+  const windowTitle = (location.state as { windowTitle?: unknown } | null)?.windowTitle;
+  const guessedFor = useRef<string | null>(null);
+  const listed = people.data?.people;
+  useEffect(() => {
+    if (typeof pasted !== "string" || typeof windowTitle !== "string" || !listed) return;
+    if (guessedFor.current === location.key) return;
+    guessedFor.current = location.key;
+    const found = personFromTitle(
+      windowTitle,
+      listed.map((p) => ({ id: p.participant.id, name: p.participant.displayName })),
+    );
+    if (found) {
+      setParticipantId(found);
+      setGuessed(found);
+      lastGuess.current = found;
+    }
+  }, [location.key, pasted, windowTitle, listed]);
+  const guessedName =
+    guessed && guessed === participantId
+      ? listed?.find((p) => p.participant.id === guessed)?.participant.displayName
+      : undefined;
 
   const request: ComposeRequest = useMemo(
     () => ({
@@ -289,6 +323,11 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                     </option>
                   ))}
                 </select>
+                {guessedName ? (
+                  <span className="muted small">
+                    From the window you copied it in, this looks like {guessedName}.
+                  </span>
+                ) : null}
                 {people.data && people.data.people.length < people.data.peopleTotal ? (
                   <span id="recipient-note" className="muted small">
                     The {people.data.people.length} people you&rsquo;ve been in touch with most

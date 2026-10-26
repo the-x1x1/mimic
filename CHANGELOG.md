@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.52] — 2026-10-26
+
+Who it's from, from the window.
+
+### Added
+
+- When you answer a message from anywhere, I look at the title of the window you copied it in — "Ada Lovelace | Messenger", "@ada - Discord" — and when it names one person you've been in touch with, I choose them as who it's from, so the reply sounds like you do with them. I say so, and you can change it. When the title could mean two people, I choose no one.
+
 ## [0.10.0-alpha.51] — 2026-10-26
 
 Check it all now.

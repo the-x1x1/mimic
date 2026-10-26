@@ -195,6 +195,87 @@ describe("writing something new", () => {
       await waitFor(() => expect(screen.queryByText("The reply you copied")).toBeNull());
     });
 
+    it("chooses who it's from when the window's title names them", async () => {
+      native.people.mockResolvedValue({
+        people: [
+          { participant: { id: "p1", displayName: "Ada Lovelace", relationship: null } },
+          { participant: { id: "p2", displayName: "Bob Stone", relationship: null } },
+        ],
+        peopleTotal: 2,
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter
+            initialEntries={[
+              {
+                pathname: "/write",
+                state: {
+                  pasted: "are we still on for 7?",
+                  windowTitle: "Ada Lovelace | Messenger",
+                },
+              },
+            ]}
+          >
+            <ComposePanel />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(
+        await screen.findByText("From the window you copied it in, this looks like Ada Lovelace."),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Recipient")).toHaveValue("p1");
+      fireEvent.change(screen.getByLabelText("Recipient"), { target: { value: "p2" } });
+      expect(screen.queryByText(/this looks like Ada Lovelace/)).toBeNull();
+    });
+
+    it("doesn't carry whom one window named over to the next message", async () => {
+      native.people.mockResolvedValue({
+        people: [
+          { participant: { id: "p1", displayName: "Ada Lovelace", relationship: null } },
+          { participant: { id: "p2", displayName: "Bob Stone", relationship: null } },
+        ],
+        peopleTotal: 2,
+      });
+      function CopyFromWhatsApp() {
+        const navigate = useNavigate();
+        return (
+          <button
+            type="button"
+            onClick={() =>
+              navigate("/write", { state: { pasted: "or 8?", windowTitle: "WhatsApp" } })
+            }
+          >
+            Copy from WhatsApp
+          </button>
+        );
+      }
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter
+            initialEntries={[
+              {
+                pathname: "/write",
+                state: {
+                  pasted: "are we still on for 7?",
+                  windowTitle: "Ada Lovelace | Messenger",
+                },
+              },
+            ]}
+          >
+            <ComposePanel />
+            <CopyFromWhatsApp />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await waitFor(() => expect(screen.getByLabelText("Recipient")).toHaveValue("p1"));
+      fireEvent.click(screen.getByRole("button", { name: "Copy from WhatsApp" }));
+      expect(await screen.findByDisplayValue("or 8?")).toBeInTheDocument();
+      expect(screen.getByLabelText("Recipient")).toHaveValue("");
+      expect(screen.queryByText(/this looks like/)).toBeNull();
+    });
+
     it("pastes the reply into the window the message came from, then asks whether it went", async () => {
       native.pasteBack.mockResolvedValue(null);
       await draftFromAnywhere();

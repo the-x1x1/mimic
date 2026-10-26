@@ -44,7 +44,9 @@ function NativeEvents() {
 function FromAnywhere() {
   const navigate = useNavigate();
   useEffect(() => {
-    const off = events.onPasted(({ text }) => navigate("/write", { state: { pasted: text } }));
+    const off = events.onPasted(({ text, title }) =>
+      navigate("/write", { state: { pasted: text, windowTitle: title } }),
+    );
     return () => {
       void off.then((f) => f());
     };
