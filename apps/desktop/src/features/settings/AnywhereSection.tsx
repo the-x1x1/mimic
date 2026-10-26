@@ -13,6 +13,7 @@ export function AnywhereSection() {
   const settings = useSettings();
   const chosen = settings.data?.["anywhere.shortcut"] ?? "";
   const pressEnter = settings.data?.["anywhere.pressEnter"] === true;
+  const draftAtOnce = settings.data?.["anywhere.draftAtOnce"] !== false;
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -47,6 +48,19 @@ export function AnywhereSection() {
             </option>
           ))}
         </select>
+      </label>
+      <label className="row gap-2">
+        <input
+          type="checkbox"
+          checked={draftAtOnce}
+          onChange={(e) => {
+            setError(null);
+            ipc
+              .setSetting("anywhere.draftAtOnce", e.target.checked)
+              .catch((err: unknown) => setError((err as Error).message));
+          }}
+        />
+        <span>Write a draft as soon as it opens, with the keyboard on putting it back</span>
       </label>
       <label className="row gap-2">
         <input

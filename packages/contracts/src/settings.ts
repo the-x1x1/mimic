@@ -37,6 +37,8 @@ export const Settings = z.object({
   "anywhere.shortcut": z.string(),
   /** Paste it there and send: Enter pressed after the paste; off by default (0.10.0-alpha.58). */
   "anywhere.pressEnter": z.boolean(),
+  /** A draft written as soon as Write opens from anywhere; on by default (0.10.0-alpha.63). */
+  "anywhere.draftAtOnce": z.boolean(),
   /** Seconds a reply waits after Send it, to be taken back; 0 is at once (0.10.0-alpha.40). */
   "send.undoSeconds": z.number(),
 });

@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.63] — 2026-10-26
+
+Straight to a draft.
+
+### Changed
+
+- When the shortcut opens Write on a message you copied, I write the draft at once — to whoever the window names, once I've looked — and put the keyboard on **Paste it there** (or **Paste it there and send**), so copy, shortcut, Enter is all a reply takes. You can still change it first. Turn it off under Settings, in Answering a message from anywhere.
+
 ## [0.10.0-alpha.62] — 2026-10-26
 
 Text messages.

@@ -768,6 +768,7 @@ describe("settings and updater contracts", () => {
       "notify.enabled": true,
       "anywhere.shortcut": "",
       "anywhere.pressEnter": false,
+      "anywhere.draftAtOnce": true,
       "send.undoSeconds": 5,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();
