@@ -40,7 +40,7 @@ function renderDialog(onClose = () => {}) {
 describe("the mailbox dialog says how the password will be kept", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
-    native.mailSignInAvailable.mockResolvedValue(false);
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: false });
   });
 
   it("claims nothing until the store answers, then says it is locked to the account", async () => {
@@ -79,7 +79,7 @@ describe("a Microsoft mailbox signs in with Microsoft", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
     native.providerState.mockResolvedValue(state("account"));
-    native.mailSignInAvailable.mockResolvedValue(true);
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: true, google: false });
     native.cancelMailSignIn.mockResolvedValue(undefined);
   });
 
@@ -96,7 +96,9 @@ describe("a Microsoft mailbox signs in with Microsoft", () => {
     expect(await screen.findByText(/I never see your password/)).toBeInTheDocument();
     expect(screen.queryByLabelText("App password")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
-    await waitFor(() => expect(native.signInToMailbox).toHaveBeenCalledWith("c@outlook.com"));
+    await waitFor(() =>
+      expect(native.signInToMailbox).toHaveBeenCalledWith("c@outlook.com", "microsoft"),
+    );
     expect(
       await screen.findByText("I’ll read INBOX (3 messages) and Sent Items (2 messages)."),
     ).toBeInTheDocument();
@@ -130,15 +132,94 @@ describe("a Microsoft mailbox signs in with Microsoft", () => {
     fireEvent.click(await screen.findByLabelText(/This is a Microsoft account/));
     expect(screen.queryByLabelText("App password")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
-    await waitFor(() => expect(native.signInToMailbox).toHaveBeenCalledWith("c@formicaria.us"));
+    await waitFor(() =>
+      expect(native.signInToMailbox).toHaveBeenCalledWith("c@formicaria.us", "microsoft"),
+    );
   });
 
   it("says so, and offers nothing that would fail, when this copy can't sign in with Microsoft", async () => {
-    native.mailSignInAvailable.mockResolvedValue(false);
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: false });
     renderDialog();
     typeAddress("c@outlook.com");
     expect(await screen.findByText(MICROSOFT_UNAVAILABLE)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign in with Microsoft" })).toBeDisabled();
     expect(screen.queryByLabelText("App password")).toBeNull();
+  });
+});
+
+describe("a Gmail or Google Workspace mailbox can sign in with Google", () => {
+  const found: ImapProbe = {
+    folders: ["INBOX", "[Gmail]/Sent Mail"],
+    sentFolder: "[Gmail]/Sent Mail",
+    counts: [
+      ["INBOX", 4],
+      ["[Gmail]/Sent Mail", 1],
+    ],
+    warnings: [],
+  };
+
+  beforeEach(() => {
+    for (const f of Object.values(native)) f.mockReset();
+    native.providerState.mockResolvedValue(state("account"));
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: true });
+    native.cancelMailSignIn.mockResolvedValue(undefined);
+  });
+
+  function typeAddress(address: string) {
+    fireEvent.change(screen.getByLabelText("Your email address"), { target: { value: address } });
+  }
+
+  it("signs Gmail in with Google, and connects what it found", async () => {
+    native.signInToMailbox.mockResolvedValue(found);
+    native.connectSignedInMailbox.mockResolvedValue({});
+    renderDialog();
+    typeAddress("c@gmail.com");
+    expect(
+      await screen.findByText(/Gmail signs in with Google in your browser/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("App password")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+    await waitFor(() =>
+      expect(native.signInToMailbox).toHaveBeenCalledWith("c@gmail.com", "google"),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Connect and start reading" }));
+    await waitFor(() =>
+      expect(native.connectSignedInMailbox).toHaveBeenCalledWith("c@gmail.com", true),
+    );
+  });
+
+  it("still takes an app password for Gmail, and can go back to signing in", async () => {
+    renderDialog();
+    typeAddress("c@gmail.com");
+    fireEvent.click(await screen.findByRole("button", { name: "Use an app password instead" }));
+    expect(screen.getByLabelText("App password")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign in with Google" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Google instead" }));
+    expect(screen.queryByLabelText("App password")).toBeNull();
+    expect(screen.getByRole("button", { name: "Sign in with Google" })).toBeEnabled();
+  });
+
+  it("asks for an app password, as before, when this copy can't sign in with Google", async () => {
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: false });
+    const client = renderDialog();
+    typeAddress("c@gmail.com");
+    await waitFor(() => expect(client.getQueryState(qk.mailSignIn)?.status).toBe("success"));
+    expect(screen.getByLabelText("App password")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign in with Google/ })).toBeNull();
+    expect(screen.queryByLabelText(/This is a Google account/)).toBeNull();
+  });
+
+  it("signs a Google Workspace address in with Google once it's said to be one", async () => {
+    native.signInToMailbox.mockResolvedValue(found);
+    renderDialog();
+    typeAddress("c@formicaria.us");
+    expect(await screen.findByLabelText("App password")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/This is a Microsoft account/)).toBeNull();
+    fireEvent.click(await screen.findByLabelText(/This is a Google account/));
+    expect(screen.queryByLabelText("App password")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+    await waitFor(() =>
+      expect(native.signInToMailbox).toHaveBeenCalledWith("c@formicaria.us", "google"),
+    );
   });
 });

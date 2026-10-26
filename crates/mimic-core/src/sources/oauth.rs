@@ -21,10 +21,20 @@
 //!   in the secret store, sealed like a password. A check trades it for a new
 //!   access token, and keeps the new refresh token the provider hands back.
 //!
+//! Google takes app passwords still, for accounts with 2-Step Verification,
+//! but signing in is easier and works for Google Workspace accounts whose
+//! admin turned app passwords off (0.10.0-alpha.26): the same flow, with
+//! `https://mail.google.com/` — the one scope Google gives IMAP and SMTP —
+//! and the browser sent back to `127.0.0.1`, as Google asks.
+//!
 //! A provider must know Mimic as an app. Microsoft's registration gives a
 //! client id, which is compiled in (`MIMIC_MICROSOFT_CLIENT_ID`) and is not a
-//! secret: an app on someone's computer cannot keep one. A build made without
-//! it cannot sign in with Microsoft, and says so rather than failing.
+//! secret: an app on someone's computer cannot keep one. Google's gives a
+//! client id and a "client secret" that, for an app on a computer, Google says
+//! is not treated as secret either; both are compiled in
+//! (`MIMIC_GOOGLE_CLIENT_ID`, `MIMIC_GOOGLE_CLIENT_SECRET`), and its token
+//! endpoint wants it. A build made without them cannot sign in with that
+//! provider, and says so rather than failing.
 //!
 //! Nothing here logs or returns a token, a code or a verifier: `Tokens` and
 //! `Pkce` print as redacted, and errors carry the provider's short reason,
@@ -57,6 +67,17 @@ pub struct Provider {
     pub scope: &'static str,
     pub imap_host: &'static str,
     pub imap_port: u16,
+    /// The host the browser is sent back to: `localhost` for Microsoft,
+    /// which takes it with any port, and `127.0.0.1` for Google, which asks
+    /// for the address rather than the name.
+    pub redirect_host: &'static str,
+    /// What else the sign-in address carries for this provider.
+    pub authorize_extra: &'static [(&'static str, &'static str)],
+    /// Whether the token requests name the scope again: Microsoft's want it,
+    /// Google's have no use for it.
+    pub scope_in_token_requests: bool,
+    /// Sent with every token request when there is one (Google's).
+    pub client_secret: Option<&'static str>,
 }
 
 impl Provider {
@@ -75,13 +96,52 @@ impl Provider {
                 "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
             imap_host: "outlook.office365.com",
             imap_port: 993,
+            redirect_host: "localhost",
+            authorize_extra: &[("response_mode", "query")],
+            scope_in_token_requests: true,
+            client_secret: None,
+        }
+    }
+
+    /// Gmail and Google Workspace. `https://mail.google.com/` is the only
+    /// scope Google gives IMAP and SMTP; `access_type=offline` asks for a
+    /// refresh token, and `prompt=consent` for one every time, since Google
+    /// hands one over only on a consent.
+    pub fn google() -> Self {
+        Provider {
+            key: "google",
+            name: "Google",
+            authorize_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+            token_url: "https://oauth2.googleapis.com/token".into(),
+            scope: "https://mail.google.com/",
+            imap_host: "imap.gmail.com",
+            imap_port: 993,
+            redirect_host: "127.0.0.1",
+            authorize_extra: &[("access_type", "offline"), ("prompt", "consent")],
+            scope_in_token_requests: false,
+            client_secret: google_client_secret(),
         }
     }
 }
 
+fn compiled_in(value: Option<&'static str>) -> Option<&'static str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
 /// Mimic's client id with Microsoft, when this build was made with one.
 pub fn microsoft_client_id() -> Option<&'static str> {
-    option_env!("MIMIC_MICROSOFT_CLIENT_ID").map(str::trim).filter(|s| !s.is_empty())
+    compiled_in(option_env!("MIMIC_MICROSOFT_CLIENT_ID"))
+}
+
+/// Mimic's client id with Google, when this build was made with one and
+/// with the secret that goes with it: Google's token endpoint takes neither
+/// without the other.
+pub fn google_client_id() -> Option<&'static str> {
+    google_client_secret().and(compiled_in(option_env!("MIMIC_GOOGLE_CLIENT_ID")))
+}
+
+fn google_client_secret() -> Option<&'static str> {
+    compiled_in(option_env!("MIMIC_GOOGLE_CLIENT_SECRET"))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -180,12 +240,12 @@ pub fn authorization_url(
         ("client_id", client_id),
         ("response_type", "code"),
         ("redirect_uri", redirect_uri),
-        ("response_mode", "query"),
         ("scope", provider.scope),
         ("state", state),
         ("code_challenge", pkce.challenge.as_str()),
         ("code_challenge_method", "S256"),
     ];
+    params.extend(provider.authorize_extra.iter().copied());
     if let Some(hint) = login_hint.map(str::trim).filter(|h| !h.is_empty()) {
         params.push(("login_hint", hint));
     }
@@ -203,7 +263,7 @@ pub fn sign_in(
     should_stop: &dyn Fn() -> bool,
 ) -> Result<Tokens, OAuthError> {
     let loopback = Loopback::bind()?;
-    let redirect_uri = loopback.redirect_uri();
+    let redirect_uri = loopback.redirect_uri_at(provider.redirect_host);
     let pkce = Pkce::new();
     let state = new_state();
     let url = authorization_url(provider, client_id, &redirect_uri, &state, &pkce, login_hint);
@@ -243,7 +303,13 @@ impl Loopback {
     /// The redirect address given to the provider. A provider that knows
     /// Mimic as an app on a computer takes `http://localhost` with any port.
     pub fn redirect_uri(&self) -> String {
-        format!("http://localhost:{}", self.port)
+        self.redirect_uri_at("localhost")
+    }
+
+    /// The redirect address at `host` — `localhost`, or `127.0.0.1`, which
+    /// the IPv4 listener always answers.
+    pub fn redirect_uri_at(&self, host: &str) -> String {
+        format!("http://{host}:{}", self.port)
     }
 
     /// Wait for the browser to come back with a code for this `state`, until
@@ -430,13 +496,12 @@ pub fn exchange_code(
 ) -> Result<Tokens, OAuthError> {
     token_request(
         provider,
-        &[
+        vec![
             ("client_id", client_id),
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("code_verifier", pkce.verifier.as_str()),
-            ("scope", provider.scope),
         ],
     )
 }
@@ -446,23 +511,24 @@ pub fn exchange_code(
 pub fn refresh(provider: &Provider, client_id: &str, refresh_token: &str) -> Result<Tokens, OAuthError> {
     token_request(
         provider,
-        &[
-            ("client_id", client_id),
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-            ("scope", provider.scope),
-        ],
+        vec![("client_id", client_id), ("grant_type", "refresh_token"), ("refresh_token", refresh_token)],
     )
 }
 
-fn token_request(provider: &Provider, form: &[(&str, &str)]) -> Result<Tokens, OAuthError> {
+fn token_request<'a>(provider: &'a Provider, mut form: Vec<(&'a str, &'a str)>) -> Result<Tokens, OAuthError> {
+    if provider.scope_in_token_requests {
+        form.push(("scope", provider.scope));
+    }
+    if let Some(secret) = provider.client_secret {
+        form.push(("client_secret", secret));
+    }
     let network = |e: reqwest::Error| OAuthError::Network(provider.name, one_line(&e.to_string()));
     let client = reqwest::blocking::Client::builder().timeout(TOKEN_TIMEOUT).build().map_err(network)?;
     let response = client
         .post(&provider.token_url)
         .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .header(reqwest::header::ACCEPT, "application/json")
-        .body(form_encode(form))
+        .body(form_encode(&form))
         .send()
         .map_err(network)?;
     let status = response.status();
@@ -836,6 +902,68 @@ mod tests {
 
         let no_browser = sign_in(&provider, "client-1", None, &|_| Err("no browser\nat all".into()), &|| false);
         assert!(matches!(no_browser, Err(OAuthError::Browser(why)) if why == "no browser"));
+    }
+
+    #[test]
+    fn google_is_asked_for_a_refresh_token_with_its_secret_and_comes_back_to_127_0_0_1() {
+        let pkce = Pkce::new();
+        let google = Provider::google();
+        let url = authorization_url(&google, "g-1", "http://127.0.0.1:4321", "st4te", &pkce, Some("c@gmail.com"));
+        assert!(url.starts_with("https://accounts.google.com/o/oauth2/v2/auth?client_id=g-1&"), "{url}");
+        for part in [
+            "scope=https%3A%2F%2Fmail.google.com%2F",
+            "access_type=offline",
+            "prompt=consent",
+            "redirect_uri=http%3A%2F%2F127.0.0.1%3A4321",
+            "login_hint=c%40gmail.com",
+        ] {
+            assert!(url.contains(part), "{part} in {url}");
+        }
+        assert!(!url.contains("response_mode"), "Microsoft's, not Google's: {url}");
+        let microsoft = authorization_url(&Provider::microsoft(), "m-1", "http://localhost:1", "s", &pkce, None);
+        assert!(microsoft.contains("response_mode=query") && !microsoft.contains("access_type"), "{microsoft}");
+
+        let (token_url, forms) = fake::token_endpoint(vec![
+            (200, r#"{"access_token":"at-1","refresh_token":"rt-1","expires_in":3599}"#.into()),
+            // Google's refresh brings no new refresh token.
+            (200, r#"{"access_token":"at-2","expires_in":3599}"#.into()),
+            (400, r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#.into()),
+        ]);
+        let google = Provider { token_url, client_secret: Some("shh"), ..Provider::google() };
+        let opened = std::sync::Mutex::new(String::new());
+        let open = |address: &str| {
+            *opened.lock().unwrap() = address.to_string();
+            let query = parse_query(address.split_once('?').unwrap().1);
+            let back_to = query["redirect_uri"].clone();
+            assert!(back_to.starts_with("http://127.0.0.1:"), "{back_to}");
+            let port: u16 = back_to.rsplit(':').next().unwrap().parse().unwrap();
+            let back = format!("/?code=4%2F0Ab&scope=https%3A%2F%2Fmail.google.com%2F&state={}", query["state"]);
+            std::thread::spawn(move || browse(port, &back));
+            Ok(())
+        };
+        let tokens = sign_in(&google, "g-1", Some("c@gmail.com"), &open, &|| false).unwrap();
+        assert_eq!((tokens.access_token.as_str(), tokens.refresh_token.as_deref()), ("at-1", Some("rt-1")));
+        let form = parse_query(&forms.recv().unwrap());
+        assert_eq!(form["code"], "4/0Ab");
+        assert_eq!(form["client_secret"], "shh");
+        assert!(!form.contains_key("scope"), "{form:?}");
+
+        let again = refresh(&google, "g-1", "rt-1").unwrap();
+        assert_eq!((again.access_token.as_str(), again.refresh_token.as_deref()), ("at-2", None));
+        let form = parse_query(&forms.recv().unwrap());
+        assert_eq!((form["refresh_token"].as_str(), form["client_secret"].as_str()), ("rt-1", "shh"));
+        assert!(matches!(refresh(&google, "g-1", "rt-1"), Err(OAuthError::SignInAgain("Google"))));
+    }
+
+    #[test]
+    fn microsofts_token_requests_name_the_scope_and_carry_no_secret() {
+        let (token_url, forms) =
+            fake::token_endpoint(vec![(200, r#"{"access_token":"at","refresh_token":"rt","expires_in":1}"#.into())]);
+        let provider = Provider { token_url, ..Provider::microsoft() };
+        refresh(&provider, "m-1", "rt").unwrap();
+        let form = parse_query(&forms.recv().unwrap());
+        assert_eq!(form["scope"], Provider::microsoft().scope);
+        assert!(!form.contains_key("client_secret"), "{form:?}");
     }
 
     #[test]

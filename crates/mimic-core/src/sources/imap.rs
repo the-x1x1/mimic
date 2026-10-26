@@ -20,18 +20,19 @@
 //!   minutes rather than hours. Older mail can still be imported from an
 //!   export.
 //! * Fetches with `BODY.PEEK[]`, which does not mark anything as read.
-//!   Nothing is ever written to the mailbox, and there is no command in this
-//!   module that could.
+//!   A check writes nothing to the mailbox. The one write in this module is
+//!   `copy_to_sent` (`APPEND`), of a reply Mimic sent, for a provider that
+//!   keeps no copy itself.
 //!
 //! How it signs in: Gmail, iCloud, Fastmail and Yahoo accept an app password
 //! (`LOGIN`). Outlook.com and Hotmail stopped accepting passwords of any kind
 //! for IMAP in September 2024, and Microsoft 365 did in 2022–23: those sign
-//! in with Microsoft
-//! (`sources::oauth`), and present an access token with `AUTHENTICATE
+//! in with Microsoft. Gmail and Google Workspace can sign in with Google
+//! instead of an app password (0.10.0-alpha.26). Both go through
+//! `sources::oauth`, and present an access token with `AUTHENTICATE
 //! XOAUTH2`. The secret store keeps the password, or the refresh token, under
 //! the same key; a check trades a refresh token for an access token first
-//! (`Credentials::credential`). Other OAuth providers (Gmail's own
-//! sign-in) are not here.
+//! (`Credentials::credential`).
 //!
 //! The client is a small IMAP4rev1 subset written against `Read + Write`, so
 //! the tests drive the real protocol code against a scripted server on a
@@ -94,6 +95,28 @@ pub enum Auth {
     Password,
     /// Signed in with Microsoft; the secret store keeps the refresh token.
     Microsoft,
+    /// Signed in with Google (0.10.0-alpha.26); likewise.
+    Google,
+}
+
+impl Auth {
+    /// The provider a mailbox signs in with, or none for a password.
+    pub fn provider(self) -> Option<super::oauth::Provider> {
+        match self {
+            Auth::Password => None,
+            Auth::Microsoft => Some(super::oauth::Provider::microsoft()),
+            Auth::Google => Some(super::oauth::Provider::google()),
+        }
+    }
+
+    /// This build's client id with that provider, when it was made with one.
+    pub fn client_id(self) -> Option<&'static str> {
+        match self {
+            Auth::Password => None,
+            Auth::Microsoft => super::oauth::microsoft_client_id(),
+            Auth::Google => super::oauth::google_client_id(),
+        }
+    }
 }
 
 /// What one connection signs in with. Never printed.
@@ -826,8 +849,8 @@ pub enum PasswordError {
     NotAMailbox,
     #[error("I can't read this mailbox's settings; remove it and connect it again.")]
     UnreadableSettings,
-    #[error("This mailbox signs in with Microsoft, not a password. Sign in again instead.")]
-    SignsInWithMicrosoft,
+    #[error("This mailbox signs in with {0}, not a password. Sign in again instead.")]
+    SignsIn(&'static str),
     #[error(transparent)]
     Login(#[from] ImapError),
     #[error("I couldn't save the password: {0}")]
@@ -850,8 +873,8 @@ pub fn replace_password(
     let source = db.get_source(source_id)?.filter(|s| s.connector == CONNECTOR).ok_or(PasswordError::NotAMailbox)?;
     let config: ImapSourceConfig =
         serde_json::from_value(source.config).map_err(|_| PasswordError::UnreadableSettings)?;
-    if config.account.auth != Auth::Password {
-        return Err(PasswordError::SignsInWithMicrosoft);
+    if let Some(provider) = config.account.auth.provider() {
+        return Err(PasswordError::SignsIn(provider.name));
     }
     probe(&config.account, &Credential::Password(password.to_string()))?;
     save(password).map_err(PasswordError::Save)?;
@@ -1121,8 +1144,9 @@ pub type SaveSecret = Arc<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync
 pub struct Credentials {
     password_for: PasswordFor,
     save: SaveSecret,
-    microsoft: super::oauth::Provider,
-    microsoft_client: Option<String>,
+    /// Each provider a mailbox may sign in with, and this build's client id
+    /// with it (none: it can't).
+    sign_ins: Vec<(Auth, super::oauth::Provider, Option<String>)>,
     /// Access tokens still good, per mailbox, and when to stop trusting
     /// each: a check every few minutes needn't ask for a new one every time.
     kept: std::sync::Mutex<HashMap<String, (String, std::time::Instant)>>,
@@ -1135,11 +1159,24 @@ impl Credentials {
         microsoft: super::oauth::Provider,
         microsoft_client: Option<String>,
     ) -> Self {
-        Credentials { password_for, save, microsoft, microsoft_client, kept: Default::default() }
+        Credentials {
+            password_for,
+            save,
+            sign_ins: vec![(Auth::Microsoft, microsoft, microsoft_client)],
+            kept: Default::default(),
+        }
+    }
+
+    /// Mailboxes that sign in with `auth` do it with `provider`, and this
+    /// client id (none: this build can't).
+    pub fn signing_in_with(mut self, auth: Auth, provider: super::oauth::Provider, client: Option<String>) -> Self {
+        self.sign_ins.retain(|(a, _, _)| *a != auth);
+        self.sign_ins.push((auth, provider, client));
+        self
     }
 
     /// What a mailbox signs in with now: its password; or, for one signed in
-    /// with Microsoft, an access token — kept from an earlier check while it
+    /// with Microsoft or Google, an access token — kept from an earlier check while it
     /// has at least five minutes left, or else traded for the refresh token,
     /// with the refresh token the provider hands back saved in its place.
     /// `Err` is the sentence the mailbox shows.
@@ -1149,7 +1186,7 @@ impl Credentials {
             Auth::Password => (self.password_for)(&key).map(Credential::Password).ok_or_else(|| {
                 "I don't have a password I can use for this mailbox. Give it to me again with New password, under Your mail.".to_string()
             }),
-            Auth::Microsoft => {
+            Auth::Microsoft | Auth::Google => {
                 let now = std::time::Instant::now();
                 let mut kept = self.kept.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some((token, until)) = kept.get(source_id) {
@@ -1157,13 +1194,19 @@ impl Credentials {
                         return Ok(Credential::AccessToken(token.clone()));
                     }
                 }
-                let Some(client) = self.microsoft_client.as_deref() else {
-                    return Err("This copy of Mimic can't sign in with Microsoft, so I can't reach this mailbox.".into());
+                let Some((_, provider, client)) = self.sign_ins.iter().find(|(a, _, _)| *a == auth) else {
+                    return Err("This copy of Mimic can't sign in to this mailbox, so I can't reach it.".into());
+                };
+                let name = provider.name;
+                let Some(client) = client.as_deref() else {
+                    return Err(format!("This copy of Mimic can't sign in with {name}, so I can't reach this mailbox."));
                 };
                 let Some(refresh) = (self.password_for)(&key) else {
-                    return Err("I don't have a Microsoft sign-in I can use for this mailbox. Sign in again under Your mail.".into());
+                    return Err(format!(
+                        "I don't have a {name} sign-in I can use for this mailbox. Sign in again under Your mail."
+                    ));
                 };
-                let tokens = super::oauth::refresh(&self.microsoft, client, &refresh).map_err(|e| match e {
+                let tokens = super::oauth::refresh(provider, client, &refresh).map_err(|e| match e {
                     super::oauth::OAuthError::SignInAgain(who) => {
                         format!("{who} wants you to sign in again for this mailbox. Do it under Your mail.")
                     }
@@ -1173,7 +1216,7 @@ impl Credentials {
                     // The old one may stop working now a new one is issued.
                     // One that could not be kept is said, never shown.
                     if let Err(e) = (self.save)(&key, next) {
-                        tracing::warn!(target: "secrets", error = %e, "a mailbox's new Microsoft sign-in could not be saved");
+                        tracing::warn!(target: "secrets", error = %e, "a mailbox's new sign-in could not be saved");
                     }
                 }
                 let lasts = std::time::Duration::from_secs(tokens.expires_in.saturating_sub(300));
@@ -1739,7 +1782,52 @@ mod tests {
         config.account.auth = Auth::Microsoft;
         db.set_source_config(&source, &serde_json::to_value(&config).unwrap()).unwrap();
         let err = replace_password(&db, &source, "pw", |_| Ok(())).unwrap_err();
-        assert!(matches!(err, PasswordError::SignsInWithMicrosoft));
+        assert!(matches!(err, PasswordError::SignsIn("Microsoft")));
+        config.account.auth = Auth::Google;
+        db.set_source_config(&source, &serde_json::to_value(&config).unwrap()).unwrap();
+        let err = replace_password(&db, &source, "pw", |_| Ok(())).unwrap_err();
+        assert_eq!(err.to_string(), "This mailbox signs in with Google, not a password. Sign in again instead.");
+    }
+
+    #[test]
+    fn a_mailbox_signed_in_with_google_is_refreshed_with_googles_client_and_keeps_its_refresh_token() {
+        let (url, forms) = super::super::oauth::fake::token_endpoint(vec![
+            // Google hands back no new refresh token.
+            (200, r#"{"access_token":"g-at-1","expires_in":3599,"scope":"https://mail.google.com/"}"#.into()),
+            (400, r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#.into()),
+        ]);
+        let (creds, saved) = credentials(vec![(secret_key("s1"), "g-rt".into())], &url, Some("ms-client"));
+        let creds = creds.signing_in_with(
+            Auth::Google,
+            super::super::oauth::Provider {
+                token_url: url.clone(),
+                client_secret: Some("g-secret"),
+                ..super::super::oauth::Provider::google()
+            },
+            Some("g-client".into()),
+        );
+        assert!(matches!(creds.credential(Auth::Google, "s1"), Ok(Credential::AccessToken(t)) if t == "g-at-1"));
+        let form = forms.recv().unwrap();
+        for part in ["client_id=g-client", "client_secret=g-secret", "refresh_token=g-rt"] {
+            assert!(form.contains(part), "{part} in {form}");
+        }
+        assert!(saved.lock().unwrap().is_empty(), "the refresh token it has is kept as it is");
+        creds.forget("s1");
+        assert_eq!(
+            creds.credential(Auth::Google, "s1").unwrap_err(),
+            "Google wants you to sign in again for this mailbox. Do it under Your mail."
+        );
+
+        let (without, _) = credentials(vec![(secret_key("s1"), "g-rt".into())], &url, Some("ms-client"));
+        assert_eq!(
+            without
+                .signing_in_with(Auth::Google, super::super::oauth::Provider::google(), None)
+                .credential(Auth::Google, "s1")
+                .unwrap_err(),
+            "This copy of Mimic can't sign in with Google, so I can't reach this mailbox."
+        );
+        let (unregistered, _) = credentials(vec![(secret_key("s1"), "g-rt".into())], &url, Some("ms-client"));
+        assert!(unregistered.credential(Auth::Google, "s1").unwrap_err().contains("can't sign in to this mailbox"));
     }
 
     #[test]

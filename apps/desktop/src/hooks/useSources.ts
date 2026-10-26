@@ -67,7 +67,7 @@ export function useSetMailboxPassword() {
   });
 }
 
-/** Whether this copy of Mimic can sign in to a mailbox with Microsoft. It can't change while it runs. */
+/** Which providers this copy of Mimic can sign in to a mailbox with. It can't change while it runs. */
 export function useMailSignIn() {
   return useQuery({
     queryKey: qk.mailSignIn,
@@ -77,7 +77,7 @@ export function useMailSignIn() {
 }
 
 /**
- * Sign a connected Microsoft mailbox in again. Resolves once the browser has
+ * Sign a connected Microsoft or Google mailbox in again. Resolves once the browser has
  * come back and the new sign-in opened the mailbox.
  */
 export function useSignInMailboxAgain() {

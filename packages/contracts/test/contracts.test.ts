@@ -38,6 +38,7 @@ import {
   Settings,
   SituationSummary,
   SituationFiling,
+  MailSignIns,
   EncoderView,
   VoiceOverview,
   Dashboard,
@@ -120,6 +121,11 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(view.downloaded).toBe(false);
     expect(view.inUse).toBe(false);
     expect(view.reason).toMatch(/lexical fallback/);
+  });
+
+  it("parses which providers this copy can sign in to a mailbox with", () => {
+    const view = MailSignIns.parse(read(contractFixture("mail_sign_ins.json")));
+    expect(view).toEqual({ microsoft: false, google: true });
   });
 
   it("parses how the user's messages came to be filed, and the model that could read them", () => {
@@ -848,8 +854,12 @@ describe("connecting a mailbox", () => {
     expect(guessMailHost("C@Outlook.com")).toMatchObject({
       host: "outlook.office365.com",
       signIn: "microsoft",
+      noPassword: true,
     });
-    expect(guessMailHost("c@gmail.com")?.signIn).toBeUndefined();
+    // Gmail can sign in with Google, and takes an app password too.
+    expect(guessMailHost("c@gmail.com")).toMatchObject({ signIn: "google" });
+    expect(guessMailHost("c@googlemail.com")?.noPassword).toBeUndefined();
+    expect(guessMailHost("c@icloud.com")?.signIn).toBeUndefined();
     // Microsoft's addresses in other countries sign in the same way.
     for (const a of ["c@hotmail.co.uk", "c@outlook.fr", "c@live.com.au", "c@windowslive.com"]) {
       expect(guessMailHost(a)?.signIn).toBe("microsoft");
@@ -868,6 +878,7 @@ describe("connecting a mailbox", () => {
     const imap = (account: Record<string, unknown>) => ({ connector: "imap", config: { account } });
     expect(mailboxAuth(imap({ username: "c@outlook.com", auth: "microsoft" }))).toBe("microsoft");
     expect(mailboxAuth(imap({ username: "c@gmail.com", auth: "password" }))).toBe("password");
+    expect(mailboxAuth(imap({ username: "c@gmail.com", auth: "google" }))).toBe("google");
     // Connected before there was a choice.
     expect(mailboxAuth(imap({ username: "c@gmail.com" }))).toBe("password");
     expect(mailboxAuth({ connector: "mbox", config: {} })).toBeNull();

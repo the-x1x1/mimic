@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button, InlineError } from "@mimic/ui";
+import { SIGN_IN_NAMES, type SignInWith } from "@mimic/contracts";
 import { useMailSignIn, useSetMailboxPassword, useSignInMailboxAgain } from "@/hooks/useSources";
 import { ipc } from "@/lib/ipc";
 import { toast } from "@/state/toast";
@@ -76,14 +77,22 @@ export function MailboxPassword({ sourceId, name }: { sourceId: string; name: st
 }
 
 /**
- * A connected Microsoft mailbox, signed in again — when Microsoft asks for it,
- * or the saved sign-in can't be unlocked on this Windows account — without
- * removing it and everything read from it. The new sign-in is tried on the
- * mailbox first, and kept only if it opens it.
+ * A connected Microsoft or Google mailbox, signed in again — when the
+ * provider asks for it, or the saved sign-in can't be unlocked on this
+ * Windows account — without removing it and everything read from it. The new
+ * sign-in is tried on the mailbox first, and kept only if it opens it.
  */
-export function MailboxSignInAgain({ sourceId, name }: { sourceId: string; name: string }) {
+export function MailboxSignInAgain({
+  sourceId,
+  name,
+  signInWith,
+}: {
+  sourceId: string;
+  name: string;
+  signInWith: SignInWith;
+}) {
   const again = useSignInMailboxAgain();
-  const available = useMailSignIn().data === true;
+  const available = useMailSignIn().data?.[signInWith] === true;
   const stopped = (again.error as { code?: unknown } | null)?.code === "canceled";
 
   if (!available) return null;
@@ -106,7 +115,7 @@ export function MailboxSignInAgain({ sourceId, name }: { sourceId: string; name:
             })
           }
         >
-          Sign in again
+          Sign in again with {SIGN_IN_NAMES[signInWith]}
         </Button>
       )}
       {again.isError && !stopped ? (

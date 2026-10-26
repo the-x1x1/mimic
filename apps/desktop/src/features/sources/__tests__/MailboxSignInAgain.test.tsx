@@ -15,7 +15,7 @@ function renderIt() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <MailboxSignInAgain sourceId="src-1" name="c@outlook.com" />
+      <MailboxSignInAgain sourceId="src-1" name="c@outlook.com" signInWith="microsoft" />
     </QueryClientProvider>,
   );
 }
@@ -23,7 +23,7 @@ function renderIt() {
 describe("a Microsoft mailbox can be signed in again without removing it", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
-    native.mailSignInAvailable.mockResolvedValue(true);
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: true, google: false });
     native.cancelMailSignIn.mockResolvedValue(undefined);
   });
 
@@ -31,13 +31,15 @@ describe("a Microsoft mailbox can be signed in again without removing it", () =>
     let fail: (e: unknown) => void = () => {};
     native.signInMailboxAgain.mockReturnValue(new Promise((_, reject) => (fail = reject)));
     renderIt();
-    fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in again with Microsoft" }));
     await waitFor(() => expect(native.signInMailboxAgain).toHaveBeenCalledWith("src-1"));
     expect(await screen.findByText("Finish signing in in your browser.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(native.cancelMailSignIn).toHaveBeenCalled();
     fail(Object.assign(new Error("Signing in was stopped."), { code: "canceled" }));
-    expect(await screen.findByRole("button", { name: "Sign in again" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Sign in again with Microsoft" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Signing in was stopped.")).toBeNull();
   });
 
@@ -48,16 +50,16 @@ describe("a Microsoft mailbox can be signed in again without removing it", () =>
       }),
     );
     renderIt();
-    fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in again with Microsoft" }));
     expect(
       await screen.findByText("That sign-in doesn't open c@outlook.com's mailbox."),
     ).toBeInTheDocument();
   });
 
   it("offers nothing on a copy of Mimic that can't sign in with Microsoft", async () => {
-    native.mailSignInAvailable.mockResolvedValue(false);
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: true });
     renderIt();
     await waitFor(() => expect(native.mailSignInAvailable).toHaveBeenCalled());
-    expect(screen.queryByRole("button", { name: "Sign in again" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in again with Microsoft" })).toBeNull();
   });
 });

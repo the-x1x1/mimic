@@ -2,7 +2,7 @@
   "found": [
     {
       "message": {
-        "id": "e6bb1c58-49ad-4435-99f9-4bb8e9c85cc9",
+        "id": "18b472fb-0364-4196-bb71-253982003ed3",
         "direction": "other",
         "author": "Bob",
         "sentAt": "2026-01-25T18:40:00Z",
@@ -10,7 +10,7 @@
         "automated": null,
         "filing": null
       },
-      "conversationId": "cb5b8552-aea4-459a-8cfa-7d464885f51a",
+      "conversationId": "fa69d30a-eb5d-4192-b58e-3366ca8f3ea0",
       "subject": "Pub",
       "snippet": [
         {
@@ -31,7 +31,7 @@
     },
     {
       "message": {
-        "id": "8e026cd1-2dca-4a93-9e4b-848d9b4ec53b",
+        "id": "b7b91b06-6f26-4826-a3bf-ec2045343566",
         "direction": "other",
         "author": "Ada Lovelace",
         "sentAt": "2026-01-14T09:00:00Z",
@@ -39,7 +39,7 @@
         "automated": null,
         "filing": null
       },
-      "conversationId": "1a30d686-9b31-409d-8365-9006bd500508",
+      "conversationId": "5fda5402-1df9-4288-a1a4-cd92e0fabb95",
       "subject": "Quarterly deck",
       "snippet": [
         {

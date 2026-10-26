@@ -44,6 +44,23 @@ For a local build, set `MIMIC_MICROSOFT_CLIENT_ID` in the environment before `pn
 
 Work and school tenants decide whether their users may approve an app themselves; many allow it only for apps from a verified publisher. Until Mimic's publisher is verified (a Microsoft Partner Network ID on the registration), someone in such a tenant needs their admin to approve Mimic — Microsoft says so on its own page, and the connect dialog tells the user to expect it. Personal accounts are not affected.
 
+## Mimic's registration with Google
+
+Signing in to Gmail and Google Workspace mailboxes with Google (0.10.0-alpha.26) needs Mimic registered as an app with Google. Without it, Gmail connects with an app password, as it always has. The registration gives a client id, compiled in from `MIMIC_GOOGLE_CLIENT_ID` (a repository **variable**), and a client secret, compiled in from `MIMIC_GOOGLE_CLIENT_SECRET` (a repository **secret**). Google says a desktop app's secret is not treated as confidential — anyone with the installer has it — but its token endpoint wants it, and keeping it a repository secret keeps it out of the build log. A build needs both; the release workflow warns when either is missing.
+
+Registering, once, in the Google Cloud console (console.cloud.google.com, signed in with any Google account):
+
+1. **Create a project** named `Mimic`.
+2. **APIs & Services → Library → Gmail API → Enable.** IMAP and SMTP don't use the API, but its scope, `https://mail.google.com/`, is listed only once it is enabled.
+3. **Google Auth Platform → Branding** (the OAuth consent screen): app name `Mimic`, a support email; **Audience:** _External_. **Data Access → Add scopes:** `https://mail.google.com/`.
+4. **Audience → Publishing status.** In _Testing_, only the test users listed there can sign in, and Google lets their sign-ins lapse after seven days — Mimic would ask every week. _In production_ without Google's verification, anyone can sign in after a warning that Google hasn't verified the app (up to 100 people), and sign-ins last. For the owner's own use, publish it; verification of a restricted scope (a security assessment) is only worth it for wide distribution.
+5. **Clients → Create client:** application type _Desktop app_, name `Mimic`. Copy the client id and the client secret. A desktop client takes the browser back to `http://127.0.0.1` on any port, which the sign-in needs; nothing else is registered.
+6. Set them: `gh variable set MIMIC_GOOGLE_CLIENT_ID --repo the-x1x1/mimic --body <client id>` and `gh secret set MIMIC_GOOGLE_CLIENT_SECRET --repo the-x1x1/mimic --body <client secret>`.
+
+For a local build, set both in the environment before `pnpm tauri dev` or `.\scripts\build.ps1`.
+
+Google Workspace admins can block apps that aren't on their list (Security → API controls); a Workspace user then sees that from Google when signing in, and an app password, if the admin allows those, still works.
+
 ## Manual release checklist (spec §27.5)
 
 Fresh install → launch → update from the previous public release → declare an identity → add a source → validate → import → cancel mid-import and resume → analyze → compose against a local provider → compose against a hosted provider → edit and record what was sent → delete a person and confirm the preview matched → re-analyze → delete everything → restart during an interrupted import → GitHub offline → engine crash → provider unreachable. Record results in PROJECT_STATUS.

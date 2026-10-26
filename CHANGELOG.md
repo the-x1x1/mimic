@@ -2,6 +2,17 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.26] — 2026-10-26
+
+Sign in with Google.
+
+### Added
+
+- **Gmail and Google Workspace sign in with Google**, in your browser, the way Outlook.com signs in with Microsoft — no app password to make. I never see your password; what lets me stay signed in is kept, sealed, on this computer. Checking, sending replies and everything else go through that sign-in.
+- Gmail still takes an app password: **Use an app password instead** in the connect dialog. A Google Workspace address at your own domain can sign in with Google once you say it's one, under Server settings.
+- A Google mailbox can be signed in again from Your mail, keeping everything already read.
+- This needs Mimic registered with Google; a copy built without that connects Gmail with an app password, as before. `docs/RELEASE_PROCESS.md` says how.
+
 ## [0.10.0-alpha.25] — 2026-10-26
 
 A copy in your Sent folder.
