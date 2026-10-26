@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.49] — 2026-10-26
+
+I read a reply before it goes by itself.
+
+### Changed
+
+- A reply I'd send by myself waits for you instead when it has a gap left to fill in (like "[time]" or "{name}"), talks about being an AI, has a link that wasn't in the message it answers, or runs past 3,000 characters. It says which.
+
 ## [0.10.0-alpha.48] — 2026-10-26
 
 More mailboxes known.

@@ -81,6 +81,15 @@ pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
 pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
 pub const LIST: &str = "It came through a mailing list, where a reply goes to everyone on it, so it waits for you.";
+/// What a reply says, read before it goes by itself (0.10.0-alpha.49): a
+/// model's draft can leave a gap to fill in, speak as what it is, or offer a
+/// link nobody gave it — none of which the user would send unread.
+pub const UNFINISHED: &str = "It has a gap left to fill in, like [this], so it waits for you.";
+pub const NOT_IN_YOUR_VOICE: &str = "It talks about being an AI, which isn't you, so it waits for you.";
+pub const NEW_LINK: &str = "It has a link that wasn't in their message, so it waits for you.";
+pub const TOO_LONG: &str = "It's much longer than a reply I'd send without you, so it waits for you.";
+/// The longest reply sent by itself, in characters.
+pub const MOST_CHARS: usize = 3000;
 /// Mail Mimic read longer ago than this is not answered by itself, however
 /// it came to be allowed since (0.10.0-alpha.44): turned back on, a mailbox
 /// or a person added, someone taken off the never list.
@@ -361,6 +370,9 @@ fn refusal(
     if incoming.metadata.get("list").and_then(serde_json::Value::as_bool) == Some(true) {
         return Ok(Some(LIST));
     }
+    if let Some(why) = unfinished(&draft.generated_text, &incoming.body) {
+        return Ok(Some(why));
+    }
     if !rules.mailboxes.contains(&incoming.source_id) {
         return Ok(Some(MAILBOX_OFF));
     }
@@ -409,6 +421,79 @@ fn refusal(
         }
     }
     Ok(None)
+}
+
+/// What in a reply's words keeps it from going by itself (0.10.0-alpha.49),
+/// if anything: a gap left to fill in (`[time]`, `{name}`, `<address>`), the
+/// model speaking as itself, a link that isn't in the message it answers,
+/// or more than `MOST_CHARS`. Words only: the signature is the user's.
+pub fn unfinished(text: &str, answering: &str) -> Option<&'static str> {
+    if text.chars().count() > MOST_CHARS {
+        return Some(TOO_LONG);
+    }
+    if has_gap(text) {
+        return Some(UNFINISHED);
+    }
+    let lower = text.to_lowercase().replace('\u{2019}', "'");
+    const SELF_TALK: [&str; 6] =
+        ["as an ai", "i am an ai", "i'm an ai", "language model", "ai assistant", "as an assistant"];
+    if SELF_TALK.iter().any(|t| says_word(&lower, t)) {
+        return Some(NOT_IN_YOUR_VOICE);
+    }
+    // Theirs however written: with or without `https://` or `www.`, or a
+    // closing `/`.
+    let theirs = answering.to_lowercase();
+    if links_in(&lower).any(|link| !theirs.contains(plain_link(link))) {
+        return Some(NEW_LINK);
+    }
+    None
+}
+
+/// Whether `phrase` is in `text` as words of its own: "i'm an ai", not
+/// "i'm an aide".
+fn says_word(text: &str, phrase: &str) -> bool {
+    text.match_indices(phrase).any(|(i, _)| {
+        let before = text[..i].chars().next_back();
+        let after = text[i + phrase.len()..].chars().next();
+        before.is_none_or(|c| !c.is_alphanumeric()) && after.is_none_or(|c| !c.is_alphanumeric())
+    })
+}
+
+/// A link without its scheme, `www.` or closing `/`.
+fn plain_link(link: &str) -> &str {
+    let link = link.strip_prefix("https://").or_else(|| link.strip_prefix("http://")).unwrap_or(link);
+    link.strip_prefix("www.").unwrap_or(link).trim_end_matches('/')
+}
+
+/// A gap left to fill in: brackets of any kind around something with a
+/// letter in it, at most 40 characters long — not an address or a link
+/// (`<sam@example.com>`, `<https://…>`).
+fn has_gap(text: &str) -> bool {
+    [('[', ']'), ('{', '}'), ('<', '>')].iter().any(|&(open, close)| {
+        text.match_indices(open).any(|(i, _)| {
+            let rest = &text[i + open.len_utf8()..];
+            rest.find(close).is_some_and(|j| {
+                let inside = &rest[..j];
+                inside.chars().count() <= 40
+                    && !inside.contains('\n')
+                    && !inside.contains('@')
+                    && !inside.contains("://")
+                    && inside.chars().any(char::is_alphabetic)
+            })
+        })
+    })
+}
+
+/// The links in already lower-cased words: `http://`, `https://` and
+/// `www.` to the next space, closing mark or character outside ASCII (in
+/// writing without spaces), without trailing punctuation.
+fn links_in(lower: &str) -> impl Iterator<Item = &str> {
+    lower.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\'' | '<' | '>')).filter_map(|word| {
+        let start = ["https://", "http://", "www."].iter().filter_map(|p| word.find(*p)).min()?;
+        let link = word[start..].split(|c: char| !c.is_ascii()).next().unwrap_or_default();
+        let link = link.trim_end_matches(['.', ',', '!', '?', ';', ':']);
+        (!link.is_empty()).then_some(link)
+    })
 }
 
 /// Whether every address a reply would go to is one of the person's own
@@ -1255,6 +1340,33 @@ mod tests {
         checked(&w);
         let run = tick(&w.db, &credentials(), at(MAX_HOLD_MINUTES)).unwrap();
         assert_eq!((run.sent, run.stopped), (1, 0), "read a day before it went, and not a backlog for that");
+    }
+
+    #[test]
+    fn a_reply_that_looks_unfinished_is_left_for_the_user() {
+        let theirs = "lunch at the place by the river? menu is at https://river.example/menu";
+        assert_eq!(unfinished("yes, the river place. 12:30?", theirs), None);
+        assert_eq!(unfinished("yes! see you at [time] :)", theirs), Some(UNFINISHED));
+        assert_eq!(unfinished("thanks {name}", theirs), Some(UNFINISHED));
+        assert_eq!(unfinished("send it to <your address>", theirs), Some(UNFINISHED));
+        assert_eq!(unfinished("haha [1] and <3", theirs), None, "a number, a heart: no gap");
+        assert_eq!(unfinished("As an AI, I can't eat lunch", theirs), Some(NOT_IN_YOUR_VOICE));
+        assert_eq!(unfinished("looked at https://river.example/menu, looks good", theirs), None, "their own link");
+        assert_eq!(unfinished("book here: www.tables.example.", theirs), Some(NEW_LINK));
+        assert_eq!(unfinished(&"a".repeat(MOST_CHARS + 1), theirs), Some(TOO_LONG));
+        // Not a gap, not the model, their link however written.
+        assert_eq!(unfinished("ask Sam <sam@example.com>", theirs), None);
+        assert_eq!(unfinished("menu's here <https://river.example/menu>", theirs), None);
+        assert_eq!(unfinished("I’m an aide there, and my thai assistant too", theirs), None);
+        assert_eq!(unfinished("I’m an AI", theirs), Some(NOT_IN_YOUR_VOICE), "a curly apostrophe");
+        assert_eq!(unfinished("http://river.example/menu/ looks good", theirs), None);
+        assert_eq!(unfinished("好的 https://river.example/menu。谢谢", theirs), None);
+
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute("UPDATE drafts SET generated_text = 'yes, see you at [time]' WHERE id = ?1", [&w.draft.id])
+            .unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
     }
 
     #[test]
