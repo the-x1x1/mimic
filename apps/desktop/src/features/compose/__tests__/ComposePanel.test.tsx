@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GenerationContext, type Draft } from "@mimic/contracts";
 import { contractFixture } from "@mimic/test-fixtures";
+import { useAnywhere } from "@/state/anywhere";
 import { ComposePanel } from "../ComposePanel";
 
 // The real hooks run; only the native calls are replaced.
@@ -15,6 +16,7 @@ const native = vi.hoisted(() => ({
   generationContext: vi.fn(),
   generateDraft: vi.fn(),
   resolveDraft: vi.fn(),
+  stepAside: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -102,5 +104,75 @@ describe("writing something new", () => {
         expect.objectContaining({ incomingMessage: "are we still on for 7?" }),
       ),
     );
+  });
+
+  describe("answered from anywhere", () => {
+    const writeText = vi.fn();
+
+    beforeEach(() => {
+      useAnywhere.setState({ copied: null });
+      writeText.mockReset();
+      writeText.mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      native.stepAside.mockResolvedValue(true);
+      native.generateDraft.mockResolvedValue(draft("d1", "yes, see you at 7"));
+    });
+
+    async function draftFromAnywhere() {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter
+            initialEntries={[{ pathname: "/write", state: { pasted: "are we still on for 7?" } }]}
+          >
+            <ComposePanel />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      const write = await screen.findByRole("button", { name: "Write a draft" });
+      await waitFor(() => expect(write).toBeEnabled());
+      fireEvent.click(write);
+      expect(await screen.findByDisplayValue("yes, see you at 7")).toBeInTheDocument();
+    }
+
+    it("copies the reply and steps aside, then asks whether it went", async () => {
+      await draftFromAnywhere();
+      expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+      fireEvent.change(screen.getByDisplayValue("yes, see you at 7"), {
+        target: { value: "yes! see you at 7" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Copy and go back" }));
+
+      await waitFor(() => expect(native.stepAside).toHaveBeenCalled());
+      expect(writeText).toHaveBeenCalledWith("yes! see you at 7");
+      expect(native.resolveDraft).not.toHaveBeenCalled();
+      expect(await screen.findByText("The reply you copied")).toBeInTheDocument();
+      expect(screen.getByText("yes! see you at 7")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "It went as I copied it" }));
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d1", "sent_edited", "yes! see you at 7"),
+      );
+      await waitFor(() => expect(screen.queryByText("The reply you copied")).toBeNull());
+    });
+
+    it("records a reply that didn't go, and nothing for one changed after copying", async () => {
+      await draftFromAnywhere();
+      fireEvent.click(screen.getByRole("button", { name: "Copy and go back" }));
+      fireEvent.click(await screen.findByRole("button", { name: "It didn’t go" }));
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d1", "discarded", null),
+      );
+
+      useAnywhere.setState({
+        copied: { draftId: "d2", text: "sure", generatedText: "sure" },
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "I changed it first" }));
+      await waitFor(() => expect(screen.queryByText("The reply you copied")).toBeNull());
+      expect(native.resolveDraft).toHaveBeenCalledTimes(1);
+    });
   });
 });

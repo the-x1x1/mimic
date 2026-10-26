@@ -20,6 +20,8 @@ import {
   useProviderState,
   useResolveDraft,
 } from "@/hooks/useCompose";
+import { ipc } from "@/lib/ipc";
+import { useAnywhere } from "@/state/anywhere";
 import { toast } from "@/state/toast";
 
 /**
@@ -31,6 +33,11 @@ import { toast } from "@/state/toast";
  * and starting something. The intent field stays the centre of it: Mimic
  * supplies how the user writes, the user supplies what they want to say, so it
  * is the largest input here and the one focused first.
+ *
+ * Opened from anywhere (the shortcut), a draft can be copied and Mimic steps
+ * aside, so the reply can be pasted where the message was. Mimic can't see
+ * it go from there, so the next time Write is open it asks whether it did,
+ * and records only what the user says (`useAnywhere`).
  */
 export function ComposePanel({ title = "Write something new" }: { title?: string }) {
   const people = usePeople();
@@ -44,6 +51,9 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   const [intent, setIntent] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [edited, setEdited] = useState<string>("");
+  const [fromAnywhere, setFromAnywhere] = useState(false);
+  const copiedAway = useAnywhere((s) => s.copied);
+  const setCopiedAway = useAnywhere((s) => s.setCopied);
 
   // Opened from anywhere (the shortcut, `anywhere.rs`): what was copied is
   // the message being answered, and a draft for something else goes.
@@ -54,6 +64,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     setIncoming(pasted);
     setDraft(null);
     setEdited("");
+    setFromAnywhere(true);
     // Each time it is opened this way, even on the same words.
   }, [location.key, pasted]);
 
@@ -124,6 +135,43 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     toast.info("Copied");
   }
 
+  /** Copy the reply and step aside, to paste it where the message came from. */
+  async function copyAndGoBack() {
+    if (!draft) return;
+    await navigator.clipboard.writeText(edited);
+    setCopiedAway({ draftId: draft.id, text: edited, generatedText: draft.generatedText });
+    setDraft(null);
+    setEdited("");
+    setIntent("");
+    setIncoming("");
+    setFromAnywhere(false);
+    try {
+      await ipc.stepAside();
+    } catch {
+      toast.info("Copied", "Paste it where the message was.");
+    }
+  }
+
+  /** What the user says became of the reply they copied away. */
+  async function settleCopied(went: boolean) {
+    if (!copiedAway) return;
+    const changed = copiedAway.text !== copiedAway.generatedText;
+    await resolve.mutateAsync({
+      draftId: copiedAway.draftId,
+      outcome: went ? (changed ? "sent_edited" : "sent_unedited") : "discarded",
+      finalText: went ? copiedAway.text : null,
+    });
+    setCopiedAway(null);
+    toast.success(
+      "Noted",
+      went
+        ? changed
+          ? "I'll learn from what you changed before copying it."
+          : "You sent it as I wrote it."
+        : undefined,
+    );
+  }
+
   return (
     <div className="compose">
       <div className="compose__header">
@@ -144,6 +192,45 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
 
       <div className="compose__grid">
         <div className="stack gap-3">
+          {copiedAway ? (
+            <Card title="The reply you copied">
+              <blockquote className="letter">
+                {copiedAway.text.length > 280
+                  ? `${copiedAway.text.slice(0, 280)}…`
+                  : copiedAway.text}
+              </blockquote>
+              <p className="muted small">
+                I can&rsquo;t see what became of it after you pasted it. Did it go?
+              </p>
+              <div className="row gap-2">
+                <Button
+                  variant="primary"
+                  disabled={resolve.isPending}
+                  onClick={() => void settleCopied(true).catch(() => undefined)}
+                >
+                  It went as I copied it
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={resolve.isPending}
+                  onClick={() => setCopiedAway(null)}
+                  title="I won't learn from it, since I don't know what you sent."
+                >
+                  I changed it first
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={resolve.isPending}
+                  onClick={() => void settleCopied(false).catch(() => undefined)}
+                >
+                  It didn&rsquo;t go
+                </Button>
+              </div>
+              {resolve.isError && copiedAway ? (
+                <InlineError>{(resolve.error as Error).message}</InlineError>
+              ) : null}
+            </Card>
+          ) : null}
           <Card title="Who and where">
             <div className="row gap-2">
               <Field label="Recipient" htmlFor="recipient">
@@ -246,12 +333,19 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                 onChange={(e) => setEdited(e.target.value)}
               />
               <div className="row gap-2">
-                <Button variant="primary" onClick={markSent}>
+                {fromAnywhere ? (
+                  <Button variant="primary" onClick={() => void copyAndGoBack()}>
+                    Copy and go back
+                  </Button>
+                ) : null}
+                <Button variant={fromAnywhere ? "ghost" : "primary"} onClick={markSent}>
                   {dirty ? "I sent my edited version" : "I sent this"}
                 </Button>
-                <Button variant="ghost" onClick={copy}>
-                  Copy
-                </Button>
+                {fromAnywhere ? null : (
+                  <Button variant="ghost" onClick={copy}>
+                    Copy
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   onClick={async () => {

@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.35] — 2026-10-26
+
+Back where you were.
+
+### Added
+
+- **Copy and go back.** When you've opened me with your shortcut to answer a message from somewhere else, the draft has **Copy and go back**: it copies the reply and I step out of the way — into the notification area, or minimised if I'm not there — so the app you came from is in front to paste into.
+- **Did it go?** I can't see what happens after you paste, so the next time Write is open I ask about the reply you copied: **It went as I copied it** (I learn from it, and from anything you changed before copying), **I changed it first** (I leave it alone, since I don't know what you sent), or **It didn't go**.
+
 ## [0.10.0-alpha.34] — 2026-10-26
 
 Connecting a mailbox at your own domain.

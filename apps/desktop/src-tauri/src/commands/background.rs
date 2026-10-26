@@ -10,6 +10,16 @@ fn autostart_error(e: impl std::fmt::Display) -> CommandError {
     CommandError::new("autostart", format!("I couldn't change whether I start with Windows: {e}"))
 }
 
+/// Get out of the way after a reply was copied, so the window the user came
+/// from is in front to paste it into (`background::step_aside`): true when
+/// hidden (the icon or the shortcut brings Mimic back), false when minimised.
+#[tauri::command]
+pub async fn step_aside(app: tauri::AppHandle) -> CommandResult<bool> {
+    crate::background::step_aside(&app)
+        .map(|how| how == crate::background::Aside::Hidden)
+        .map_err(|e| CommandError::new("window", format!("I couldn't step aside: {e}")))
+}
+
 /// Whether Windows starts Mimic when the user signs in.
 #[tauri::command]
 pub async fn get_start_with_windows(app: tauri::AppHandle) -> CommandResult<bool> {

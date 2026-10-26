@@ -128,6 +128,7 @@ pub fn run() {
             commands::sources::set_mailbox_password,
             commands::sources::mail_sign_in_available,
             commands::sources::mail_exchangers,
+            commands::background::step_aside,
             commands::sources::sign_in_to_mailbox,
             commands::sources::connect_signed_in_mailbox,
             commands::sources::cancel_mail_sign_in,
