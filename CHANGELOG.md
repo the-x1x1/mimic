@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.62] — 2026-10-26
+
+Text messages.
+
+### Added
+
+- **Your Android text messages.** Back them up with SMS Backup & Restore and import the .xml file it makes. Both sides of each conversation are read — one conversation per person, or per group — so I learn how you text back. The backup marks which messages the phone sent, so you say once that they're yours. Drafts, messages that didn't send, and pictures without words are left out and counted; a later backup adds only what's new.
+
 ## [0.10.0-alpha.61] — 2026-10-26
 
 Messenger and Instagram.

@@ -25,6 +25,7 @@ pub mod mimic_json;
 pub mod normalize;
 pub mod oauth;
 pub mod outgoing;
+pub mod sms;
 pub mod smtp;
 pub mod telegram;
 pub mod transcript;
@@ -262,6 +263,7 @@ pub fn all() -> Vec<Box<dyn CommunicationSource>> {
         Box::new(discord::DiscordSource),
         Box::new(telegram::TelegramSource),
         Box::new(meta::MetaSource),
+        Box::new(sms::SmsSource),
     ]
 }
 

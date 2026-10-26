@@ -235,4 +235,15 @@ describe("which name in a chat is the user's", () => {
     expect(await screen.findByText(/Meta.s download names who wrote each/)).toBeInTheDocument();
     expect(screen.queryByText(/saved on your phone/)).toBeNull();
   });
+
+  it("asks whether the messages a phone sent are the user's", async () => {
+    native.userIdentity.mockResolvedValue(identity());
+    const phone = writer("Messages this phone sent", 12, {
+      value: "sms:this-phone",
+      normalized: "sms:this-phone",
+    });
+    renderIt([phone], "sms");
+    expect(await screen.findByText("Are these yours?")).toBeInTheDocument();
+    expect(screen.getByText(/backup marks the messages it sent/)).toBeInTheDocument();
+  });
 });

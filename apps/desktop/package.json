@@ -1,6 +1,6 @@
 {
   "name": "@mimic/desktop",
-  "version": "0.10.0-alpha.61",
+  "version": "0.10.0-alpha.62",
   "private": true,
   "type": "module",
   "scripts": {

@@ -130,6 +130,12 @@ export function WhoIsYou({
             I&rsquo;ll import it once you say it&rsquo;s yours.
           </p>
         )
+      ) : connector === "sms" ? (
+        <p id={heading}>
+          <strong>{yours.length > 0 ? "These are yours." : "Are these yours?"}</strong> Your
+          phone&rsquo;s backup marks the messages it sent, so say they&rsquo;re yours and I&rsquo;ll
+          read them as your writing. Until you do, I&rsquo;ll read them as someone else&rsquo;s.
+        </p>
       ) : connector === "meta" ? (
         <p id={heading}>
           <strong>Which of these is you?</strong> Meta&rsquo;s download names who wrote each message
