@@ -183,6 +183,42 @@ describe("sending a reply from Mimic", () => {
     });
   });
 
+  it("sends a reply to a Teams message into that chat", async () => {
+    native.replyEnvelope.mockResolvedValue(
+      envelope({
+        kind: "teams",
+        mailboxes: [
+          {
+            sourceId: "s8",
+            name: "c@formicaria.example (Teams)",
+            fromAddress: "C Haynes in Teams",
+            server: "Teams",
+            whyNot: null,
+          },
+        ],
+        mailbox: "s8",
+        to: ["Ada Lovelace"],
+        otherAddresses: [],
+        subject: "",
+      }),
+    );
+    native.sendReply.mockImplementation(async (r: { to: string[] }) => ({
+      ...sent(r.to),
+      sourceId: "s8",
+      fromAddress: "teams:u1",
+      subject: "",
+    }));
+    const onDone = renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    expect(within(panel).getByText("C Haynes in Teams")).toBeInTheDocument();
+    expect(within(panel).queryByLabelText("Subject")).toBeNull();
+    expect(within(panel).getByText(/into that conversation in Teams, as you/)).toBeInTheDocument();
+    await sendIt(panel);
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(native.sendReply).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "s8" }));
+  });
+
   it("copies in only the others on their message that are ticked", async () => {
     native.replyEnvelope.mockResolvedValue(
       envelope({ othersOnIt: ["bob@example.com", "cy@example.com", "di@example.com"] }),

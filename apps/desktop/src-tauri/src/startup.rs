@@ -117,6 +117,28 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         )
         .signing_in_with(mimic_core::sources::imap::Auth::Google, google.0, google.1),
     );
+    // Teams accounts' access tokens: traded for each one's sign-in in the
+    // secret store, through the client id mailboxes sign in with.
+    let teams_access = std::sync::Arc::new(mimic_core::sources::teams::Access::new(
+        mimic_core::sources::teams::provider(),
+        {
+            let credentials = mail_credentials.clone();
+            std::sync::Arc::new(move || {
+                credentials.sign_in_with(mimic_core::sources::imap::Auth::Microsoft).map(|(_, client)| client)
+            })
+        },
+        {
+            let secrets = secrets.clone();
+            std::sync::Arc::new(move |key: &str| {
+                use mimic_core::providers::SecretStore;
+                secrets.get(key).filter(|t| !t.is_empty())
+            })
+        },
+        {
+            let secrets = secrets.clone();
+            std::sync::Arc::new(move |key: &str, value: &str| secrets.set(key, value).map_err(|e| e.to_string()))
+        },
+    ));
     // Reading what the user's messages are doing sends every one of them to
     // the model, so it is only ever handed one on this computer.
     let local_registry = providers.clone();
@@ -143,30 +165,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         // from the secret store per run (0.10.0-alpha.64).
         // Teams chats, through Graph, with the sign-in kept for each
         // (0.10.0-alpha.67), as the Microsoft registration mailboxes use.
-        mimic_core::sources::teams::CheckTeamsExecutor::shared(std::sync::Arc::new(
-            mimic_core::sources::teams::Access::new(
-                mimic_core::sources::teams::provider(),
-                {
-                    let credentials = mail_credentials.clone();
-                    std::sync::Arc::new(move || {
-                        credentials.sign_in_with(mimic_core::sources::imap::Auth::Microsoft).map(|(_, client)| client)
-                    })
-                },
-                {
-                    let secrets = secrets.clone();
-                    std::sync::Arc::new(move |key: &str| {
-                        use mimic_core::providers::SecretStore;
-                        secrets.get(key).filter(|t| !t.is_empty())
-                    })
-                },
-                {
-                    let secrets = secrets.clone();
-                    std::sync::Arc::new(move |key: &str, value: &str| {
-                        secrets.set(key, value).map_err(|e| e.to_string())
-                    })
-                },
-            ),
-        )),
+        mimic_core::sources::teams::CheckTeamsExecutor::shared(teams_access.clone()),
         mimic_core::sources::slack::CheckSlackExecutor::shared({
             let secrets = secrets.clone();
             std::sync::Arc::new(move |key: &str| {
@@ -234,6 +233,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         log_dir,
         instance,
         mail_credentials,
+        teams_access,
         sign_in: Default::default(),
         replying: AtomicBool::new(false),
         watchers: Default::default(),

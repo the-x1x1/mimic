@@ -25,11 +25,11 @@ export function AutoReplySection() {
   const [filter, setFilter] = useState("");
   const rules = state.data?.rules ?? null;
   const people = usePeople(false, rules !== null);
-  // Mailboxes, and Slack workspaces (0.10.0-alpha.66).
+  // Mailboxes, Slack workspaces (0.10.0-alpha.66) and Teams accounts (.68).
   const mailboxes = (sources.data ?? []).filter(
-    (s) => s.connector === "imap" || s.connector === "slack",
+    (s) => s.connector === "imap" || s.connector === "slack" || s.connector === "teams",
   );
-  const slackToo = mailboxes.some((s) => s.connector === "slack");
+  const chats = mailboxes.some((s) => s.connector === "slack" || s.connector === "teams");
 
   if (!rules || !state.data) {
     return (
@@ -131,7 +131,7 @@ export function AutoReplySection() {
 
       <fieldset className="stack gap-1">
         <legend className="muted small">
-          {slackToo ? "Through these mailboxes and workspaces" : "Through these mailboxes"}
+          {chats ? "Through these mailboxes and chats" : "Through these mailboxes"}
         </legend>
         {mailboxes.length === 0 ? (
           <p className="muted small">Connect a mailbox under Your mail first.</p>
@@ -150,11 +150,11 @@ export function AutoReplySection() {
             </label>
           ))
         )}
-        {slackToo ? (
+        {chats ? (
           <p className="muted small">
-            In Slack I answer a direct message only, never a group, and just before a reply goes I
-            look in the conversation: if you&rsquo;ve answered there, or they&rsquo;ve written
-            again, it doesn&rsquo;t go.
+            In Slack and Teams I answer a one-to-one conversation only, never a group, and just
+            before a reply goes I look in the conversation: if you&rsquo;ve answered there, or
+            they&rsquo;ve written again, it doesn&rsquo;t go.
           </p>
         ) : null}
       </fieldset>

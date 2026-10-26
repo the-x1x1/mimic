@@ -105,6 +105,8 @@ pub async fn sign_in_teams_again(
         .secrets
         .set(&teams::secret_key(&source_id), &refresh)
         .map_err(|e| CommandError::new("secrets", format!("I couldn't store the sign-in: {e}")))?;
+    // An access token kept from the old sign-in isn't used again.
+    state.teams_access.forget(&source_id);
     state.db.set_source_status(&source_id, "ready", None)?;
     check_soon(&state, &source_id)?;
     Ok(state.db.get_source(&source_id)?.unwrap_or(source))

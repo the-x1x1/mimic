@@ -71,7 +71,7 @@ describe("replying by myself", () => {
     for (const f of Object.values(native)) f.mockReset();
   });
 
-  it("offers a Slack workspace beside the mailboxes, for direct messages only", async () => {
+  it("offers Slack workspaces and Teams accounts beside the mailboxes, one-to-one only", async () => {
     renderIt(
       off,
       false,
@@ -79,11 +79,21 @@ describe("replying by myself", () => {
       [
         mailbox,
         { ...mailbox, id: "s2", connector: "slack", name: "Acme (Slack)", channel: "chat" },
+        {
+          ...mailbox,
+          id: "s3",
+          connector: "teams",
+          name: "c@formicaria.example (Teams)",
+          channel: "chat",
+        },
       ],
     );
-    expect(await screen.findByText("Through these mailboxes and workspaces")).toBeInTheDocument();
+    expect(await screen.findByText("Through these mailboxes and chats")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Acme (Slack)" })).toBeInTheDocument();
-    expect(screen.getByText(/In Slack I answer a direct message only/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "c@formicaria.example (Teams)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/I answer a one-to-one conversation only/)).toBeInTheDocument();
   });
 
   it("is off until turned on, and turning it on says what it does first", async () => {

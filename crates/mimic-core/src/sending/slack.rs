@@ -159,7 +159,7 @@ pub(crate) fn still_theirs(api: &SlackApi, config: &SlackSourceConfig) -> Result
     match api.auth_test() {
         Ok(me) if config.is(&me) => Ok(()),
         Ok(_) => Err(SendError::Cannot(NOT_THE_ACCOUNT.into())),
-        Err(e) => Err(SendError::Slack(e.to_string())),
+        Err(e) => Err(SendError::Service(e.to_string())),
     }
 }
 
@@ -200,16 +200,16 @@ pub(crate) fn post(
         }
         Ok(Err(PostError::NotSent(e))) => {
             db.outgoing_failed(&entry.id, &e.to_string())?;
-            Err(SendError::Slack(e.to_string()))
+            Err(SendError::Service(e.to_string()))
         }
         Ok(Err(e @ PostError::Unsure(_))) => {
             let why = format!("{e} Look in the conversation in Slack before sending it again.");
             db.outgoing_unsure(&entry.id, &why)?;
-            Err(SendError::SlackUnsure(why))
+            Err(SendError::ServiceUnsure(why))
         }
         Err(_) => {
             db.outgoing_unsure(&entry.id, PANICKED)?;
-            Err(SendError::SlackUnsure(PANICKED.into()))
+            Err(SendError::ServiceUnsure(PANICKED.into()))
         }
     }
 }

@@ -256,6 +256,61 @@ impl GraphApi {
     }
 }
 
+impl GraphApi {
+    /// Post `text` into a chat as the user (0.10.0-alpha.68), as plain text:
+    /// the new message's id and when Teams says it was made, or why not —
+    /// and whether it may have gone anyway.
+    pub fn post(&self, chat: &str, text: &str) -> Result<(String, Option<String>), PostError> {
+        let response = self
+            .client
+            .post(format!("{}/chats/{}/messages", self.base, encode(chat)))
+            .bearer_auth(&self.token)
+            .json(&json!({ "body": { "contentType": "text", "content": text } }))
+            .send();
+        let response = match response {
+            Ok(r) => r,
+            Err(e) if e.is_connect() || e.is_builder() => {
+                return Err(PostError::NotSent(TeamsError::Network(one_line(&e.to_string()))))
+            }
+            Err(e) => return Err(PostError::Unsure(one_line(&e.to_string()))),
+        };
+        let status = response.status().as_u16();
+        if status == 429 {
+            return Err(PostError::NotSent(TeamsError::RateLimited));
+        }
+        let value: Value = match response.json() {
+            Ok(v) => v,
+            Err(e) if (200..300).contains(&status) => {
+                return Err(PostError::Unsure(format!("Teams answered {status}: {}", one_line(&e.to_string()))))
+            }
+            Err(_) => Value::Null,
+        };
+        if (200..300).contains(&status) {
+            let created = value.get("createdDateTime").and_then(Value::as_str).map(str::to_string);
+            return value
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| (id.to_string(), created))
+                .ok_or_else(|| PostError::Unsure("Teams said it went, without saying which message it was".into()));
+        }
+        // A server's failure may have come after it took the message.
+        if status >= 500 {
+            return Err(PostError::Unsure(format!("Teams answered {status}")));
+        }
+        Err(PostError::NotSent(refusal(status, &value)))
+    }
+}
+
+/// Why a post didn't go — or might have.
+#[derive(Debug, thiserror::Error)]
+pub enum PostError {
+    #[error(transparent)]
+    NotSent(TeamsError),
+    /// Asked, and no clear answer came back: it may have gone.
+    #[error("I lost Teams' answer as it was being sent ({0}), so it may or may not have gone.")]
+    Unsure(String),
+}
+
 /// A chat id in a path: Teams' hold `:` and `@`.
 fn encode(s: &str) -> String {
     s.bytes()
@@ -599,6 +654,8 @@ fn sync_inner(
                     body,
                     metadata: json!({
                         "teamsChat": chat.id,
+                        // To the millisecond, for asking what came after it.
+                        "teamsCreated": created,
                         "teamsDirect": chat.kind == "oneOnOne",
                         // A file, a card or a quoted message; or a picture
                         // pasted into the words.
@@ -821,6 +878,72 @@ pub(crate) mod fake {
             }
         });
         (base, seen)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod live {
+    //! A Graph that keeps what it is told: chats with their messages, newest
+    //! last; history newest first; a post added as the user's, a second
+    //! after the chat's last message.
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::{json, Value};
+
+    pub(crate) struct Chat {
+        pub id: String,
+        /// The other person, for a one-to-one chat.
+        pub other: Option<(String, String)>,
+        pub messages: Vec<Value>,
+    }
+
+    pub(crate) type Chats = Arc<Mutex<Vec<Chat>>>;
+
+    pub(crate) fn said(user: &str, name: &str, id: &str, created: &str, text: &str) -> Value {
+        json!({
+            "id": id, "messageType": "message", "createdDateTime": created, "deletedDateTime": null,
+            "from": { "user": { "id": user, "displayName": name } },
+            "body": { "contentType": "text", "content": text }, "attachments": []
+        })
+    }
+
+    pub(crate) fn graph(chats: Chats) -> super::fake::Answer {
+        Box::new(move |path, body| {
+            let mut chats = chats.lock().unwrap();
+            let answer = if path == "/me" {
+                json!({ "id": "u1", "displayName": "C Haynes", "mail": "c@formicaria.example" })
+            } else if path == "/me/chats" {
+                json!({ "value": chats.iter().map(|c| {
+                    let mut members = vec![json!({ "userId": "u1", "displayName": "C Haynes" })];
+                    match &c.other {
+                        Some((id, name)) => members.push(json!({ "userId": id, "displayName": name })),
+                        None => members.push(json!({ "userId": "u3", "displayName": "Bob" })),
+                    }
+                    let kind = if c.other.is_some() { "oneOnOne" } else { "group" };
+                    json!({ "id": c.id, "chatType": kind, "members": members })
+                }).collect::<Vec<_>>() })
+            } else if let Some(id) = path.strip_prefix("/me/chats/").and_then(|p| p.strip_suffix("/messages")) {
+                let mut found: Vec<Value> =
+                    chats.iter().filter(|c| c.id == id).flat_map(|c| c.messages.iter().cloned()).collect();
+                found.reverse();
+                json!({ "value": found })
+            } else if let Some(id) = path.strip_prefix("/chats/").and_then(|p| p.strip_suffix("/messages")) {
+                let sent: Value = serde_json::from_str(body).unwrap();
+                let Some(chat) = chats.iter_mut().find(|c| c.id == id) else {
+                    return (404, r#"{"error":{"code":"NotFound","message":"no chat"}}"#.into());
+                };
+                let last =
+                    chat.messages.last().and_then(|m| m["createdDateTime"].as_str()).unwrap_or("2026-01-01T00:00:00Z");
+                let at = chrono::DateTime::parse_from_rfc3339(last).unwrap() + chrono::Duration::seconds(1);
+                let id = format!("p{}", chat.messages.len());
+                let created = at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                chat.messages.push(said("u1", "C Haynes", &id, &created, sent["body"]["content"].as_str().unwrap()));
+                json!({ "id": id, "createdDateTime": created })
+            } else {
+                return (404, r#"{"error":{"code":"NotFound","message":"no"}}"#.into());
+            };
+            (200, answer.to_string())
+        })
     }
 }
 
