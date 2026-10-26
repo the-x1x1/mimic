@@ -833,6 +833,20 @@ describe("the home screen says whether mail arrives by itself, and only when it 
     };
     expect(describeMailChecking(off)).toMatch(/^Checking your mailboxes is turned off/);
   });
+  it("says mail is read as it arrives only while a server is listening", () => {
+    const checking = { everyMinutes: 15, lastCheckedAt: null, failing: null };
+    expect(
+      describeMailChecking({ ...base, mailChecking: { ...checking, mailboxes: 1, listening: 1 } }),
+    ).toBe("I check your mailbox every 15 minutes, and read new mail as it arrives.");
+    expect(
+      describeMailChecking({ ...base, mailChecking: { ...checking, mailboxes: 3, listening: 2 } }),
+    ).toBe(
+      "I check your mailboxes every 15 minutes, and read new mail as it arrives in 2 of them.",
+    );
+    expect(
+      describeMailChecking({ ...base, mailChecking: { ...checking, mailboxes: 2, listening: 0 } }),
+    ).toBe("I check your mailboxes every 15 minutes.");
+  });
   it("reads a first check as a first check, not as nothing imported", () => {
     const first = {
       ...base,

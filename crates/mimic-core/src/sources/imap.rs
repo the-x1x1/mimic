@@ -937,12 +937,30 @@ pub enum Watched {
 /// each time the server says some came, so a check can be queued at once
 /// rather than at the next scheduled one. It opens the folder with `EXAMINE`
 /// and reads nothing: no message, no flag — the check does the reading.
+/// `listening` is told true once the server is listening for it, and false
+/// when the watch ends, however it ends (0.10.0-alpha.30: the home screen says
+/// so only while it is true).
 pub fn watch(
     account: &ImapAccount,
     folder: &str,
     credential: &Credential,
     times: Watching,
     should_stop: &dyn Fn() -> bool,
+    listening: &dyn Fn(bool),
+    arrived: &mut dyn FnMut(),
+) -> Result<Watched, ImapError> {
+    let watched = watch_inner(account, folder, credential, times, should_stop, listening, arrived);
+    listening(false);
+    watched
+}
+
+fn watch_inner(
+    account: &ImapAccount,
+    folder: &str,
+    credential: &Credential,
+    times: Watching,
+    should_stop: &dyn Fn() -> bool,
+    listening: &dyn Fn(bool),
     arrived: &mut dyn FnMut(),
 ) -> Result<Watched, ImapError> {
     let mut conn = Connection::open(account, credential)?;
@@ -951,6 +969,7 @@ pub fn watch(
         return Ok(Watched::NoIdle);
     }
     conn.examine(folder)?;
+    listening(true);
     let started = Instant::now();
     loop {
         if should_stop() {
@@ -1362,6 +1381,10 @@ pub fn recover(db: &Db) -> Result<usize, DbError> {
 #[serde(rename_all = "camelCase")]
 pub struct MailChecking {
     pub mailboxes: usize,
+    /// How many are being listened to for mail as it arrives (`watch`). Only
+    /// the app knows; `checking` says 0, and the desktop fills it in.
+    #[serde(default)]
+    pub listening: usize,
     /// `0` when checking is off.
     pub every_minutes: i64,
     pub last_checked_at: Option<String>,
@@ -1386,6 +1409,7 @@ pub fn checking(db: &Db) -> Result<Option<MailChecking>, DbError> {
     });
     Ok(Some(MailChecking {
         mailboxes: boxes.len(),
+        listening: 0,
         every_minutes: interval_minutes(db)?,
         last_checked_at: last,
         failing,
@@ -2182,8 +2206,11 @@ mod tests {
         let should_stop = || arrivals.get() >= 1 && started.elapsed() > Duration::from_millis(1500);
         let mut arrived = || arrivals.set(arrivals.get() + 1);
         let times = Watching { renew: Duration::from_secs(20), session: Duration::from_secs(60) };
-        let watched = watch(&here(port), "INBOX", &pw("x"), times, &should_stop, &mut arrived).unwrap();
+        let heard = std::cell::RefCell::new(Vec::new());
+        let listening = |on: bool| heard.borrow_mut().push(on);
+        let watched = watch(&here(port), "INBOX", &pw("x"), times, &should_stop, &listening, &mut arrived).unwrap();
         assert_eq!(watched, Watched::Stopped);
+        assert_eq!(*heard.borrow(), vec![true, false], "listening while it waited, and not after");
         assert_eq!(arrivals.get(), 1, "the one message that arrived, once");
         assert!(
             started.elapsed() < Duration::from_millis(1500) + Duration::from_secs(3),
@@ -2203,7 +2230,7 @@ mod tests {
         let mut arrived = || arrivals.set(arrivals.get() + 1);
         let times = Watching { renew: Duration::from_millis(200), session: Duration::from_secs(2) };
         let started = Instant::now();
-        let watched = watch(&here(port), "INBOX", &pw("x"), times, &|| false, &mut arrived).unwrap();
+        let watched = watch(&here(port), "INBOX", &pw("x"), times, &|| false, &|_| {}, &mut arrived).unwrap();
         assert_eq!(watched, Watched::Renew);
         assert!(started.elapsed() < Duration::from_secs(5));
         assert_eq!(arrivals.get(), 1);
@@ -2215,8 +2242,12 @@ mod tests {
     #[test]
     fn a_server_that_cannot_say_when_mail_arrives_is_left_to_the_schedule() {
         let (port, seen) = idle_server(false);
-        let watched = watch(&here(port), "INBOX", &pw("x"), Watching::USUAL, &|| false, &mut || {}).unwrap();
+        let heard = std::cell::RefCell::new(Vec::new());
+        let listening = |on: bool| heard.borrow_mut().push(on);
+        let watched =
+            watch(&here(port), "INBOX", &pw("x"), Watching::USUAL, &|| false, &listening, &mut || {}).unwrap();
         assert_eq!(watched, Watched::NoIdle);
+        assert_eq!(*heard.borrow(), vec![false], "never listening");
         let commands = seen.recv().unwrap();
         only_watching(&commands);
         assert!(!commands.iter().any(|c| c.contains("EXAMINE") || c.contains("IDLE")), "{commands:?}");

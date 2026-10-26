@@ -381,6 +381,11 @@ export const Dashboard = z.object({
   mailChecking: z
     .object({
       mailboxes: z.number(),
+      /**
+       * How many the server is listening to for mail as it arrives, now
+       * (0.10.0-alpha.30). Absent from a reply made before, read as none.
+       */
+      listening: z.number().optional(),
       everyMinutes: z.number(),
       lastCheckedAt: z.string().nullable(),
       /** Why the last check failed, when it did. */
@@ -401,7 +406,14 @@ export function describeMailChecking(d: Dashboard): string | null {
   if (m.everyMinutes === 0) {
     return `Checking ${which} is turned off, so nothing new comes in until you ask.`;
   }
-  return `I check ${which} every ${m.everyMinutes} minutes.`;
+  const listening = Math.min(m.listening ?? 0, m.mailboxes);
+  const asItArrives =
+    listening === 0
+      ? ""
+      : listening === m.mailboxes
+        ? ", and read new mail as it arrives"
+        : `, and read new mail as it arrives in ${listening} of them`;
+  return `I check ${which} every ${m.everyMinutes} minutes${asItArrives}.`;
 }
 
 /**

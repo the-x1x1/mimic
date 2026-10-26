@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.30] — 2026-10-26
+
+What the home screen says about your mail.
+
+### Changed
+
+- The line about checking your mail now says when I read new mail as it arrives — and only while your mail server is actually telling me, for each mailbox. Until then it says how often I check, as before.
+
 ## [0.10.0-alpha.29] — 2026-10-26
 
 A message from anywhere.

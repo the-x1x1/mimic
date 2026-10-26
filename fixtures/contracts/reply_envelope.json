@@ -1,15 +1,15 @@
 {
-  "draftId": "e1d673c0-5545-47d5-aa57-2d7b0b3bde0f",
+  "draftId": "6cc3df9b-4382-4e89-9332-a164702b3735",
   "mailboxes": [
     {
-      "sourceId": "eecc434f-6865-4a48-a559-979a16dbbf02",
+      "sourceId": "4fd381b0-81f8-4be4-8bd6-2c8744e8b4a0",
       "name": "c@example.com",
       "fromAddress": "c@example.com",
       "server": "127.0.0.1",
       "whyNot": null
     }
   ],
-  "mailbox": "eecc434f-6865-4a48-a559-979a16dbbf02",
+  "mailbox": "4fd381b0-81f8-4be4-8bd6-2c8744e8b4a0",
   "to": ["ada.replies@example.com"],
   "otherAddresses": ["ada@example.com"],
   "subject": "Re: Lunch",
