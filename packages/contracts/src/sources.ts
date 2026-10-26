@@ -242,6 +242,28 @@ export function slackWorkspace(source: {
     : null;
 }
 
+/** A connected Teams account, from its stored settings (0.10.0-alpha.67). */
+export function teamsAccount(source: {
+  connector: string;
+  config: Record<string, unknown>;
+}): { user: string; email: string | null; lastCheckedAt: string | null } | null {
+  if (source.connector !== "teams") return null;
+  const parsed = z
+    .object({
+      user: z.string(),
+      email: z.string().nullable().optional(),
+      lastCheckedAt: z.string().nullable().optional(),
+    })
+    .safeParse(source.config);
+  return parsed.success
+    ? {
+        user: parsed.data.user,
+        email: parsed.data.email ?? null,
+        lastCheckedAt: parsed.data.lastCheckedAt ?? null,
+      }
+    : null;
+}
+
 /**
  * What a Slack app made for Mimic asks for, as a manifest to paste into
  * "Create New App → From a manifest": user scopes only, no bot, and a token

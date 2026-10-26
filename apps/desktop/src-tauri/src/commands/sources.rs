@@ -104,6 +104,9 @@ pub async fn start_source_import(
     if source.connector == mimic_core::sources::slack::CONNECTOR {
         return Ok(state.jobs.enqueue(mimic_core::sources::slack::JOB_KIND, json!({ "sourceId": source_id }))?);
     }
+    if source.connector == mimic_core::sources::teams::CONNECTOR {
+        return Ok(state.jobs.enqueue(mimic_core::sources::teams::JOB_KIND, json!({ "sourceId": source_id }))?);
+    }
     Ok(state.jobs.enqueue(mimic_core::import::JOB_KIND, json!({ "sourceId": source_id }))?)
 }
 
@@ -268,10 +271,10 @@ fn signed_in_account(auth: Auth, provider: &oauth::Provider, email: &str) -> Ima
 /// the command that started it, which holds it until it returns — through
 /// looking at the mailbox, not just signing in — and the wait on the
 /// browser, which may outlive a command whose caller went away.
-struct SigningIn(SharedState);
+pub(crate) struct SigningIn(SharedState);
 
 impl SigningIn {
-    fn begin(state: &SharedState) -> CommandResult<std::sync::Arc<Self>> {
+    pub(crate) fn begin(state: &SharedState) -> CommandResult<std::sync::Arc<Self>> {
         if state.sign_in.active.swap(true, Ordering::SeqCst) {
             return Err(CommandError::new(
                 "busy",
@@ -283,7 +286,7 @@ impl SigningIn {
     }
 
     /// Whether `cancel_mail_sign_in` stopped this sign-in.
-    fn stopped(&self) -> bool {
+    pub(crate) fn stopped(&self) -> bool {
         self.0.sign_in.cancel.load(Ordering::SeqCst)
     }
 }
@@ -294,7 +297,7 @@ impl Drop for SigningIn {
     }
 }
 
-fn sign_in_error(e: OAuthError) -> CommandError {
+pub(crate) fn sign_in_error(e: OAuthError) -> CommandError {
     match e {
         OAuthError::Canceled => CommandError::new("canceled", e.to_string()),
         other => CommandError::new("sign_in", other.to_string()),
@@ -304,7 +307,7 @@ fn sign_in_error(e: OAuthError) -> CommandError {
 /// The provider and client id a new sign-in uses — this build's, or the
 /// user's own registration — or the refusal that says this copy can't sign
 /// in with it yet.
-fn client_for(state: &crate::AppState, auth: Auth) -> CommandResult<(oauth::Provider, String)> {
+pub(crate) fn client_for(state: &crate::AppState, auth: Auth) -> CommandResult<(oauth::Provider, String)> {
     let name = provider_of(auth)?.name;
     state
         .mail_credentials
@@ -314,7 +317,7 @@ fn client_for(state: &crate::AppState, auth: Auth) -> CommandResult<(oauth::Prov
 
 /// Sign in with the provider in the user's browser: stoppable with
 /// `cancel_mail_sign_in`, and given up after five minutes.
-async fn browser_sign_in(
+pub(crate) async fn browser_sign_in(
     app: &tauri::AppHandle,
     signing_in: &std::sync::Arc<SigningIn>,
     provider: oauth::Provider,
@@ -362,7 +365,7 @@ async fn probe_signed_in(
         })
 }
 
-fn no_refresh_token(provider: &oauth::Provider) -> CommandError {
+pub(crate) fn no_refresh_token(provider: &oauth::Provider) -> CommandError {
     CommandError::new(
         "sign_in",
         format!(
@@ -531,13 +534,17 @@ pub async fn delete_source(
     source_id: String,
 ) -> CommandResult<mimic_core::privacy::DeletionReport> {
     crate::commands::voice::stop_measuring(&state);
-    let was_slack =
-        state.db.get_source(&source_id)?.is_some_and(|s| s.connector == mimic_core::sources::slack::CONNECTOR);
+    let connector = state.db.get_source(&source_id)?.map(|s| s.connector);
     let report = state.db.delete_source_and_contents(&source_id)?;
-    // A workspace's token goes with it.
-    if was_slack {
-        if let Err(e) = state.secrets.remove(&mimic_core::sources::slack::secret_key(&source_id)) {
-            tracing::warn!(target: "secrets", error = %e, "a removed workspace's token could not be removed");
+    // A workspace's token, or a Teams sign-in, goes with it.
+    let key = match connector.as_deref() {
+        Some(mimic_core::sources::slack::CONNECTOR) => Some(mimic_core::sources::slack::secret_key(&source_id)),
+        Some(mimic_core::sources::teams::CONNECTOR) => Some(mimic_core::sources::teams::secret_key(&source_id)),
+        _ => None,
+    };
+    if let Some(key) = key {
+        if let Err(e) = state.secrets.remove(&key) {
+            tracing::warn!(target: "secrets", error = %e, "a removed source's sign-in could not be removed");
         }
         return Ok(report);
     }

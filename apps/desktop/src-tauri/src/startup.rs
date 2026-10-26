@@ -141,6 +141,32 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         mimic_core::sources::imap::CheckMailboxExecutor::shared(mail_credentials.clone()),
         // A Slack workspace's direct messages, with the user's own token read
         // from the secret store per run (0.10.0-alpha.64).
+        // Teams chats, through Graph, with the sign-in kept for each
+        // (0.10.0-alpha.67), as the Microsoft registration mailboxes use.
+        mimic_core::sources::teams::CheckTeamsExecutor::shared(std::sync::Arc::new(
+            mimic_core::sources::teams::Access::new(
+                mimic_core::sources::teams::provider(),
+                {
+                    let credentials = mail_credentials.clone();
+                    std::sync::Arc::new(move || {
+                        credentials.sign_in_with(mimic_core::sources::imap::Auth::Microsoft).map(|(_, client)| client)
+                    })
+                },
+                {
+                    let secrets = secrets.clone();
+                    std::sync::Arc::new(move |key: &str| {
+                        use mimic_core::providers::SecretStore;
+                        secrets.get(key).filter(|t| !t.is_empty())
+                    })
+                },
+                {
+                    let secrets = secrets.clone();
+                    std::sync::Arc::new(move |key: &str, value: &str| {
+                        secrets.set(key, value).map_err(|e| e.to_string())
+                    })
+                },
+            ),
+        )),
         mimic_core::sources::slack::CheckSlackExecutor::shared({
             let secrets = secrets.clone();
             std::sync::Arc::new(move |key: &str| {
@@ -173,6 +199,9 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     }
     if let Err(e) = mimic_core::sources::slack::recover(&db) {
         tracing::warn!(target: "mail", error = %e, "could not reset interrupted Slack checks");
+    }
+    if let Err(e) = mimic_core::sources::teams::recover(&db) {
+        tracing::warn!(target: "mail", error = %e, "could not reset interrupted Teams checks");
     }
     if interrupted > 0 {
         tracing::warn!(target: "jobs", interrupted, requeued, "recovered interrupted jobs");
@@ -383,7 +412,8 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                         let new_messages = ev.status == "completed"
                             && (ev.kind == mimic_core::import::JOB_KIND
                                 || ev.kind == mimic_core::sources::imap::JOB_KIND
-                                || ev.kind == mimic_core::sources::slack::JOB_KIND);
+                                || ev.kind == mimic_core::sources::slack::JOB_KIND
+                                || ev.kind == mimic_core::sources::teams::JOB_KIND);
                         let measuring = new_messages && crate::commands::voice::measure_what_changed(&st.db, &st.jobs);
                         // So does a model's reading of what they are doing,
                         // however it ended: what it read is kept.
@@ -481,6 +511,21 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                         }
                     }
                     Err(e) => tracing::warn!(target: "mail", error = %e, "could not work out which workspaces are due"),
+                }
+                // Teams accounts, on the same interval.
+                match mimic_core::sources::teams::due_now(&st.db) {
+                    Ok(ids) => {
+                        for id in ids {
+                            if let Err(e) =
+                                st.jobs.enqueue(mimic_core::sources::teams::JOB_KIND, json!({ "sourceId": id }))
+                            {
+                                tracing::warn!(target: "mail", error = %e, "could not queue a Teams check");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(target: "mail", error = %e, "could not work out which Teams accounts are due")
+                    }
                 }
             }
         });

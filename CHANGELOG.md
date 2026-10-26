@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.67] — 2026-10-26
+
+Teams.
+
+### Added
+
+- **Your Microsoft Teams chats.** Under Your mail, **Connect Teams** signs you in with Microsoft in your browser — a work or school account — and I read your one-to-one and group chats, both sides, and check for new messages as often as I check your mail. Meeting chats and channels aren't read, and nothing in Teams changes. A personal Microsoft account's Teams can't be read this way, and I say so. **Sign in again** keeps what I've read when Microsoft asks you to.
+
 ## [0.10.0-alpha.66] — 2026-10-26
 
 Replying in Slack by myself.

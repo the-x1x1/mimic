@@ -80,6 +80,32 @@ export function useConnectSlack() {
   });
 }
 
+/** Sign in for Teams and connect it; a check follows by itself (0.10.0-alpha.67). */
+export function useConnectTeams() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => ipc.connectTeams(),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.onboarding, qk.dashboard, qk.settings]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
+/** Sign a connected Teams account in again; a check follows by itself. */
+export function useSignInTeamsAgain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceId: string) => ipc.signInTeamsAgain(sourceId),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.dashboard]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
 /** A connected workspace's new token; a check follows by itself. */
 export function useSetSlackToken() {
   const qc = useQueryClient();

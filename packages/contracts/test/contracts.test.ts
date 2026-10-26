@@ -988,6 +988,17 @@ describe("connecting a mailbox", () => {
     expect(mailboxAuth({ connector: "mbox", config: {} })).toBeNull();
   });
 
+  it("reads a connected Teams account", async () => {
+    const { teamsAccount } = await import("../src");
+    const config = { userId: "u1", user: "C Haynes", email: "c@formicaria.example", marks: {} };
+    expect(teamsAccount({ connector: "teams", config })).toEqual({
+      user: "C Haynes",
+      email: "c@formicaria.example",
+      lastCheckedAt: null,
+    });
+    expect(teamsAccount({ connector: "slack", config })).toBeNull();
+  });
+
   it("knows a Slack user token and reads a connected workspace", async () => {
     const { isSlackUserToken, slackWorkspace, SLACK_MANIFEST, SLACK_USER_SCOPES } =
       await import("../src");

@@ -14,5 +14,6 @@ pub mod settings;
 pub mod sign_in_setup;
 pub mod slack;
 pub mod sources;
+pub mod teams;
 pub mod updater;
 pub mod voice;
