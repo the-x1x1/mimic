@@ -101,6 +101,8 @@ impl From<mimic_core::sending::SendError> for CommandError {
             SendError::Smtp(s) => Self::new("send_failed", s.to_string()),
             SendError::Message(m) => Self::new("invalid", m.to_string()),
             SendError::Cannot(why) => Self::new("cannot_send", why),
+            SendError::Slack(why) => Self::new("send_failed", why),
+            SendError::SlackUnsure(why) => Self::new("send_unsure", why),
         }
     }
 }

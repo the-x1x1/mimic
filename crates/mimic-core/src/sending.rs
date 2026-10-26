@@ -50,6 +50,8 @@ use crate::sources::imap::{self, Credentials, ImapSourceConfig};
 use crate::sources::outgoing::{self, Mailbox, Outgoing, OutgoingError};
 use crate::sources::smtp::{self, SmtpAccount, SmtpError};
 
+pub mod slack;
+
 /// Why a reply can't be sent from here.
 pub const NO_MAILBOX: &str =
     "To send from here, connect your mailbox under Your mail. Until then, Use this copies the reply for you to send.";
@@ -81,6 +83,12 @@ pub enum SendError {
     Message(#[from] OutgoingError),
     #[error(transparent)]
     Db(#[from] DbError),
+    /// Slack didn't take it (0.10.0-alpha.65).
+    #[error("{0}")]
+    Slack(String),
+    /// Slack's answer was lost: it may have gone.
+    #[error("{0}")]
+    SlackUnsure(String),
 }
 
 impl SendError {
@@ -88,6 +96,7 @@ impl SendError {
     pub fn may_have_gone(&self) -> bool {
         match self {
             SendError::Smtp(e) => e.may_have_gone(),
+            SendError::SlackUnsure(_) => true,
             SendError::Cannot(why) => why == PANICKED,
             _ => false,
         }
@@ -109,6 +118,15 @@ pub struct SendingMailbox {
     pub why_not: Option<String>,
     /// What goes under a reply sent through it (0.10.0-alpha.36).
     pub signature: Option<String>,
+}
+
+/// Where a reply goes: out of a mailbox, or into Slack (0.10.0-alpha.65).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReplyKind {
+    #[default]
+    Mail,
+    Slack,
 }
 
 /// Everything the Send panel shows before anything goes.
@@ -135,6 +153,10 @@ pub struct ReplyEnvelope {
     /// A reply to it held to go by itself (`crate::autoreply`), which can be
     /// stopped or sent now.
     pub held: Option<OutboxEntry>,
+    /// Mail, or Slack: for Slack, `mailboxes` is the workspace, `to` the
+    /// conversation, and there is no subject (`slack::envelope_for`).
+    #[serde(default)]
+    pub kind: ReplyKind,
 }
 
 /// What the user approved: sent exactly as given.
@@ -197,6 +219,12 @@ fn is_users(mine: &std::collections::HashSet<String>, address: &str) -> bool {
 pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError> {
     let draft = db.get_draft(draft_id)?.ok_or_else(|| SendError::Cannot(DRAFT_GONE.into()))?;
     let incoming = answered(db, &draft)?;
+    // A message read from Slack is answered in Slack.
+    if let Some(m) = &incoming {
+        if let Some(envelope) = slack::envelope_for(db, &draft, m)? {
+            return Ok(envelope);
+        }
+    }
     let held = db.held_outgoing_for_draft(&draft.id)?;
     let mut mailboxes = sending_mailboxes(db)?;
     if let Some(m) = &incoming {
@@ -235,6 +263,7 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
         subject,
         why_not,
         held,
+        kind: ReplyKind::Mail,
     })
 }
 

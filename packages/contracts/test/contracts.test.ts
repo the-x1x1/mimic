@@ -1480,6 +1480,9 @@ describe("what was sent says where it went and whether it got there", () => {
       ),
     ).toMatch(/^Stopped before it went to .+\. Rehearsing: I'd have sent this/);
     expect(describeOutboxEntry(entry({ status: "unsure" }))).toMatch(/Look in your Sent folder/);
+    expect(
+      describeOutboxEntry(entry({ status: "unsure", fromAddress: "slack:T1:U1", to: ["Ada"] })),
+    ).toBe("May have gone to Ada — I couldn't tell. Look in the conversation in Slack.");
   });
 
   it("names who else a reply was copied to", () => {

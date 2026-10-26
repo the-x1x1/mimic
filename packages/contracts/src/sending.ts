@@ -92,6 +92,12 @@ export const ReplyEnvelope = z.object({
   whyNot: z.string().nullable(),
   /** A reply to it held to go by itself, which can be stopped or sent now. */
   held: OutboxEntry.nullable(),
+  /**
+   * Out of a mailbox, or into Slack (0.10.0-alpha.65): for Slack the one
+   * "mailbox" is the workspace, `to` is the conversation, and there is no
+   * subject. Absent is mail.
+   */
+  kind: z.enum(["mail", "slack"]).optional(),
 });
 export type ReplyEnvelope = z.infer<typeof ReplyEnvelope>;
 
@@ -138,7 +144,9 @@ export function describeOutboxEntry(e: OutboxEntry): string {
         ? `Stopped before it went to ${to}. ${e.error}`
         : `Stopped before it went to ${to}.`;
     case "unsure":
-      return `May have gone to ${to} — I couldn't tell. Look in your Sent folder.`;
+      return e.fromAddress.startsWith("slack:")
+        ? `May have gone to ${to} — I couldn't tell. Look in the conversation in Slack.`
+        : `May have gone to ${to} — I couldn't tell. Look in your Sent folder.`;
     case "failed":
       return e.error ? `Didn't go to ${to}: ${e.error}` : `Didn't go to ${to}.`;
   }

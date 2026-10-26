@@ -246,7 +246,7 @@ export function slackWorkspace(source: {
  * What a Slack app made for Mimic asks for, as a manifest to paste into
  * "Create New App → From a manifest": user scopes only, no bot, and a token
  * that doesn't expire. `chat:write` is there for sending a reply the user
- * approves; nothing is sent yet.
+ * approves (0.10.0-alpha.65).
  */
 export const SLACK_USER_SCOPES = [
   "im:history",
