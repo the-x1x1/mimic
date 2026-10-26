@@ -99,6 +99,7 @@ pub fn import_source(
         source_id: source_id.to_string(),
         default_channel: source.channel.clone(),
         joins_by_message_id: joins_by_message_id(&source.connector),
+        same_ids: same_ids(&source.connector),
         user_ids,
         participants: HashMap::new(),
         summary: ImportSummary::default(),
@@ -163,6 +164,7 @@ impl<'a> Importer<'a> {
                 source_id: source_id.to_string(),
                 default_channel: source.channel.clone(),
                 joins_by_message_id: joins_by_message_id(&source.connector),
+                same_ids: same_ids(&source.connector),
                 user_ids,
                 participants: HashMap::new(),
                 summary: ImportSummary::default(),
@@ -226,11 +228,23 @@ fn joins_by_message_id(connector: &str) -> bool {
     MESSAGE_ID_CONNECTORS.contains(&connector)
 }
 
+/// Connectors whose message ids are the same in every source of theirs —
+/// one Telegram chat exported, then the whole account; two of Meta's
+/// downloads (0.10.0-alpha.61) — so a conversation is joined, and a message
+/// kept once, across them, as mail is by its Message-ID.
+pub const SAME_IDS_CONNECTORS: [&str; 2] = ["telegram", "meta"];
+
+fn same_ids(connector: &str) -> Option<String> {
+    SAME_IDS_CONNECTORS.contains(&connector).then(|| connector.to_string())
+}
+
 struct ImportState<'a> {
     db: &'a Db,
     source_id: String,
     default_channel: String,
     joins_by_message_id: bool,
+    /// The connector, when its ids are the same across its sources.
+    same_ids: Option<String>,
     user_ids: HashSet<String>,
     /// Author identity key -> participant id (or `None` for the user).
     participants: HashMap<String, Option<String>>,
@@ -265,6 +279,8 @@ impl ImportState<'_> {
                 }
             }
             self.db.email_conversation_holding(&wanted)?
+        } else if let Some(connector) = &self.same_ids {
+            self.db.conversation_holding_in(connector, &ids)?
         } else {
             None
         };
@@ -277,8 +293,13 @@ impl ImportState<'_> {
         // The same message imported through another source (an export and
         // the connected mailbox it came from) is one message, not two: two
         // copies would count the user's own writing twice.
-        let elsewhere =
-            if is_email { self.db.email_ids_in_other_sources(&self.source_id, &ids)? } else { HashSet::new() };
+        let elsewhere = if is_email {
+            self.db.email_ids_in_other_sources(&self.source_id, &ids)?
+        } else if let Some(connector) = &self.same_ids {
+            self.db.ids_in_other_sources_of(connector, &self.source_id, &ids)?
+        } else {
+            HashSet::new()
+        };
         // What this source has stored already — an earlier import of the same
         // file, an earlier check of the same mailbox — is known before anyone
         // is attributed for it: a copy whose author reads differently this
@@ -895,6 +916,49 @@ mod tests {
         let waiting: Vec<String> = db.threads_awaiting_reply(10).unwrap().into_iter().map(|t| t.last_message).collect();
         assert_eq!(waiting, vec!["Can you send the numbers?".to_string()], "the vacation reply hides nothing");
         assert_eq!(db.count_self_messages(None, None).unwrap(), 1, "only what the user wrote, if only for being away");
+    }
+
+    #[test]
+    fn a_chat_imported_again_through_a_second_source_is_one_conversation_kept_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let chat = |extra: &str| {
+            format!(
+                r#"{{ "name": "Ada", "type": "personal_chat", "id": 42, "messages": [
+                  {{ "id": 1, "type": "message", "date_unixtime": "1770110040", "from": "Ada", "from_id": "user42", "text": "lunch?" }},
+                  {{ "id": 2, "type": "message", "date_unixtime": "1770110400", "from": "C", "from_id": "user7", "text": "yes" }}{extra} ] }}"#
+            )
+        };
+        // One chat exported first, then the whole account, with one more message.
+        let one = dir.path().join("one.json");
+        std::fs::write(&one, chat("")).unwrap();
+        let later = r#", { "id": 3, "type": "message", "date_unixtime": "1770110700", "from": "Ada", "from_id": "user42", "text": "see you" }"#;
+        let all = dir.path().join("all.json");
+        std::fs::write(
+            &all,
+            format!(r#"{{ "personal_information": {{ "user_id": 7 }}, "chats": {{ "list": [ {} ] }} }}"#, chat(later)),
+        )
+        .unwrap();
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::AccountId, "telegram:user7").unwrap();
+        let source = |path: &Path| {
+            db.create_source(&NewSource {
+                connector: "telegram".into(),
+                name: "Telegram".into(),
+                channel: "chat".into(),
+                location: Some(path.to_string_lossy().into()),
+                config: serde_json::Value::Null,
+            })
+            .unwrap()
+            .id
+        };
+        let (first, second) = (source(&one), source(&all));
+        assert_eq!(run(&db, &first).unwrap().inserted, 2);
+        let again = run(&db, &second).unwrap();
+        assert_eq!((again.inserted, again.duplicates), (1, 2), "only the new message");
+        let conversations: i64 = db.conn().query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0)).unwrap();
+        assert_eq!(conversations, 1, "the same chat, once");
+        assert_eq!(db.count_self_messages(None, None).unwrap(), 1, "the user's reply, counted once");
     }
 
     #[test]
