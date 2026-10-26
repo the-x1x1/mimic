@@ -35,6 +35,8 @@ export const Settings = z.object({
   "notify.enabled": z.boolean(),
   /** The shortcut that opens Write on what the clipboard holds; empty is off. */
   "anywhere.shortcut": z.string(),
+  /** Seconds a reply waits after Send it, to be taken back; 0 is at once (0.10.0-alpha.40). */
+  "send.undoSeconds": z.number(),
 });
 export type Settings = z.infer<typeof Settings>;
 export type SettingKey = keyof Settings;
@@ -49,6 +51,9 @@ export const ANYWHERE_SHORTCUTS = [
   "Ctrl+Shift+Alt+R",
   "Ctrl+Shift+Alt+Space",
 ] as const;
+
+/** The waits Settings offers before a reply the user sent goes, in seconds; 0 is at once. */
+export const UNDO_CHOICES = [0, 5, 10, 30] as const;
 
 /** The waiting windows Settings offers, in days; 0 is any age. */
 export const WAITING_WINDOWS = [7, 14, 30, 90, 0] as const;

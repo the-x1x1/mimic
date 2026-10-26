@@ -1,7 +1,8 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button, InlineError } from "@mimic/ui";
 import { listAddresses, sendMayHaveGone, type Draft, type ReplyEnvelope } from "@mimic/contracts";
 import { useSendReply } from "@/hooks/useSending";
+import { useSettings } from "@/hooks/useSystem";
 import { toast } from "@/state/toast";
 
 /**
@@ -15,6 +16,11 @@ import { toast } from "@/state/toast";
  * for them can be chosen instead. A reply goes to the person who wrote, and
  * to the others on their message only when ticked under **Copy in**
  * (`othersOnIt`, none ticked to begin with), and says which.
+ *
+ * **Send it** waits the seconds the user chose (`send.undoSeconds`, five
+ * unless changed) before anything goes, with **Don't send it** to take it
+ * back (0.10.0-alpha.40). Leaving the panel in that time sends nothing, and
+ * says so.
  */
 export function SendPanel({
   draft,
@@ -32,6 +38,20 @@ export function SendPanel({
 }) {
   const send = useSendReply();
   const id = useId();
+  const settings = useSettings();
+  const wait = settings.data?.["send.undoSeconds"] ?? 5;
+  // The countdown before it goes: seconds left, or null when not counting.
+  const [left, setLeft] = useState<number | null>(null);
+  const counting = useRef<{ timer: number | null }>({ timer: null });
+  useEffect(() => {
+    const c = counting.current;
+    return () => {
+      if (c.timer !== null) {
+        window.clearInterval(c.timer);
+        toast.info("Not sent", "You left before it went, so it didn't.");
+      }
+    };
+  }, []);
   const able = envelope.mailboxes.filter((m) => m.fromAddress !== null);
   const [sourceId, setSourceId] = useState(envelope.mailbox ?? able[0]?.sourceId ?? "");
   // Each choice is a list: where they asked for replies may be several.
@@ -49,6 +69,35 @@ export function SendPanel({
   const from = able.find((m) => m.sourceId === sourceId);
   const code = (send.error as { code?: string } | null)?.code;
   const unsure = sendMayHaveGone(code);
+
+  function stopCounting() {
+    if (counting.current.timer !== null) window.clearInterval(counting.current.timer);
+    counting.current.timer = null;
+    setLeft(null);
+  }
+
+  /** Send it: after the wait, as it stood when pressed — or at once. */
+  function sendIt() {
+    const go = () =>
+      void confirm().catch(() => {
+        // Said below, from the mutation's own error.
+      });
+    if (wait <= 0) {
+      go();
+      return;
+    }
+    let n = wait;
+    setLeft(n);
+    counting.current.timer = window.setInterval(() => {
+      n -= 1;
+      if (n > 0) {
+        setLeft(n);
+        return;
+      }
+      stopCounting();
+      go();
+    }, 1000);
+  }
 
   async function confirm() {
     const entry = await send.mutateAsync({
@@ -77,7 +126,12 @@ export function SendPanel({
           From
         </label>
         {able.length > 1 ? (
-          <select id={`${id}-from`} value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+          <select
+            id={`${id}-from`}
+            value={sourceId}
+            disabled={left !== null}
+            onChange={(e) => setSourceId(e.target.value)}
+          >
             {able.map((m) => (
               <option key={m.sourceId} value={m.sourceId}>
                 {m.fromAddress}
@@ -96,6 +150,7 @@ export function SendPanel({
           <select
             id={`${id}-to`}
             value={choice}
+            disabled={left !== null}
             onChange={(e) => setChoice(Number(e.target.value))}
           >
             {choices.map((c, i) => (
@@ -123,6 +178,7 @@ export function SendPanel({
                 <input
                   type="checkbox"
                   checked={cc.length === others.length}
+                  disabled={left !== null}
                   onChange={(e) => setTicked(new Set(e.target.checked ? others : []))}
                 />
                 <span>Everyone else on their message</span>
@@ -133,6 +189,7 @@ export function SendPanel({
                 <input
                   type="checkbox"
                   checked={ticked.has(a)}
+                  disabled={left !== null}
                   onChange={(e) => {
                     const next = new Set(ticked);
                     if (e.target.checked) next.add(a);
@@ -161,6 +218,7 @@ export function SendPanel({
           type="text"
           value={subject}
           maxLength={300}
+          disabled={left !== null}
           onChange={(e) => setSubject(e.target.value)}
         />
       </div>
@@ -178,22 +236,38 @@ export function SendPanel({
           {unsure ? `${send.error.message} I won't send it again by myself.` : send.error.message}
         </InlineError>
       ) : null}
-      <div className="thread__actions">
-        <Button
-          variant="primary"
-          onClick={() =>
-            void confirm().catch(() => {
-              // Said above, from the mutation's own error.
-            })
-          }
-          disabled={send.isPending || unsure || to.length === 0 || !sourceId || !text.trim()}
-        >
-          {send.isPending ? "Sending…" : "Send it"}
-        </Button>
-        <Button variant="ghost" onClick={onCancel} disabled={send.isPending}>
-          Not yet
-        </Button>
-      </div>
+      {left !== null ? (
+        <div className="thread__actions" role="status">
+          <span>
+            Sending in {left} second{left === 1 ? "" : "s"}&hellip;
+          </span>
+          <Button variant="primary" onClick={stopCounting}>
+            Don&rsquo;t send it
+          </Button>
+        </div>
+      ) : (
+        <div className="thread__actions">
+          <Button
+            variant="primary"
+            onClick={sendIt}
+            // Not before the wait the user chose is known: a press then
+            // would count down five seconds where they chose none.
+            disabled={
+              send.isPending ||
+              settings.isPending ||
+              unsure ||
+              to.length === 0 ||
+              !sourceId ||
+              !text.trim()
+            }
+          >
+            {send.isPending ? "Sending…" : "Send it"}
+          </Button>
+          <Button variant="ghost" onClick={onCancel} disabled={send.isPending}>
+            Not yet
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

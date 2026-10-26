@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.40] — 2026-10-26
+
+A moment to take it back.
+
+### Added
+
+- **Don't send it.** When you press Send it, I wait five seconds before anything goes, counting down, with **Don't send it** to take it back. Choose the wait under Checking your mail in Settings — 5, 10 or 30 seconds, or not at all. Leave the panel while it counts and nothing goes, and I say so.
+
 ## [0.10.0-alpha.39] — 2026-10-26
 
 Only at the hours you choose.

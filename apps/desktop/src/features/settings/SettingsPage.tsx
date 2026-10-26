@@ -3,6 +3,7 @@ import { Badge, Button, Card, Field, InlineError } from "@mimic/ui";
 import {
   ANTHROPIC_SECRET_KEY,
   IDENTIFIER_LABELS,
+  UNDO_CHOICES,
   WAITING_WINDOWS,
   describeCredentials,
   describeWaitingWindow,
@@ -631,6 +632,19 @@ function MailSection() {
           <option value={15}>every 15 minutes</option>
           <option value={30}>every 30 minutes</option>
           <option value={60}>every hour</option>
+        </select>
+      </label>
+      <label className="row gap-2">
+        <span>When you press Send it, wait</span>
+        <select
+          value={settings.data?.["send.undoSeconds"] ?? 5}
+          onChange={(e) => ipc.setSetting("send.undoSeconds", Number(e.target.value))}
+        >
+          {UNDO_CHOICES.map((s) => (
+            <option key={s} value={s}>
+              {s === 0 ? "not at all" : `${s} seconds, to take it back`}
+            </option>
+          ))}
         </select>
       </label>
     </Card>

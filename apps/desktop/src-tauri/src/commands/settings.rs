@@ -37,8 +37,15 @@ pub fn defaults() -> Map<String, Value> {
     m.insert(crate::background::NOTIFY.into(), json!(true));
     // The shortcut that opens Write on what the clipboard holds; empty is off.
     m.insert(crate::anywhere::SETTING.into(), json!(""));
+    // Seconds a reply the user sent waits, to be taken back (0.10.0-alpha.40).
+    m.insert(UNDO_SECONDS.into(), json!(5));
     m
 }
+
+/// How long a reply waits after **Send it**, to be taken back; at most
+/// `UNDO_MOST` seconds.
+pub const UNDO_SECONDS: &str = "send.undoSeconds";
+const UNDO_MOST: i64 = 30;
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, SharedState>) -> CommandResult<Map<String, Value>> {
@@ -98,6 +105,12 @@ fn check(key: &str, value: &Value) -> CommandResult<()> {
         crate::anywhere::accelerator(value.as_str().unwrap_or_default())
             .map_err(|why| CommandError::new("invalid_setting", why))?;
     }
+    if key == UNDO_SECONDS && !value.as_i64().is_some_and(|s| (0..=UNDO_MOST).contains(&s)) {
+        return Err(CommandError::new(
+            "invalid_setting",
+            format!("{key} is a whole number of seconds up to {UNDO_MOST}, 0 for at once"),
+        ));
+    }
     if key == "updates.channel" && !matches!(value.as_str(), Some("stable") | Some("beta")) {
         return Err(CommandError::new("invalid_setting", "updates.channel must be stable or beta"));
     }
@@ -136,5 +149,16 @@ mod tests {
             assert!(check(key, &bad).is_err(), "{bad}");
         }
         assert!(check("waiting.somethingElse", &json!(1)).is_err());
+    }
+
+    #[test]
+    fn a_reply_waits_whole_seconds_up_to_half_a_minute_to_be_taken_back() {
+        assert_eq!(defaults().get(UNDO_SECONDS), Some(&json!(5)));
+        for ok in [json!(0), json!(5), json!(30)] {
+            assert!(check(UNDO_SECONDS, &ok).is_ok(), "{ok}");
+        }
+        for bad in [json!(-1), json!(31), json!(2.5), json!("5")] {
+            assert!(check(UNDO_SECONDS, &bad).is_err(), "{bad}");
+        }
     }
 }
