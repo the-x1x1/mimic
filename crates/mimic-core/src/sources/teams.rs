@@ -186,6 +186,15 @@ impl GraphApi {
         })
     }
 
+    /// Whether this sign-in can do what a check does, asking for one of
+    /// each: who it is, and the first of their chats (0.10.0-alpha.69).
+    pub fn check(&self) -> Result<(Me, usize), TeamsError> {
+        let me = self.me()?;
+        let v = self.get(&format!("{}/me/chats?$top=1", self.base))?;
+        let chats = v.get("value").and_then(Value::as_array).map_or(0, Vec::len);
+        Ok((me, chats))
+    }
+
     /// The user's chats, with their members.
     pub fn chats(&self) -> Result<Vec<Chat>, TeamsError> {
         let mut out = Vec::new();

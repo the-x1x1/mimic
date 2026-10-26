@@ -13,6 +13,8 @@ const native = vi.hoisted(() => ({
   startWithWindows: vi.fn(),
   testMailboxReading: vi.fn(),
   testMailboxSending: vi.fn(),
+  testSlack: vi.fn(),
+  testTeams: vi.fn(),
   providerState: vi.fn(),
   checkProvider: vi.fn(),
 }));
@@ -82,6 +84,32 @@ describe("replying for you, set up in one place", () => {
     );
     expect(await screen.findByText("I write replies only when you ask.")).toBeInTheDocument();
     expect(await screen.findByText("Every reply waits for you to send it.")).toBeInTheDocument();
+  });
+
+  it("lists Slack and Teams, and checks them with the rest, sending nothing", async () => {
+    native.settings.mockResolvedValue({ "assist.autoDraft": true });
+    native.sources.mockResolvedValue([
+      { ...mailbox("s7", "Acme (Slack)"), connector: "slack", channel: "chat" },
+      { ...mailbox("s8", "c@formicaria.example (Teams)"), connector: "teams", channel: "chat" },
+    ]);
+    native.autoReply.mockResolvedValue(rules(false));
+    native.testSlack.mockResolvedValue("Read your direct messages in Acme as c. Nothing was sent.");
+    native.testTeams.mockRejectedValue(new Error("Microsoft wants you to sign in to Teams again."));
+    native.providerState.mockResolvedValue({ providers: [], active: null });
+    renderIt();
+    const list = await screen.findByRole("list", { name: "Replying for you" });
+    expect(await within(list).findByText("No mailbox is connected.")).toBeInTheDocument();
+    expect(
+      within(list).getByText("Acme (Slack) is connected: replies to it go in as you, from here."),
+    ).toBeInTheDocument();
+    const check = await screen.findByRole("button", { name: "Check it all now (sends nothing)" });
+    await waitFor(() => expect(check).toBeEnabled());
+    fireEvent.click(check);
+    const found = await screen.findByRole("list", { name: "What the check found" });
+    expect(await within(found).findByText(/Read your direct messages in Acme/)).toBeInTheDocument();
+    expect(await within(found).findByText(/sign in to Teams again/)).toBeInTheDocument();
+    expect(native.testSlack).toHaveBeenCalledWith("s7");
+    expect(native.testTeams).toHaveBeenCalledWith("s8");
   });
 
   it("says which mailboxes can send, and what runs by itself", async () => {
