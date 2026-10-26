@@ -49,7 +49,7 @@ export function SourcesPage() {
       {sources.isSuccess && sources.data.length === 0 ? (
         <EmptyState
           title="Start with messages you already have"
-          body="Import a WhatsApp chat, Discord data package, email export (.mbox), or Mimic JSON file. No account connection is required. Only import conversations you own or have permission to process."
+          body="Import a WhatsApp chat, Telegram export, Discord data package, email export (.mbox), or Mimic JSON file. No account connection is required. Only import conversations you own or have permission to process."
           primary={
             <div className="row gap-2">
               <Button variant="primary" onClick={() => setAdding(true)}>
