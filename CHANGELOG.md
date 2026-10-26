@@ -2,6 +2,16 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.56] — 2026-10-26
+
+One reply, even from two computers.
+
+### Changed
+
+- Just before a reply goes by itself, I look in that mailbox's Sent folder for a reply to the same message — reading only who each recent one answers, opening none. If there's one there — sent by me on your other computer, or by you from your phone since I last read the mailbox — mine doesn't go, and the held reply says why. If I can't look, it waits up to half an hour and I try again; then, or at once if the server won't let me look, it's left for you.
+- A reply I sent by myself is now marked in its Message-ID, a header nobody reads, in a way that names nothing. When I read one back from the Sent folder on another computer, I know it as mine: it answers the conversation, and I don't learn from it as your writing. Your own vacation replies carry no mark, so they still hide nothing waiting for you.
+- I don't reply by myself to mail that came without a Message-ID: a reply couldn't say what it answers.
+
 ## [0.10.0-alpha.55] — 2026-10-26
 
 Answering from anywhere, said in Settings.
@@ -16,7 +26,7 @@ Not when you were only copied in.
 
 ### Changed
 
-- I reply by myself only to mail sent to you, not mail you were only copied in on, where someone else was the one asked. That waits for you, and says why.
+- I reply by myself only to mail sent to you, not mail you were only copied in on, where someone else was the one asked. That waits for you.
 
 ## [0.10.0-alpha.53] — 2026-10-26
 
@@ -24,7 +34,7 @@ Not without reading the attachment.
 
 ### Changed
 
-- I don't reply by myself to a message that came with an attachment or an invitation — a contract to sign, a photo, a meeting request — since my reply couldn't have read it — including a PDF or photo Apple's Mail sends inline and a forwarded message, though not a logo in someone's signature or the signature of signed mail. It waits for you, and says why. Mail I read before this version waits for you too, since I can't tell.
+- I don't reply by myself to a message that came with an attachment or an invitation — a contract to sign, a photo, a meeting request — since my reply couldn't have read it — including a PDF or photo Apple's Mail sends inline and a forwarded message, though not a logo in someone's signature or the signature of signed mail. It waits for you. Mail I read before this version waits for you too, since I can't tell.
 
 ## [0.10.0-alpha.52] — 2026-10-26
 

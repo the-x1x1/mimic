@@ -69,6 +69,11 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 /// position moves past them, so one of them cannot stall every check.
 const MAX_MESSAGE_BYTES: usize = 25 * 1024 * 1024;
 
+/// How many of the Sent folder's newest messages `answering` reads the
+/// reply headers of, and how many at a time.
+const MOST_ANSWERING: usize = 1000;
+const ANSWERING_CHUNK: usize = 200;
+
 const SENT_NAMES: [&str; 6] = ["sent", "sent items", "sent messages", "sent mail", "[gmail]/sent mail", "inbox.sent"];
 
 /// How to reach the server. Stored in `sources.config`; the password is not.
@@ -616,6 +621,37 @@ impl<S: Read + Write> Session<S> {
         Ok((validity, exists))
     }
 
+    /// Whether the open folder holds a message answering `message_id` — one
+    /// whose `In-Reply-To` or `References` names it — among the newest
+    /// `MOST_ANSWERING` it has had since `since` (the server's own date,
+    /// `SINCE`), reading those two headers only (`BODY.PEEK`), so nothing is
+    /// opened or marked (0.10.0-alpha.56). Not `SEARCH HEADER`: Exchange
+    /// searches only the headers a message had on its way, which a Sent copy
+    /// never had.
+    pub fn answering(&mut self, message_id: &str, since: chrono::NaiveDate) -> Result<bool, ImapError> {
+        let wanted = format!("<{}>", message_id.trim().trim_matches(['<', '>'])).to_lowercase();
+        let lines = self.command(&format!("UID SEARCH SINCE {}", since.format("%-d-%b-%Y")))?;
+        let mut uids: Vec<u32> = lines
+            .iter()
+            .filter_map(|l| l.text.strip_prefix("* SEARCH"))
+            .flat_map(|r| r.split_whitespace().filter_map(|n| n.parse::<u32>().ok()).collect::<Vec<_>>())
+            .collect();
+        uids.sort_unstable();
+        uids.dedup();
+        let newest = &uids[uids.len().saturating_sub(MOST_ANSWERING)..];
+        for chunk in newest.chunks(ANSWERING_CHUNK) {
+            let set = chunk.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+            let lines =
+                self.command(&format!("UID FETCH {set} (UID BODY.PEEK[HEADER.FIELDS (IN-REPLY-TO REFERENCES)])"))?;
+            // As a literal, as servers send it, or inline in the line.
+            let names = |bytes: &[u8]| String::from_utf8_lossy(bytes).to_lowercase().contains(&wanted);
+            if lines.iter().any(|l| names(l.text.as_bytes()) || l.literals.iter().any(|b| names(b))) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// UIDs strictly greater than `after`, ascending.
     pub fn uids_after(&mut self, after: u32) -> Result<Vec<u32>, ImapError> {
         let lines = self.command(&format!("UID SEARCH UID {}:*", after.saturating_add(1)))?;
@@ -954,6 +990,9 @@ impl Connection {
     pub fn uids_after(&mut self, after: u32) -> Result<Vec<u32>, ImapError> {
         with_session!(self, s => s.uids_after(after))
     }
+    pub fn answering(&mut self, message_id: &str, since: chrono::NaiveDate) -> Result<bool, ImapError> {
+        with_session!(self, s => s.answering(message_id, since))
+    }
     pub fn fetch(&mut self, uids: &[u32]) -> Result<Vec<(u32, Vec<u8>)>, ImapError> {
         with_session!(self, s => s.fetch(uids))
     }
@@ -1162,6 +1201,25 @@ pub struct ImapProbe {
     /// Messages in each folder that will be read.
     pub counts: Vec<(String, u32)>,
     pub warnings: Vec<String>,
+}
+
+/// Whether `folder` holds a reply to `message_id` — the Sent folder, asked
+/// just before a reply goes by itself, so one sent from Mimic on another
+/// computer, or by the user since the last check, is seen (0.10.0-alpha.56).
+/// Read-only: `EXAMINE`, a search by date and two headers of what it finds
+/// (`Session::answering`); nothing is opened.
+pub fn reply_in_folder(
+    account: &ImapAccount,
+    credential: &Credential,
+    folder: &str,
+    message_id: &str,
+    since: chrono::NaiveDate,
+) -> Result<bool, ImapError> {
+    let mut conn = Connection::open(account, credential)?;
+    conn.examine(folder)?;
+    let found = conn.answering(message_id, since)?;
+    conn.logout();
+    Ok(found)
 }
 
 pub fn probe(account: &ImapAccount, credential: &Credential) -> Result<ImapProbe, ImapError> {
@@ -2346,6 +2404,21 @@ mod tests {
                         format!("* CAPABILITY IMAP4rev1{idle} AUTH=XOAUTH2\r\n{tag} OK done\r\n")
                     } else if upper.starts_with("EXAMINE") {
                         format!("* 3 EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n{tag} OK [READ-ONLY] done\r\n")
+                    } else if upper.starts_with("UID SEARCH SINCE ") {
+                        format!("* SEARCH 5 6\r\n* SEARCH 7\r\n{tag} OK done\r\n")
+                    } else if upper.starts_with("UID FETCH ")
+                        && upper.contains("BODY.PEEK[HEADER.FIELDS (IN-REPLY-TO REFERENCES)]")
+                    {
+                        // 5 answers nothing here; 6 by its References, folded;
+                        // 7 by its In-Reply-To, sent inline.
+                        let six = "References: <first@x.example>\r\n <Answered@x.example>\r\n\r\n";
+                        format!(
+                            "* 1 FETCH (UID 5 BODY[HEADER.FIELDS (IN-REPLY-TO REFERENCES)] {{4}}\r\n\r\n\r\n)\r\n\
+                             * 2 FETCH (UID 6 BODY[HEADER.FIELDS (IN-REPLY-TO REFERENCES)] {{{}}}\r\n{six})\r\n\
+                             * 3 FETCH (UID 7 BODY[HEADER.FIELDS (IN-REPLY-TO REFERENCES)] \"In-Reply-To: <late@x.example>\")\r\n\
+                             {tag} OK done\r\n",
+                            six.len()
+                        )
                     } else if upper == "IDLE" && ends_at_once {
                         w.write_all(format!("+ idling\r\n{tag} OK IDLE terminated\r\n").as_bytes()).unwrap();
                         continue;
@@ -2444,6 +2517,30 @@ mod tests {
         let times = Watching { renew: Duration::from_secs(20), session: Duration::from_secs(60) };
         watch(&here(port), "INBOX", &pw("x"), times, &should_stop, &|_| {}, &mut arrived).unwrap();
         assert_eq!(arrivals.get(), 1);
+    }
+
+    #[test]
+    fn a_reply_in_the_sent_folder_is_found_by_what_it_answers() {
+        let (port, seen) = idle_server_saying(true, "", false);
+        let since = chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+        assert!(reply_in_folder(&here(port), &pw("x"), "Sent", "answered@x.example", since).unwrap(), "References");
+        assert!(reply_in_folder(&here(port), &pw("x"), "Sent", "<late@x.example>", since).unwrap(), "In-Reply-To");
+        assert!(!reply_in_folder(&here(port), &pw("x"), "Sent", "other@x.example", since).unwrap());
+        // Only reading, and only two headers.
+        let commands = seen.recv().unwrap();
+        assert!(commands.iter().any(|c| c.ends_with("EXAMINE \"Sent\"")), "{commands:?}");
+        assert!(commands.iter().any(|c| c.ends_with("UID SEARCH SINCE 1-Oct-2026")), "{commands:?}");
+        assert!(
+            commands
+                .iter()
+                .any(|c| c.ends_with("UID FETCH 5,6,7 (UID BODY.PEEK[HEADER.FIELDS (IN-REPLY-TO REFERENCES)])")),
+            "{commands:?}"
+        );
+        for c in &commands {
+            let verb = c.split_whitespace().nth(1).unwrap_or(c).to_ascii_uppercase();
+            assert!(["LOGIN", "CAPABILITY", "EXAMINE", "UID", "LOGOUT"].contains(&verb.as_str()), "{c}");
+            assert!(!c.to_ascii_uppercase().contains("BODY["), "nothing opened: {c}");
+        }
     }
 
     #[test]

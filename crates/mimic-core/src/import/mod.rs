@@ -339,7 +339,14 @@ impl ImportState<'_> {
                 sequence_index: first + i as i64,
                 body: raw.body.clone(),
                 reply_to_external_id: None,
-                metadata: if its_own.contains(&raw.external_id) {
+                // Or one Mimic sent on its own from another of the user's
+                // computers, read back from the Sent folder by the mark in its
+                // Message-ID (0.10.0-alpha.56). It answers the thread as theirs
+                // does, and isn't their writing either. A vacation responder's
+                // reply has no mark, and stays automated, so it hides nothing.
+                metadata: if its_own.contains(&raw.external_id)
+                    || (direction == Direction::Self_ && sources::outgoing::is_sent_on_its_own(&raw.external_id))
+                {
                     let mut m = raw.metadata.clone();
                     if let Some(map) = m.as_object_mut() {
                         map.remove("automated");
@@ -823,6 +830,71 @@ mod tests {
 
         let again = run(&db, &source).unwrap();
         assert_eq!((again.sent_folder_marked, again.automated_marked), (0, 0), "nothing is added twice");
+    }
+
+    #[test]
+    fn a_reply_mimic_sent_from_another_computer_answers_and_isnt_the_users_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        // Two threads, under subjects of their own: `mail`'s one subject
+        // would join the user's two replies, and so the threads, by it.
+        let mail = |id: &str, from: &str, time: &str, subject: &str, extra: &str, body: &str| {
+            format!(
+                "From x@x Mon Feb 02 09:00:00 2026\nFrom: {from}\nSubject: {subject}\nDate: Mon, 2 Feb 2026 {time}:00 +0000\nMessage-ID: <{id}>\n{extra}\n{body}\n\n"
+            )
+        };
+        let question = mail("q@example.com", "Ada <ada@example.com>", "09:00", "Tuesday", "", "Does Tuesday work?");
+        let other = mail("o@example.com", "Bob <bob@example.com>", "09:30", "Numbers", "", "Can you send the numbers?");
+        // Read back from the Sent folder: one Mimic on another computer sent,
+        // and the user's own vacation responder's, both saying so.
+        let own = crate::sources::outgoing::new_own_message_id("c@home.example");
+        let by_mimic = mail(
+            &own,
+            "C <c@home.example>",
+            "10:00",
+            "Re: Tuesday",
+            "Auto-Submitted: auto-replied\nIn-Reply-To: <q@example.com>\n",
+            "Tuesday works.",
+        );
+        let away = mail(
+            "away@home.example",
+            "C <c@home.example>",
+            "10:30",
+            "Out of office: Numbers",
+            "Auto-Submitted: auto-replied\nIn-Reply-To: <o@example.com>\n",
+            "I'm away until Monday.",
+        );
+        std::fs::write(dir.path().join("Inbox.mbox"), format!("{question}{other}")).unwrap();
+        std::fs::write(dir.path().join("Sent.mbox"), format!("{by_mimic}{away}")).unwrap();
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::Email, "c@home.example").unwrap();
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
+        let source = db
+            .create_source(&NewSource {
+                connector: "mbox".into(),
+                name: "Mail".into(),
+                channel: "email".into(),
+                location: Some(dir.path().to_string_lossy().into()),
+                config: serde_json::Value::Null,
+            })
+            .unwrap()
+            .id;
+        run(&db, &source).unwrap();
+        let metadata = |id: &str| -> serde_json::Value {
+            let raw: String = db
+                .conn()
+                .query_row("SELECT metadata_json FROM messages WHERE external_id = ?1", [id], |r| r.get(0))
+                .unwrap();
+            serde_json::from_str(&raw).unwrap()
+        };
+        assert_eq!(metadata(&own)["sentOnItsOwn"], serde_json::json!(true));
+        assert!(metadata(&own).get("automated").is_none());
+        assert_eq!(metadata("away@home.example")["automated"], serde_json::json!("auto_reply"));
+        assert!(metadata("away@home.example").get("sentOnItsOwn").is_none());
+
+        let waiting: Vec<String> = db.threads_awaiting_reply(10).unwrap().into_iter().map(|t| t.last_message).collect();
+        assert_eq!(waiting, vec!["Can you send the numbers?".to_string()], "the vacation reply hides nothing");
+        assert_eq!(db.count_self_messages(None, None).unwrap(), 1, "only what the user wrote, if only for being away");
     }
 
     #[test]
