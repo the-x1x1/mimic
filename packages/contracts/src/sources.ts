@@ -260,6 +260,30 @@ const ZOHO: KnownMailHost = {
   help: "Zoho Mail → Settings → Security → App passwords.",
 };
 
+const GMX_NET: KnownMailHost = {
+  host: "imap.gmx.net",
+  port: 993,
+  help: "GMX → Settings → POP3 & IMAP: allow access, then use your GMX password (or an app password, with two-factor sign-in).",
+};
+
+const MAIL_RU: KnownMailHost = {
+  host: "imap.mail.ru",
+  port: 993,
+  help: "Mail.ru → Settings → Security → Passwords for external apps.",
+};
+
+const YANDEX: KnownMailHost = {
+  host: "imap.yandex.com",
+  port: 993,
+  help: "Yandex Mail → Settings → Mail clients: allow IMAP with app passwords; then Yandex ID → Security → App passwords → Mail.",
+};
+
+const ATT: KnownMailHost = {
+  host: "imap.mail.att.net",
+  port: 993,
+  help: "AT&T → Profile → Sign-in info → Secure mail key: use the key, not your password.",
+};
+
 /** Google Workspace at a domain of its own: signs in with Google, or takes an app password where the organisation allows them. */
 const GOOGLE_WORKSPACE: KnownMailHost = {
   host: "imap.gmail.com",
@@ -309,6 +333,51 @@ export const KNOWN_MAIL_HOSTS: Record<string, KnownMailHost> = {
   },
   "zoho.com": ZOHO,
   "zohomail.com": ZOHO,
+  // Verizon's addresses are AOL's mail now.
+  "verizon.net": {
+    host: "imap.aol.com",
+    port: 993,
+    help: "AOL Account security → Generate app password.",
+  },
+  "gmx.com": {
+    host: "imap.gmx.com",
+    port: 993,
+    help: "GMX → Settings → POP3 & IMAP: allow access, then use your GMX password (or an app password, with two-factor sign-in).",
+  },
+  "gmx.net": GMX_NET,
+  "gmx.de": GMX_NET,
+  "gmx.at": GMX_NET,
+  "gmx.ch": GMX_NET,
+  "web.de": {
+    host: "imap.web.de",
+    port: 993,
+    help: "WEB.DE → Settings → POP3/IMAP: allow access, then use your WEB.DE password (or an app password, with two-factor sign-in).",
+  },
+  "mail.com": {
+    host: "imap.mail.com",
+    port: 993,
+    help: "IMAP needs mail.com Premium. With it: Settings → POP3 & IMAP, allow access, then use your mail.com password.",
+  },
+  "yandex.com": YANDEX,
+  "yandex.ru": YANDEX,
+  "ya.ru": YANDEX,
+  "mail.ru": MAIL_RU,
+  "inbox.ru": MAIL_RU,
+  "list.ru": MAIL_RU,
+  "bk.ru": MAIL_RU,
+  "comcast.net": {
+    host: "imap.comcast.net",
+    port: 993,
+    help: "Xfinity → Email → Settings → Security: turn on third-party access, then use your Xfinity password.",
+  },
+  "att.net": ATT,
+  "sbcglobal.net": ATT,
+  "bellsouth.net": ATT,
+  "qq.com": {
+    host: "imap.qq.com",
+    port: 993,
+    help: "QQ Mail → Settings → Account: turn on IMAP/SMTP and use the authorization code it gives, not your QQ password.",
+  },
 };
 
 /** A domain's mail exchangers, most preferred first (desktop `mail_exchangers`). */

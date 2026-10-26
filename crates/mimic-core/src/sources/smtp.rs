@@ -628,7 +628,14 @@ pub fn known_for(imap_host: &str, username: &str) -> Option<SmtpAccount> {
         "imap.secureserver.net" => ("smtpout.secureserver.net", 465, SmtpSecurity::Tls),
         "mail.privateemail.com" => ("mail.privateemail.com", 465, SmtpSecurity::Tls),
         "imap.gmx.com" => ("mail.gmx.com", 465, SmtpSecurity::Tls),
+        "imap.gmx.net" => ("mail.gmx.net", 465, SmtpSecurity::Tls),
+        "imap.web.de" => ("smtp.web.de", 587, SmtpSecurity::StartTls),
+        "imap.mail.com" => ("smtp.mail.com", 465, SmtpSecurity::Tls),
         "imap.mail.ru" => ("smtp.mail.ru", 465, SmtpSecurity::Tls),
+        "imap.yandex.com" | "imap.yandex.ru" => ("smtp.yandex.com", 465, SmtpSecurity::Tls),
+        "imap.comcast.net" => ("smtp.comcast.net", 587, SmtpSecurity::StartTls),
+        "imap.mail.att.net" => ("smtp.mail.att.net", 465, SmtpSecurity::Tls),
+        "imap.qq.com" => ("smtp.qq.com", 465, SmtpSecurity::Tls),
         // Proton Mail Bridge, on this computer, on its default ports.
         "127.0.0.1" | "localhost" => ("127.0.0.1", 1025, SmtpSecurity::Plain),
         _ => return None,
@@ -1050,9 +1057,18 @@ mod tests {
             ("imap.zoho.eu", "smtp.zoho.eu"),
             ("imap.secureserver.net", "smtpout.secureserver.net"),
             ("mail.privateemail.com", "mail.privateemail.com"),
+            ("imap.gmx.net", "mail.gmx.net"),
+            ("imap.mail.com", "smtp.mail.com"),
+            ("imap.yandex.com", "smtp.yandex.com"),
+            ("imap.mail.att.net", "smtp.mail.att.net"),
+            ("imap.qq.com", "smtp.qq.com"),
         ] {
             let found = known_for(imap, "c@example.org").unwrap();
             assert_eq!((found.host.as_str(), found.port, found.security), (smtp, 465, SmtpSecurity::Tls));
+        }
+        for (imap, smtp) in [("imap.web.de", "smtp.web.de"), ("imap.comcast.net", "smtp.comcast.net")] {
+            let found = known_for(imap, "c@example.org").unwrap();
+            assert_eq!((found.host.as_str(), found.port, found.security), (smtp, 587, SmtpSecurity::StartTls));
         }
         assert!(known_for("mail.example.org", "c@example.org").is_none(), "anything else is set up by hand");
         assert_eq!(

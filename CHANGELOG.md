@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.48] — 2026-10-26
+
+More mailboxes known.
+
+### Added
+
+- Connecting a mailbox now fills in the servers, and says where to make the password, for GMX, WEB.DE, mail.com, Yandex, Mail.ru, Xfinity (Comcast), AT&T (and SBCGlobal and BellSouth addresses), Verizon (now at AOL) and QQ Mail — for reading and for sending.
+
 ## [0.10.0-alpha.47] — 2026-10-26
 
 Off from the icon.

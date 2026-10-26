@@ -868,6 +868,14 @@ describe("connecting a mailbox", () => {
   it("guesses the server for the common providers and nothing for the rest", async () => {
     const { guessMailHost } = await import("../src");
     expect(guessMailHost("c@gmail.com")?.host).toBe("imap.gmail.com");
+    // The common providers beyond the big four (0.10.0-alpha.48).
+    expect(guessMailHost("c@gmx.de")?.host).toBe("imap.gmx.net");
+    expect(guessMailHost("c@web.de")?.host).toBe("imap.web.de");
+    expect(guessMailHost("c@comcast.net")?.help).toMatch(/third-party access/);
+    expect(guessMailHost("c@sbcglobal.net")?.host).toBe("imap.mail.att.net");
+    expect(guessMailHost("c@verizon.net")?.host).toBe("imap.aol.com");
+    expect(guessMailHost("c@yandex.ru")?.host).toBe("imap.yandex.com");
+    expect(guessMailHost("c@qq.com")?.help).toMatch(/authorization code/);
     expect(guessMailHost("c@icloud.com")?.port).toBe(993);
     // Outlook.com is known, and signs in with Microsoft rather than a password.
     expect(guessMailHost("C@Outlook.com")).toMatchObject({
