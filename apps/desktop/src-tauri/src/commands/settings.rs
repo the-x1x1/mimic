@@ -41,6 +41,8 @@ pub fn defaults() -> Map<String, Value> {
     m.insert(crate::anywhere::PRESS_ENTER.into(), json!(false));
     // A draft written as soon as Write opens from anywhere (0.10.0-alpha.63).
     m.insert(crate::anywhere::DRAFT_AT_ONCE.into(), json!(true));
+    // Copying what is selected when the shortcut is pressed (0.10.0-alpha.71). Off.
+    m.insert(crate::anywhere::COPY_FOR_ME.into(), json!(false));
     // Seconds a reply the user sent waits, to be taken back (0.10.0-alpha.40).
     m.insert(UNDO_SECONDS.into(), json!(5));
     m
@@ -182,5 +184,6 @@ mod tests {
             Some(&json!(true)),
             "a draft at once, unless turned off"
         );
+        assert_eq!(defaults().get(crate::anywhere::COPY_FOR_ME), Some(&json!(false)), "no keys pressed unasked");
     }
 }

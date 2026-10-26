@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.71] — 2026-10-26
+
+Copy it for me.
+
+### Added
+
+- **Select, then press the shortcut.** Turn on **Copy what I've selected when I press the shortcut** under Answering a message from anywhere, and you no longer have to copy the message first: once you let go of the shortcut, I press Ctrl+Insert in that window to copy it — copy in every app, and never Ctrl+C, which would stop what a terminal is running. Off unless you turn it on.
+
 ## [0.10.0-alpha.70] — 2026-10-26
 
 Many chats, checked politely.

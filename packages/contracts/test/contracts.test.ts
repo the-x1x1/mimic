@@ -769,6 +769,7 @@ describe("settings and updater contracts", () => {
       "anywhere.shortcut": "",
       "anywhere.pressEnter": false,
       "anywhere.draftAtOnce": true,
+      "anywhere.copyForMe": false,
       "send.undoSeconds": 5,
     };
     expect(() => Settings.parse(defaults)).not.toThrow();
