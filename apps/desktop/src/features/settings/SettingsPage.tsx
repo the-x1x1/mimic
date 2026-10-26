@@ -35,12 +35,14 @@ import { MeaningSection } from "./MeaningSection";
 import { AutoReplySection } from "./AutoReplySection";
 import { BackgroundSection } from "./BackgroundSection";
 import { AnywhereSection } from "./AnywhereSection";
+import { ReplyingForYou } from "./ReplyingForYou";
 import { ModelStep } from "@/features/onboarding/ModelStep";
 
 export function SettingsPage() {
   return (
     <div className="stack gap-3">
       <PageHeader title="Settings" />
+      <ReplyingForYou />
       <IdentitySection />
       <AppearanceSection />
       <WritingEngineSection />
@@ -372,7 +374,7 @@ function AssistSection() {
   const active = providers.data?.providers.find((p) => p.id === providers.data?.active);
   const on = settings.data?.["assist.autoDraft"] ?? false;
   return (
-    <Card title="Preparing replies in advance">
+    <Card title="Preparing replies in advance" id="prepare">
       <p className="neutral">
         Mimic normally drafts only when you ask it to. With this on, after each import, mailbox
         check or analysis it drafts replies for up to ten of the threads waiting on you &mdash; not

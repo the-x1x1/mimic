@@ -126,6 +126,31 @@ pub async fn set_mailbox_sending(
     Ok(MailboxSending::of(latest.sending, true))
 }
 
+/// Sign in to the server a mailbox's replies go out through — its provider's
+/// usual one, or the one the user set — and send nothing: whether a reply
+/// could go now. The server's name when it worked (0.10.0-alpha.32).
+#[tauri::command]
+pub async fn test_mailbox_sending(state: State<'_, SharedState>, source_id: String) -> CommandResult<String> {
+    let config = mailbox_config(&state, &source_id)?;
+    let Some(account) = config.sending_account() else {
+        return Err(CommandError::new("cannot_send", sending::NOT_SET_UP));
+    };
+    let host = account.host.clone();
+    let (credentials, auth, id) = (state.mail_credentials.clone(), config.account.auth, source_id.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let credential = credentials.credential(auth, &id).map_err(|why| CommandError::new("mailbox", why))?;
+        smtp::probe(&account, &credential).map_err(|e| {
+            if matches!(e, smtp::SmtpError::SignIn(_)) {
+                credentials.forget(&id);
+            }
+            CommandError::new("send_failed", e.to_string())
+        })
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", e.to_string()))??;
+    Ok(host)
+}
+
 /// Forget how the user set a mailbox to send, and use its provider's known
 /// server again (none, for a provider Mimic doesn't know).
 #[tauri::command]

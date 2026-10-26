@@ -339,6 +339,8 @@ export const ipc = {
   /** The user looked: a reply that may have gone didn't, so its draft can be sent again. */
   replyDidNotGo: (outboxId: string) => call("reply_did_not_go", OutboxEntry, { outboxId }),
   mailboxSending: (sourceId: string) => call("get_mailbox_sending", MailboxSending, { sourceId }),
+  /** Sign in to the mailbox's outgoing server and send nothing; its name when it worked. */
+  testMailboxSending: (sourceId: string) => call("test_mailbox_sending", z_string, { sourceId }),
   /** Checked first — signed in to, nothing sent — and kept only if that worked. */
   setMailboxSending: (sourceId: string, sending: SmtpAccount) =>
     call("set_mailbox_sending", MailboxSending, { sourceId, sending }),

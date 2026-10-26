@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.32] — 2026-10-26
+
+Replying for you, in one place.
+
+### Added
+
+- **Replying for you**, first in Settings: where each part stands — a mailbox, whether replies can be sent from each, replies prepared in advance, replying by myself, whether I keep running when my window is closed, and notifications — each with where to change it.
+- **Try it (sends nothing)**, under each mailbox's sending in Your mail: I sign in to its outgoing server and send nothing, so you know a reply can go before one has to.
+
 ## [0.10.0-alpha.31] — 2026-10-26
 
 When a mailbox stops working.
