@@ -81,6 +81,8 @@ export const ReplyEnvelope = z.object({
   to: z.array(z.string()),
   /** The person's other addresses, to send to instead. */
   otherAddresses: z.array(z.string()),
+  /** Everyone else the message was to or copied to, not the user: the ones that can be copied in. */
+  othersOnIt: z.array(z.string()),
   subject: z.string(),
   /** Why it can't be sent from here at all. */
   whyNot: z.string().nullable(),
@@ -95,6 +97,8 @@ export interface SendRequest {
   text: string;
   sourceId: string;
   to: string[];
+  /** The others on the message the user ticked; only ever from `ReplyEnvelope.othersOnIt`. */
+  cc: string[];
   subject: string;
 }
 
@@ -110,7 +114,10 @@ export function listAddresses(addresses: readonly string[]): string {
  * it again.
  */
 export function describeOutboxEntry(e: OutboxEntry): string {
-  const to = listAddresses(e.to);
+  const to =
+    e.cc.length > 0
+      ? `${listAddresses(e.to)}, copying in ${listAddresses(e.cc)}`
+      : listAddresses(e.to);
   switch (e.status) {
     case "sent": {
       const said = e.how === "autonomous" ? `I sent this to ${to} by myself.` : `Sent to ${to}.`;

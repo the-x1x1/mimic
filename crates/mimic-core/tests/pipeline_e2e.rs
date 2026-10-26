@@ -1054,6 +1054,7 @@ fn a_reply_sent_from_the_mailbox_answers_the_thread() {
     assert_eq!(envelope.mailbox.as_deref(), Some(mailbox.id.as_str()), "the one mailbox that can send");
     assert_eq!(envelope.to, vec!["ada.replies@example.com".to_string()], "where Ada asked for replies to go");
     assert_eq!(envelope.other_addresses, vec!["ada@example.com".to_string()]);
+    assert!(envelope.others_on_it.is_empty(), "the message was to the user alone");
     assert_eq!(envelope.subject, "Re: Lunch");
     check_fixture("reply_envelope.json", &serde_json::to_value(&envelope).unwrap());
 
@@ -1071,6 +1072,7 @@ fn a_reply_sent_from_the_mailbox_answers_the_thread() {
             text: draft.generated_text.clone(),
             source_id: mailbox.id.clone(),
             to: envelope.to.clone(),
+            cc: vec![],
             subject: envelope.subject.clone(),
         },
     )

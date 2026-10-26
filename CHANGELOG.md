@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.33] — 2026-10-26
+
+Copying in the others on a message.
+
+### Added
+
+- **Copy in**, in the Send panel: when the message you're answering went to other people too, they're listed, none ticked, and you tick whoever should get your reply as well (or everyone else on it at once). The panel says who it goes to and who's copied in before it goes, and What I've sent says it after.
+- I copy in only people who were on the message you're answering. A reply I send by myself still goes to who wrote and no one else.
+
 ## [0.10.0-alpha.32] — 2026-10-26
 
 Replying for you, in one place.

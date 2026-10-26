@@ -12,8 +12,9 @@ import { toast } from "@/state/toast";
  *
  * Who it goes to starts where the sender asked for replies (their
  * `Reply-To`), or the address they wrote from; any other address Mimic has
- * for them can be chosen instead. A reply goes to the person who wrote, not
- * to everyone on the thread, and says so.
+ * for them can be chosen instead. A reply goes to the person who wrote, and
+ * to the others on their message only when ticked under **Copy in**
+ * (`othersOnIt`, none ticked to begin with), and says which.
  */
 export function SendPanel({
   draft,
@@ -40,6 +41,10 @@ export function SendPanel({
   ];
   const [choice, setChoice] = useState(0);
   const [subject, setSubject] = useState(envelope.subject);
+  const others = envelope.othersOnIt;
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  // In the order the message had them.
+  const cc = others.filter((a) => ticked.has(a));
   const to = choices[choice] ?? [];
   const from = able.find((m) => m.sourceId === sourceId);
   const code = (send.error as { code?: string } | null)?.code;
@@ -51,10 +56,13 @@ export function SendPanel({
       text,
       sourceId,
       to,
+      cc,
       subject,
     });
     toast.success(
-      `Sent to ${listAddresses(entry.to)}.`,
+      entry.cc.length > 0
+        ? `Sent to ${listAddresses(entry.to)}, copying in ${listAddresses(entry.cc)}.`
+        : `Sent to ${listAddresses(entry.to)}.`,
       text !== draft.generatedText
         ? "It went from your mailbox, and I noticed what you changed."
         : "It went from your mailbox, as if you'd sent it yourself.",
@@ -100,6 +108,44 @@ export function SendPanel({
           <span id={`${id}-to`}>{listAddresses(to)}</span>
         )}
       </div>
+      {others.length > 0 ? (
+        <div
+          className="thread__send-row thread__send-row--top"
+          role="group"
+          aria-labelledby={`${id}-cc`}
+        >
+          <span id={`${id}-cc`} className="muted small">
+            Copy in
+          </span>
+          <div className="stack gap-1">
+            {others.length > 1 ? (
+              <label className="row gap-1">
+                <input
+                  type="checkbox"
+                  checked={cc.length === others.length}
+                  onChange={(e) => setTicked(new Set(e.target.checked ? others : []))}
+                />
+                <span>Everyone else on their message</span>
+              </label>
+            ) : null}
+            {others.map((a) => (
+              <label key={a} className="row gap-1">
+                <input
+                  type="checkbox"
+                  checked={ticked.has(a)}
+                  onChange={(e) => {
+                    const next = new Set(ticked);
+                    if (e.target.checked) next.add(a);
+                    else next.delete(a);
+                    setTicked(next);
+                  }}
+                />
+                <span>{a}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="thread__send-row">
         <label htmlFor={`${id}-subject`} className="muted small">
           Subject
@@ -114,8 +160,12 @@ export function SendPanel({
       </div>
       <p className="muted small">
         It goes from your mailbox{from?.server ? ` (through ${from.server})` : ""}, threaded under
-        their message, to {to.length === 1 ? "them" : "those addresses"} only &mdash; not to anyone
-        else on the thread.
+        their message, to {to.length === 1 ? "them" : "those addresses"}
+        {cc.length > 0
+          ? `, copying in ${listAddresses(cc)} — no one else.`
+          : others.length > 0
+            ? " only — not to anyone else on the thread unless you copy them in."
+            : " only — not to anyone else on the thread."}
       </p>
       {send.error ? (
         <InlineError>

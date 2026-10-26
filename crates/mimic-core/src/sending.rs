@@ -27,6 +27,11 @@
 //!   conversation as the user's own, as the next check would read it from
 //!   the Sent folder — which then skips it by its Message-ID — so the thread
 //!   is answered at once.
+//! * **It goes to who wrote, and to the others on their message only when
+//!   the user ticks them** (0.10.0-alpha.33). `envelope_for` lists who else
+//!   the message was to or copied to, without the user's own addresses
+//!   (`others_on_it`); `send_reply` copies in only addresses from that list
+//!   (`NOT_ON_IT`). A reply sent by itself goes to who wrote and no one else.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -53,6 +58,7 @@ pub const UNREADABLE: &str = "I can't read this mailbox's settings; remove it an
 pub const DRAFT_GONE: &str = "That draft isn't here any more, so there's nothing to send.";
 pub const EMPTY: &str = "There's nothing to send: the reply is empty.";
 pub const HELD: &str = "I'm holding a reply to this to send by myself. Stop it first if you'd rather send your own.";
+pub const NOT_ON_IT: &str = "I only copy in people who were on the message you're answering, and that address wasn't.";
 pub const PANICKED: &str =
     "Something went wrong inside Mimic while sending, so it may or may not have gone. Look in your Sent folder before sending it again.";
 
@@ -110,6 +116,9 @@ pub struct ReplyEnvelope {
     pub to: Vec<String>,
     /// Their other addresses, to send to instead.
     pub other_addresses: Vec<String>,
+    /// Everyone else the message was to or copied to, without the user's
+    /// own addresses or who it goes to: the ones the user can copy in.
+    pub others_on_it: Vec<String>,
     pub subject: String,
     /// Why it can't be sent from here at all, when it can't.
     pub why_not: Option<String>,
@@ -128,6 +137,10 @@ pub struct SendRequest {
     /// The mailbox it goes through.
     pub source_id: String,
     pub to: Vec<String>,
+    /// The others on the message the user ticked, copied in: only ever from
+    /// `ReplyEnvelope::others_on_it`.
+    #[serde(default)]
+    pub cc: Vec<String>,
     pub subject: String,
 }
 
@@ -177,6 +190,7 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
     }
     let mailbox = mailboxes.iter().find(|b| b.from_address.is_some()).map(|b| b.source_id.clone());
     let (to, other_addresses) = addresses_for(db, &draft, incoming.as_ref())?;
+    let others_on_it = others_on(db, incoming.as_ref(), &to)?;
     let subject =
         outgoing::reply_subject(incoming.as_ref().and_then(|m| m.metadata.get("subject")).and_then(Value::as_str));
     let why_not = if draft.outcome.is_some() {
@@ -197,7 +211,17 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
     } else {
         None
     };
-    Ok(ReplyEnvelope { draft_id: draft.id, mailboxes, mailbox, to, other_addresses, subject, why_not, held })
+    Ok(ReplyEnvelope {
+        draft_id: draft.id,
+        mailboxes,
+        mailbox,
+        to,
+        other_addresses,
+        others_on_it,
+        subject,
+        why_not,
+        held,
+    })
 }
 
 /// The stored message a draft answers, when it answers one.
@@ -247,6 +271,27 @@ fn addresses_for(db: &Db, draft: &Draft, incoming: Option<&Message>) -> Result<(
     }
     let others = theirs.into_iter().filter(|a| !chosen.iter().any(|c| c.eq_ignore_ascii_case(a))).collect();
     Ok((chosen, others))
+}
+
+/// Everyone else a message read from mail was to or copied to, in the order
+/// its headers give them: without the user's own addresses, without any in
+/// `to`, and each once. Nothing for a message from anywhere else.
+fn others_on(db: &Db, incoming: Option<&Message>, to: &[String]) -> Result<Vec<String>, DbError> {
+    let Some(m) = incoming else { return Ok(Vec::new()) };
+    let from_mail =
+        db.get_source(&m.source_id)?.is_some_and(|s| s.connector == imap::CONNECTOR || s.connector == "mbox");
+    if !from_mail {
+        return Ok(Vec::new());
+    }
+    let mine = db.user_identifier_set()?;
+    let mut out: Vec<String> = Vec::new();
+    for a in addresses_in(&m.metadata, "to").into_iter().chain(addresses_in(&m.metadata, "cc")) {
+        let seen = |list: &[String]| list.iter().any(|b| b.eq_ignore_ascii_case(&a));
+        if !is_users(&mine, &a) && !seen(to) && !seen(&out) {
+            out.push(a);
+        }
+    }
+    Ok(out)
 }
 
 fn addresses_in(metadata: &Value, key: &str) -> Vec<String> {
@@ -317,6 +362,7 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
     }
     let (config, account) = sending_from(db, &req.source_id)?;
     let incoming = answered(db, &draft)?;
+    let cc = copied_in(db, incoming.as_ref(), &to, &req.cc)?;
     let (in_reply_to, references) = threading(incoming.as_ref());
     let subject = match req.subject.trim() {
         "" => outgoing::reply_subject(None),
@@ -328,7 +374,7 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
             address: account.from_address.clone(),
         },
         to: to.iter().map(|a| Mailbox::bare(a)).collect(),
-        cc: Vec::new(),
+        cc: cc.iter().map(|a| Mailbox::bare(a)).collect(),
         subject,
         body: req.text.clone(),
         message_id: outgoing::new_message_id(&account.from_address),
@@ -348,7 +394,7 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         participant_id: draft.participant_id.clone(),
         from_address: account.from_address.clone(),
         to,
-        cc: Vec::new(),
+        cc,
         subject: mail.subject.clone(),
         body: req.text.clone(),
         message_id: mail.message_id.clone(),
@@ -366,6 +412,28 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         tracing::warn!(target: "sending", error = %e, "a sent reply could not be put in its conversation");
     }
     Ok(db.outgoing(&entry.id)?.unwrap_or(entry))
+}
+
+/// The addresses to copy in, as asked: each one of the others on the
+/// message being answered (`others_on`), else `NOT_ON_IT` before anything
+/// is recorded; one that is also in `to`, or asked twice, once.
+fn copied_in(db: &Db, incoming: Option<&Message>, to: &[String], asked: &[String]) -> Result<Vec<String>, SendError> {
+    let asked: Vec<&str> = asked.iter().map(|a| a.trim()).filter(|a| !a.is_empty()).collect();
+    if asked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let on_it = others_on(db, incoming, &[])?;
+    let mut out: Vec<String> = Vec::new();
+    for a in asked {
+        let Some(known) = on_it.iter().find(|b| b.eq_ignore_ascii_case(a)) else {
+            return Err(SendError::Cannot(NOT_ON_IT.into()));
+        };
+        let seen = |list: &[String]| list.iter().any(|b| b.eq_ignore_ascii_case(known));
+        if !seen(to) && !seen(&out) {
+            out.push(known.clone());
+        }
+    }
+    Ok(out)
 }
 
 /// A recorded reply written out as it goes now: from the address and words
@@ -611,6 +679,7 @@ mod tests {
             text: text.into(),
             source_id: envelope.mailbox.clone().unwrap_or_else(|| w.mailbox.clone()),
             to: envelope.to.clone(),
+            cc: vec![],
             subject: envelope.subject.clone(),
         }
     }
@@ -690,6 +759,46 @@ mod tests {
         let again = send_reply(&w.db, &credentials(), &approved(&w, &envelope, "Yes."));
         assert!(matches!(again, Err(SendError::Cannot(ref m)) if m == ALREADY_DECIDED), "{again:?}");
         assert_eq!(w.db.recent_outgoing(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_reply_copies_in_only_the_others_on_their_message_the_user_ticked() {
+        let (port, seen) = serve(Behaviour::default());
+        let w = world(port);
+        let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+        assert_eq!(
+            envelope.others_on_it,
+            vec!["bob@example.com".to_string()],
+            "Bob was on it; the user's own address and where it goes aren't offered"
+        );
+
+        // Someone who wasn't on the message is refused before anything is
+        // recorded or said.
+        let stranger = SendRequest { cc: vec!["eve@example.com".into()], ..approved(&w, &envelope, "Yes.") };
+        let e = send_reply(&w.db, &credentials(), &stranger).unwrap_err();
+        assert!(matches!(e, SendError::Cannot(ref m) if m == NOT_ON_IT), "{e}");
+        assert!(w.db.recent_outgoing(10).unwrap().is_empty());
+
+        let everyone = SendRequest {
+            cc: vec!["Bob@Example.com".into(), " bob@example.com ".into(), "ada@work.example".into()],
+            ..approved(&w, &envelope, "Yes, all of us.")
+        };
+        let e = send_reply(&w.db, &credentials(), &everyone).unwrap_err();
+        assert!(
+            matches!(e, SendError::Cannot(ref m) if m == NOT_ON_IT),
+            "where she asked for replies wasn't on the message: {e}"
+        );
+        let everyone = SendRequest { cc: vec!["Bob@Example.com".into(), " bob@example.com ".into()], ..everyone };
+        let sent = send_reply(&w.db, &credentials(), &everyone).unwrap();
+        assert_eq!(sent.to, vec!["ada@work.example".to_string()]);
+        assert_eq!(sent.cc, vec!["bob@example.com".to_string()], "once, as the message had it");
+
+        let t = seen.recv().unwrap();
+        assert!(t.commands.contains(&"RCPT TO:<ada@work.example>".to_string()), "{:?}", t.commands);
+        assert!(t.commands.contains(&"RCPT TO:<bob@example.com>".to_string()), "{:?}", t.commands);
+        assert_eq!(t.commands.iter().filter(|c| c.starts_with("RCPT")).count(), 2, "{:?}", t.commands);
+        let data = String::from_utf8(t.data).unwrap();
+        assert!(data.contains("\r\nTo: ada@work.example\r\nCc: bob@example.com\r\n"), "{data}");
     }
 
     #[test]
