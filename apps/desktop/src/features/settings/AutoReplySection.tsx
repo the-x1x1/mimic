@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Button, Card, InlineError } from "@mimic/ui";
-import { HOLD_CHOICES, describeAutoReply, type AutoReplyRules } from "@mimic/contracts";
+import { HOLD_CHOICES, describeAutoReply, hourOf, type AutoReplyRules } from "@mimic/contracts";
+
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
 import { useAutoReply, useSetAutoReply } from "@/hooks/useSending";
 import { useSources } from "@/hooks/useSources";
 import { usePeople } from "@/hooks/usePeople";
@@ -239,6 +241,61 @@ export function AutoReplySection() {
             onChange={(e) => change({ dailyLimit: Number(e.target.value) })}
           />
         </label>
+      </div>
+      <div className="stack gap-1">
+        <label className="row gap-2">
+          <input
+            type="checkbox"
+            checked={Boolean(rules.hours)}
+            disabled={save.isPending}
+            onChange={(e) => change({ hours: e.target.checked ? { from: 8, to: 20 } : null })}
+          />
+          <span>Only at the hours I choose, on this computer&rsquo;s clock</span>
+        </label>
+        {rules.hours ? (
+          <div className="row gap-2">
+            <label className="stack gap-1">
+              <span className="muted small">From</span>
+              <select
+                value={rules.hours.from}
+                disabled={save.isPending}
+                onChange={(e) => {
+                  if (rules.hours)
+                    change({ hours: { ...rules.hours, from: Number(e.target.value) } });
+                }}
+              >
+                {HOURS.map((h) => (
+                  <option key={h} value={h} disabled={h === rules.hours?.to}>
+                    {hourOf(h)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="stack gap-1">
+              <span className="muted small">Until</span>
+              <select
+                value={rules.hours.to}
+                disabled={save.isPending}
+                onChange={(e) => {
+                  if (rules.hours)
+                    change({ hours: { ...rules.hours, to: Number(e.target.value) } });
+                }}
+              >
+                {HOURS.map((h) => (
+                  <option key={h} value={h} disabled={h === rules.hours?.from}>
+                    {hourOf(h)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+        {rules.hours ? (
+          <p className="muted small">
+            A reply that would go outside them waits until they start, on the home screen, where you
+            can still stop it or send it at once.
+          </p>
+        ) : null}
       </div>
       <p className="muted small">
         {state.data.lastDay === 1

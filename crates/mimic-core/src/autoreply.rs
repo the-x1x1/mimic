@@ -34,7 +34,7 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Local, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{Db, DbError, Draft, IdentifierInput, IdentifierKind, NewOutgoing, SendHow};
@@ -112,6 +112,47 @@ pub struct Rules {
     /// answered by it, so turning it on doesn't answer a backlog. Set by
     /// `set_rules`, whatever was asked for.
     pub enabled_at: Option<String>,
+    /// The hours of the day replies may go by themselves, in this
+    /// computer's time (0.10.0-alpha.39); any time when none.
+    #[serde(default)]
+    pub hours: Option<Hours>,
+}
+
+/// From `from` o'clock up to `to` o'clock, across midnight when `to` is the
+/// earlier: `{ from: 8, to: 20 }` is eight in the morning to eight at night,
+/// `{ from: 22, to: 6 }` the night.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hours {
+    pub from: u32,
+    pub to: u32,
+}
+
+impl Hours {
+    fn contains(self, hour: u32) -> bool {
+        if self.from < self.to {
+            hour >= self.from && hour < self.to
+        } else {
+            hour >= self.from || hour < self.to
+        }
+    }
+}
+
+/// The first moment at or after `at` that falls within `hours` on `tz`'s
+/// clock: `at` itself when it does, or the next time the clock reads `from`
+/// o'clock (an hour later where that hour doesn't exist that day).
+pub fn first_within<Tz: TimeZone>(hours: Option<Hours>, at: DateTime<Utc>, tz: &Tz) -> DateTime<Utc> {
+    let Some(h) = hours else { return at };
+    let local = at.with_timezone(tz);
+    if h.contains(local.hour()) {
+        return at;
+    }
+    let day = local.date_naive();
+    let day = if local.hour() < h.from { day } else { day.succ_opt().unwrap_or(day) };
+    (0..3)
+        .filter_map(|late| day.and_hms_opt((h.from + late) % 24, 0, 0))
+        .find_map(|naive| tz.from_local_datetime(&naive).earliest())
+        .map(|t| t.with_timezone(&Utc))
+        .unwrap_or(at)
 }
 
 impl Default for Rules {
@@ -125,6 +166,7 @@ impl Default for Rules {
             hold_minutes: DEFAULT_HOLD_MINUTES,
             daily_limit: DEFAULT_DAILY_LIMIT,
             enabled_at: None,
+            hours: None,
         }
     }
 }
@@ -137,6 +179,8 @@ impl Rules {
         self.mailboxes.dedup();
         self.people.dedup();
         self.never.dedup();
+        // Within the day; the same hour twice is no window at all.
+        self.hours = self.hours.map(|h| Hours { from: h.from.min(23), to: h.to.min(23) }).filter(|h| h.from != h.to);
         self
     }
 }
@@ -367,7 +411,13 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
             body: sending::signed(&draft.generated_text, config.signature()),
             message_id: outgoing::new_message_id(&account.from_address),
             how: SendHow::Autonomous,
-            send_after: Some(fmt_rfc3339(now + Duration::minutes(rules.hold_minutes))),
+            // Held for the while the user chose, then until the hours they
+            // allow, if those have ended for the day.
+            send_after: Some(fmt_rfc3339(first_within(
+                rules.hours,
+                now + Duration::minutes(rules.hold_minutes),
+                &Local,
+            ))),
         });
         match queued {
             Ok(_) => held += 1,
@@ -377,6 +427,14 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
         }
     }
     Ok(held)
+}
+
+/// A held reply the user said to send now (`Db::send_held_now`): its time
+/// and its last change are the same moment. Nothing else gives a held reply
+/// that — holding it sets its time a hold ahead, and `Db::hold_until` a
+/// window ahead, of the change.
+fn released(entry: &crate::db::OutboxEntry) -> bool {
+    entry.send_after == entry.updated_at
 }
 
 /// Send every held reply whose time has come and which the rules still
@@ -402,6 +460,16 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
         if !goes_to_them(db, draft.participant_id.as_deref(), &entry.to)? {
             run.stopped += usize::from(db.stop_held_outgoing(&entry.id, NOT_THEIRS)?);
             continue;
+        }
+        // Outside the hours allowed — set since it was held, or passed while
+        // it waited for a check or the computer slept — it waits for them,
+        // unless the user said to send it now.
+        if !released(&entry) {
+            let start = first_within(rules.hours, now, &Local);
+            if start > now {
+                db.hold_until(&entry.id, &fmt_rfc3339(start))?;
+                continue;
+            }
         }
         let (config, account) = match sending::sending_from(db, &entry.source_id) {
             Ok(found) => found,
@@ -918,6 +986,61 @@ mod tests {
         let draft = w.db.get_draft(&w.draft.id).unwrap().unwrap();
         assert_eq!(draft.outcome.as_deref(), Some("sent_unedited"), "the signature is the mailbox's, not an edit");
         assert_eq!(draft.final_text.as_deref(), Some("yes, the river place. 12:30?"));
+    }
+
+    #[test]
+    fn the_hours_allowed_are_on_the_computers_clock_and_may_cross_midnight() {
+        let utc = chrono::FixedOffset::east_opt(0).unwrap();
+        let hst = chrono::FixedOffset::west_opt(10 * 3600).unwrap();
+        let t = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
+        let day = Some(Hours { from: 8, to: 20 });
+        assert_eq!(first_within(None, t("2026-10-26T03:00:00Z"), &utc), t("2026-10-26T03:00:00Z"));
+        assert_eq!(first_within(day, t("2026-10-26T07:30:00Z"), &utc), t("2026-10-26T08:00:00Z"));
+        assert_eq!(first_within(day, t("2026-10-26T12:10:00Z"), &utc), t("2026-10-26T12:10:00Z"));
+        assert_eq!(first_within(day, t("2026-10-26T20:00:00Z"), &utc), t("2026-10-27T08:00:00Z"));
+        assert_eq!(first_within(day, t("2026-10-26T17:00:00Z"), &hst), t("2026-10-26T18:00:00Z"), "7am in Hawaii");
+        let night = Some(Hours { from: 22, to: 6 });
+        assert_eq!(first_within(night, t("2026-10-26T12:00:00Z"), &utc), t("2026-10-26T22:00:00Z"));
+        assert_eq!(first_within(night, t("2026-10-26T23:30:00Z"), &utc), t("2026-10-26T23:30:00Z"));
+        assert_eq!(first_within(night, t("2026-10-27T05:59:00Z"), &utc), t("2026-10-27T05:59:00Z"));
+    }
+
+    #[test]
+    fn a_reply_held_outside_the_hours_allowed_waits_for_them() {
+        let w = world(Behaviour::default());
+        // An hour that the hold's end is not in, on this computer's clock.
+        let ends = (at(0) + Duration::minutes(DEFAULT_HOLD_MINUTES)).with_timezone(&Local).hour();
+        let from = (ends + 2) % 24;
+        set_rules(&w.db, Rules { hours: Some(Hours { from, to: (from + 1) % 24 }), ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1, "held as before");
+        let held = only_entry(&w.db);
+        let goes = DateTime::parse_from_rfc3339(&held.send_after).unwrap().with_timezone(&Utc);
+        assert!(goes > at(DEFAULT_HOLD_MINUTES), "{goes}");
+        assert_eq!(goes.with_timezone(&Local).hour(), from, "at the start of the hours allowed");
+        checked(&w);
+        assert_eq!(tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap().sent, 0, "not before then");
+
+        // The same hour twice is no window at all.
+        let r = set_rules(&w.db, Rules { hours: Some(Hours { from: 9, to: 9 }), ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(r.hours, None);
+    }
+
+    #[test]
+    fn a_reply_already_held_waits_for_hours_set_since_unless_sent_now() {
+        let w = world(Behaviour::default());
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        let ends = at(DEFAULT_HOLD_MINUTES).with_timezone(&Local).hour();
+        let from = (ends + 2) % 24;
+        let hours = Some(Hours { from, to: (from + 1) % 24 });
+        set_rules(&w.db, Rules { hours, ..rules(&w.db).unwrap() }).unwrap();
+        checked(&w);
+        assert_eq!(tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap().sent, 0);
+        let held = only_entry(&w.db);
+        assert_eq!(held.status, SendStatus::Held, "still held, not stopped");
+        assert_eq!(held.send_after, fmt_rfc3339(first_within(hours, at(DEFAULT_HOLD_MINUTES), &Local)));
+
+        w.db.send_held_now(&held.id, &fmt_rfc3339(at(DEFAULT_HOLD_MINUTES + 1))).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES + 1)).unwrap().sent, 1, "the user said now");
     }
 
     #[test]

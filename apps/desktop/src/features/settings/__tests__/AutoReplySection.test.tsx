@@ -148,4 +148,21 @@ describe("replying by myself", () => {
       ),
     );
   });
+
+  it("sends by itself only at the hours chosen", async () => {
+    renderIt({ ...off, enabled: true, mailboxes: ["s1"] }, true);
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Only at the hours I choose/ }));
+    await waitFor(() =>
+      expect(native.setAutoReply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hours: { from: 8, to: 20 } }),
+      ),
+    );
+    expect(await screen.findByText(/only between 8:00 and 20:00/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Until"), { target: { value: "18" } });
+    await waitFor(() =>
+      expect(native.setAutoReply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hours: { from: 8, to: 18 } }),
+      ),
+    );
+  });
 });

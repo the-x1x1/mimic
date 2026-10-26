@@ -361,6 +361,9 @@ impl Db {
     }
 
     /// Let a held reply go at the next look, rather than when its hold ends.
+    /// Its time and its last change become the same moment, which nothing
+    /// else gives a held reply (`autoreply::released`): the user said now, so
+    /// the hours allowed don't keep it.
     pub fn send_held_now(&self, id: &str, now: &str) -> DbResult<OutboxEntry> {
         let n = self.conn().execute(
             "UPDATE outbox SET send_after = ?2, updated_at = ?2 WHERE id = ?1 AND status = 'held'",
@@ -371,6 +374,15 @@ impl Db {
             return Err(DbError::Invalid(TOO_LATE.into()));
         }
         Ok(entry)
+    }
+
+    /// Keep a held reply until `send_after`: the hours allowed haven't
+    /// started. False when it is no longer held.
+    pub fn hold_until(&self, id: &str, send_after: &str) -> DbResult<bool> {
+        Ok(self.conn().execute(
+            "UPDATE outbox SET send_after = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'held'",
+            params![id, send_after, now_rfc3339()],
+        )? > 0)
     }
 
     /// The reply held for any draft of this draft's set, if one is.

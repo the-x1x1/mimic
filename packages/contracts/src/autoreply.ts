@@ -25,6 +25,8 @@ export const AutoReplyRules = z.object({
   dailyLimit: z.number().int(),
   /** When it was last turned on: only what arrived after is answered by it. */
   enabledAt: z.string().nullable(),
+  /** The hours of the day replies may go by themselves, on this computer's clock (0.10.0-alpha.39). */
+  hours: z.object({ from: z.number().int(), to: z.number().int() }).nullable().optional(),
 });
 export type AutoReplyRules = z.infer<typeof AutoReplyRules>;
 
@@ -53,12 +55,18 @@ export const HOLD_CHOICES = [2, 5, 10, 30, 60] as const;
 export function describeHeld(entry: OutboxEntry, now: Date = new Date()): string {
   const at = new Date(entry.sendAfter);
   const minutes = Math.max(0, Math.ceil((at.getTime() - now.getTime()) / 60_000));
+  // An hour or more away — the hours allowed haven't started — by the clock.
+  const clock = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   const when =
     minutes <= 0
       ? "in a moment"
       : minutes === 1
         ? "in a minute"
-        : `in ${minutes.toLocaleString()} minutes`;
+        : minutes < 60
+          ? `in ${minutes.toLocaleString()} minutes`
+          : at.toDateString() === now.toDateString()
+            ? `at ${clock}`
+            : `tomorrow at ${clock}`;
   return `I'll send this to ${listAddresses(entry.to)} by myself ${when}, unless you stop it.`;
 }
 
@@ -78,5 +86,11 @@ export function describeAutoReply(state: AutoReplyState): string {
       : chosen === 1
         ? "the one person you chose"
         : `the ${chosen.toLocaleString()} people you chose`;
-  return `On: I answer ${who}, holding each reply ${r.holdMinutes.toLocaleString()} minutes first, ${r.dailyLimit.toLocaleString()} a day at most.`;
+  const when = r.hours ? `, only between ${hourOf(r.hours.from)} and ${hourOf(r.hours.to)}` : "";
+  return `On: I answer ${who}, holding each reply ${r.holdMinutes.toLocaleString()} minutes first${when}, ${r.dailyLimit.toLocaleString()} a day at most.`;
+}
+
+/** An hour of the day as a clock shows it: 8:00, 20:00. */
+export function hourOf(hour: number): string {
+  return `${hour}:00`;
 }
