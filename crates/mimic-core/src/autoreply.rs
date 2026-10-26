@@ -81,6 +81,10 @@ pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
 pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
 pub const LIST: &str = "It came through a mailing list, where a reply goes to everyone on it, so it waits for you.";
+/// It came with something a reply can't have read (0.10.0-alpha.53).
+pub const ATTACHED: &str = "It came with an attachment or an invitation, which I can't read, so it waits for you.";
+/// Read before Mimic looked for attachments: whether it has one isn't known.
+pub const NOT_LOOKED_AT: &str = "I read it before I looked for attachments, so it waits for you.";
 /// What a reply says, read before it goes by itself (0.10.0-alpha.49): a
 /// model's draft can leave a gap to fill in, speak as what it is, or offer a
 /// link nobody gave it — none of which the user would send unread.
@@ -369,6 +373,13 @@ fn refusal(
     // Through a list, a reply goes to the list (RFC 3834 §2).
     if incoming.metadata.get("list").and_then(serde_json::Value::as_bool) == Some(true) {
         return Ok(Some(LIST));
+    }
+    // Something besides the words: a reply by itself would answer without
+    // having read it.
+    match incoming.metadata.get("attachments").and_then(serde_json::Value::as_bool) {
+        Some(false) => {}
+        Some(true) => return Ok(Some(ATTACHED)),
+        None => return Ok(Some(NOT_LOOKED_AT)),
     }
     if let Some(why) = unfinished(&draft.generated_text, &incoming.body) {
         return Ok(Some(why));
@@ -997,6 +1008,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+
+        // With an attachment or an invitation it can't have read.
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_set(metadata_json, '$.attachments', json('true'))
+                 WHERE external_id = 'l3@x.example'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "{ATTACHED}");
+
+        // Read before attachments were looked for.
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_remove(metadata_json, '$.attachments')
+                 WHERE external_id = 'l3@x.example'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "{NOT_LOOKED_AT}");
 
         // One already held is stopped, saying why.
         let w = world(Behaviour::default());
