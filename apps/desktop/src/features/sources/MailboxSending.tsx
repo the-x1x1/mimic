@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, InlineError } from "@mimic/ui";
 import { SmtpSecurity, type SmtpAccount } from "@mimic/contracts";
-import { useMailboxSending, useSetMailboxSending } from "@/hooks/useSending";
+import { useMailboxSending, useSetMailboxSending, useTestMailboxSending } from "@/hooks/useSending";
 import { toast } from "@/state/toast";
 
 const SECURITY_LABELS: Record<SmtpSecurity, string> = {
@@ -19,6 +19,7 @@ const SECURITY_LABELS: Record<SmtpSecurity, string> = {
 export function MailboxSending({ sourceId, name }: { sourceId: string; name: string }) {
   const current = useMailboxSending(sourceId);
   const save = useSetMailboxSending(sourceId);
+  const test = useTestMailboxSending(sourceId);
   const [open, setOpen] = useState(false);
   const sending = current.data?.sending ?? null;
   const [form, setForm] = useState<SmtpAccount | null>(null);
@@ -41,14 +42,35 @@ export function MailboxSending({ sourceId, name }: { sourceId: string; name: str
 
   if (!open || !form) {
     return (
-      <p className="muted small">
-        {sending
-          ? `Replies go out through ${sending.host} as ${sending.fromAddress}${current.data?.setByUser ? "" : ", this provider's usual server"}${(sending.copyToSent ?? !current.data?.keepsSent) ? ", and I put a copy of each in your Sent folder" : ""}. `
-          : "I can't send replies from this mailbox until you tell me its outgoing server. "}
-        <button type="button" className="linkish" onClick={start}>
-          {sending ? "Change" : "Set up sending"}
-        </button>
-      </p>
+      <div className="stack gap-1">
+        <p className="muted small">
+          {sending
+            ? `Replies go out through ${sending.host} as ${sending.fromAddress}${current.data?.setByUser ? "" : ", this provider's usual server"}${(sending.copyToSent ?? !current.data?.keepsSent) ? ", and I put a copy of each in your Sent folder" : ""}. `
+            : "I can't send replies from this mailbox until you tell me its outgoing server. "}
+          <button type="button" className="linkish" onClick={start}>
+            {sending ? "Change" : "Set up sending"}
+          </button>
+          {sending ? (
+            <>
+              {" · "}
+              <button
+                type="button"
+                className="linkish"
+                disabled={test.isPending}
+                onClick={() => test.mutate()}
+              >
+                {test.isPending ? "Trying…" : "Try it (sends nothing)"}
+              </button>
+            </>
+          ) : null}
+        </p>
+        {test.isSuccess ? (
+          <p className="muted small" role="status">
+            I signed in to {test.data} and sent nothing: replies can go out from {name}.
+          </p>
+        ) : null}
+        {test.isError ? <InlineError>{(test.error as Error).message}</InlineError> : null}
+      </div>
     );
   }
 

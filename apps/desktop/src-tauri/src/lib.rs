@@ -181,6 +181,7 @@ pub fn run() {
             commands::autoreply::stop_held_reply,
             commands::autoreply::send_held_reply_now,
             commands::sending::send_reply,
+            commands::sending::test_mailbox_sending,
             commands::sending::list_sent,
             commands::sending::reply_did_not_go,
             commands::sending::get_mailbox_sending,

@@ -41,7 +41,7 @@ export function AutoReplySection() {
   );
 
   return (
-    <Card title="Replying by myself">
+    <Card title="Replying by myself" id="by-myself">
       <p>{describeAutoReply(state.data)}</p>
       <p className="neutral">
         With this on, I send the replies I prepare in advance by myself &mdash; from your mailbox,

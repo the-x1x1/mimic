@@ -1,23 +1,23 @@
 {
   "identity": {
-    "id": "63299c78-06a6-48ba-93e6-f1f1e1ae7859",
+    "id": "f7553481-2aa7-4bf1-b032-550a9c57417b",
     "displayName": "C",
     "identifiers": [
       {
-        "id": "a6208f6f-05b0-45f3-9470-120a2c9189ab",
+        "id": "28535e89-6d81-434e-90c1-0b0821abaa6a",
         "kind": "email",
         "value": "c@example.com",
         "normalizedValue": "c@example.com"
       },
       {
-        "id": "32771063-f2cb-4a03-80af-159aee97cef3",
+        "id": "d8bf505e-304b-4ba1-b425-77e98419a606",
         "kind": "phone",
         "value": "+1 (555) 010-1111",
         "normalizedValue": "5550101111"
       }
     ],
-    "createdAt": "2026-10-26T11:49:17.144Z",
-    "updatedAt": "2026-10-26T11:49:17.144Z"
+    "createdAt": "2026-10-26T11:52:55.646Z",
+    "updatedAt": "2026-10-26T11:52:55.646Z"
   },
   "claimed": {
     "messages": 20,

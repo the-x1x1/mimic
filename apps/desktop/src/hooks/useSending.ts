@@ -51,6 +51,11 @@ export function useMailboxSending(sourceId: string) {
   });
 }
 
+/** Sign in to send from a mailbox, sending nothing: whether a reply could go now. */
+export function useTestMailboxSending(sourceId: string) {
+  return useMutation({ mutationFn: () => ipc.testMailboxSending(sourceId) });
+}
+
 export function useSetMailboxSending(sourceId: string) {
   const qc = useQueryClient();
   return useMutation({

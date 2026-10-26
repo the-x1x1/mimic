@@ -8,6 +8,7 @@ const native = vi.hoisted(() => ({
   mailboxSending: vi.fn(),
   setMailboxSending: vi.fn(),
   resetMailboxSending: vi.fn(),
+  testMailboxSending: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -84,5 +85,26 @@ describe("how a mailbox sends", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check and keep" }));
     expect(await screen.findByText(/turned down the sign-in for sending/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Use the usual server" })).toBeInTheDocument();
+  });
+
+  it("can be tried before replies depend on it, signing in and sending nothing", async () => {
+    native.mailboxSending.mockResolvedValue({ sending: gmail, setByUser: false, keepsSent: true });
+    native.testMailboxSending.mockResolvedValueOnce("smtp.gmail.com");
+    renderIt();
+    fireEvent.click(await screen.findByRole("button", { name: "Try it (sends nothing)" }));
+    expect(
+      await screen.findByText(
+        "I signed in to smtp.gmail.com and sent nothing: replies can go out from me@example.org.",
+      ),
+    ).toBeInTheDocument();
+    expect(native.testMailboxSending).toHaveBeenCalledWith("src-1");
+
+    native.testMailboxSending.mockRejectedValueOnce(
+      new Error("The mail server turned down the sign-in for sending (535)."),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Try it (sends nothing)" }));
+    expect(
+      await screen.findByText("The mail server turned down the sign-in for sending (535)."),
+    ).toBeInTheDocument();
   });
 });

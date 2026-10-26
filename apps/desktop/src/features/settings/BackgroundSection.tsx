@@ -22,7 +22,7 @@ export function BackgroundSection() {
   });
 
   return (
-    <Card title="When the window is closed">
+    <Card title="When the window is closed" id="background">
       <p className="neutral">
         I only check your mail, write replies and send them while I&rsquo;m running. With the first
         box ticked, closing my window leaves me in the notification area, by the clock; click my
