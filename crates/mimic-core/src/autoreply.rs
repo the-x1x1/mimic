@@ -104,6 +104,9 @@ const LATE_DAYS: i64 = 3;
 pub const NOT_TO_YOU: &str =
     "It wasn't sent to you directly — a list, a copy you were hidden on, or I can't tell — so I don't answer it by myself.";
 pub const SENT_FOLDER: &str = "It was in your Sent folder, so it may be yours; I don't answer it by myself.";
+/// Copied in, not written to (0.10.0-alpha.54): someone else is the one
+/// asked, so the user decides whether to say anything.
+pub const ONLY_COPIED: &str = "You were only copied in on it, so it waits for you.";
 pub const NOT_THEIRS: &str =
     "A reply would go somewhere other than the address of the person who wrote, so I don't send it by myself.";
 /// The mailbox's sending address changed while a reply was held: it would
@@ -391,16 +394,21 @@ fn refusal(
         return Ok(Some(SENT_FOLDER));
     }
     // Written to the user, by name — not a list, not a copy they were hidden
-    // on, and not mail too old to say (RFC 3834).
+    // on, and not mail too old to say (RFC 3834); and in `To`, not only
+    // copied in (0.10.0-alpha.54).
     let mine = db.user_identifier_set()?;
-    let to_me = ["to", "cc"]
-        .iter()
-        .filter_map(|k| incoming.metadata.get(*k).and_then(serde_json::Value::as_array))
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .any(|a| mine.contains(&IdentifierInput::new(IdentifierKind::Email, a).key()));
-    if !to_me {
-        return Ok(Some(NOT_TO_YOU));
+    let names_me = |key: &str| {
+        incoming
+            .metadata
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .any(|a| mine.contains(&IdentifierInput::new(IdentifierKind::Email, a).key()))
+    };
+    if !names_me("to") {
+        return Ok(Some(if names_me("cc") { ONLY_COPIED } else { NOT_TO_YOU }));
     }
     let Some(person) = draft.participant_id.as_deref() else {
         return Ok(Some(NO_PERSON));
@@ -1217,6 +1225,18 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+
+        // Only copied in: someone else was asked.
+        let w = world(Behaviour::default());
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_set(json_set(metadata_json, '$.to', json('[\"team@example.com\"]')),
+                                                              '$.cc', json('[\"c@example.com\"]'))
+                 WHERE external_id = 'l3@x.example'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "{ONLY_COPIED}");
 
         // Found in the Sent folder: perhaps the user's own.
         let w = world(Behaviour::default());

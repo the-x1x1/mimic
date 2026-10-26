@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.54] — 2026-10-26
+
+Not when you were only copied in.
+
+### Changed
+
+- I reply by myself only to mail sent to you, not mail you were only copied in on, where someone else was the one asked. That waits for you, and says why.
+
 ## [0.10.0-alpha.53] — 2026-10-26
 
 Not without reading the attachment.
