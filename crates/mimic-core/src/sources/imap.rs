@@ -753,9 +753,66 @@ fn skip_quoted(s: &str) -> &str {
     ""
 }
 
+/// A folder's name as people read it: IMAP's modified UTF-7 (RFC 3501
+/// §5.1.3) decoded, so `&AMk-l&AOk-ments envoy&AOk-s` is "Éléments envoyés"
+/// (0.10.0-alpha.42). The name as it came is what is sent back to the
+/// server; this is for matching and for showing. A name that isn't valid
+/// modified UTF-7 is left as it came.
+pub fn folder_name(raw: &str) -> String {
+    let mut out = String::new();
+    let mut rest = raw;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let Some(end) = after.find('-') else { return raw.to_string() };
+        let chunk = &after[..end];
+        if chunk.is_empty() {
+            out.push('&');
+        } else {
+            let Some(units) = modified_base64(chunk) else { return raw.to_string() };
+            match String::from_utf16(&units) {
+                Ok(s) => out.push_str(&s),
+                Err(_) => return raw.to_string(),
+            }
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Modified base64 (`,` for `/`, no padding) to UTF-16 code units; `None`
+/// for anything else, or bytes that aren't whole units.
+fn modified_base64(chunk: &str) -> Option<Vec<u16>> {
+    let mut bytes = Vec::new();
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in chunk.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b',' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            bytes.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    Some(bytes.chunks(2).map(|p| u16::from_be_bytes([p[0], p[1]])).collect())
+}
+
 /// Pick the folders to read: the inbox, and the sent folder by attribute
 /// first, by the names the common servers use second, and by its name in
-/// another language (`sources::is_sent_folder_name`) last.
+/// another language (`sources::is_sent_folder_name`) last — each name
+/// matched as people read it (`folder_name`), and kept as it came.
 pub fn choose_folders(listed: &[(Vec<String>, String)]) -> (Vec<String>, Option<String>) {
     let inbox = listed
         .iter()
@@ -767,13 +824,17 @@ pub fn choose_folders(listed: &[(Vec<String>, String)]) -> (Vec<String>, Option<
         .iter()
         .find(|(a, _)| a.iter().any(|x| x == "\\sent") && selectable(a))
         .or_else(|| {
-            SENT_NAMES.iter().find_map(|want| listed.iter().find(|(a, n)| n.to_lowercase() == *want && selectable(a)))
+            SENT_NAMES
+                .iter()
+                .find_map(|want| listed.iter().find(|(a, n)| folder_name(n).to_lowercase() == *want && selectable(a)))
         })
         .or_else(|| {
             // The last part of the name, for servers that keep folders under
-            // the inbox (`INBOX.Gesendet`). A name with an accent comes in
-            // IMAP's own encoding and isn't decoded, so it isn't matched.
-            let last = |n: &str| n.rsplit(['/', '.']).next().unwrap_or(n).to_string();
+            // the inbox (`INBOX.Gesendet`).
+            let last = |n: &str| {
+                let n = folder_name(n);
+                n.rsplit(['/', '.']).next().unwrap_or(&n).to_string()
+            };
             listed.iter().find(|(a, n)| super::is_sent_folder_name(&last(n)) && selectable(a))
         })
         .map(|(_, n)| n.clone());
@@ -1046,7 +1107,8 @@ pub fn probe(account: &ImapAccount, credential: &Credential) -> Result<ImapProbe
     let mut counts = Vec::new();
     for f in &folders {
         let (_, exists) = conn.examine(f)?;
-        counts.push((f.clone(), exists));
+        // As people read it; `folders` keeps it as the server gave it.
+        counts.push((folder_name(f), exists));
     }
     conn.logout();
     let mut warnings = Vec::new();
@@ -1673,6 +1735,29 @@ mod tests {
             (vec!["INBOX".into()], None),
             "a folder that cannot be opened is not a sent folder"
         );
+    }
+
+    #[test]
+    fn a_folder_named_in_another_language_is_read_as_people_read_it_and_kept_as_it_came() {
+        assert_eq!(folder_name("&AMk-l&AOk-ments envoy&AOk-s"), "Éléments envoyés");
+        assert_eq!(folder_name("INBOX.Gel&APY-schte Elemente"), "INBOX.Gelöschte Elemente");
+        assert_eq!(folder_name("Tom &- Jerry"), "Tom & Jerry");
+        assert_eq!(folder_name("&ZeVnLIqe-"), "日本語");
+        assert_eq!(folder_name("INBOX"), "INBOX");
+        for broken in ["&AMk", "&A*k-", "&AM-"] {
+            assert_eq!(folder_name(broken), broken, "left as it came");
+        }
+
+        let listed = vec![
+            (vec!["\\haschildren".to_string()], "INBOX".to_string()),
+            (vec![], "&AMk-l&AOk-ments supprim&AOk-s".to_string()),
+            (vec![], "&AMk-l&AOk-ments envoy&AOk-s".to_string()),
+        ];
+        let (folders, sent) = choose_folders(&listed);
+        assert_eq!(sent.as_deref(), Some("&AMk-l&AOk-ments envoy&AOk-s"), "sent back to the server as it came");
+        assert_eq!(folders, vec!["INBOX".to_string(), "&AMk-l&AOk-ments envoy&AOk-s".to_string()]);
+        let under_inbox = vec![(vec![], "INBOX".to_string()), (vec![], "INBOX.Gesendete Objekte".to_string())];
+        assert_eq!(choose_folders(&under_inbox).1.as_deref(), Some("INBOX.Gesendete Objekte"));
     }
 
     #[test]
