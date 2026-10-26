@@ -59,6 +59,17 @@ describe("answering a message from anywhere", () => {
     );
   });
 
+  it("writes a draft at once unless that is turned off", async () => {
+    native.setSetting.mockResolvedValue({});
+    renderIt();
+    const box = await screen.findByRole("checkbox", { name: /Write a draft as soon as it opens/ });
+    await waitFor(() => expect(box).toBeChecked());
+    fireEvent.click(box);
+    await waitFor(() =>
+      expect(native.setSetting).toHaveBeenCalledWith("anywhere.draftAtOnce", false),
+    );
+  });
+
   it("says so when another app already has the shortcut", async () => {
     native.setSetting.mockRejectedValue(
       new Error("Another app is already using Ctrl+Shift+Alt+R. Pick another, or turn it off."),

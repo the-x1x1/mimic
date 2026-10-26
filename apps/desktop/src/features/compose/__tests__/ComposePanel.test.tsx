@@ -51,7 +51,10 @@ const draft = (id: string, text: string): Draft => ({
 describe("writing something new", () => {
   beforeEach(() => {
     for (const f of Object.values(native)) f.mockReset();
-    native.settings.mockResolvedValue({ "anywhere.pressEnter": false });
+    native.settings.mockResolvedValue({
+      "anywhere.pressEnter": false,
+      "anywhere.draftAtOnce": false,
+    });
     native.people.mockResolvedValue({ people: [], peopleTotal: 0 });
     native.providerState.mockResolvedValue({
       providers: [{ id: "local", displayName: "Local model", local: true }],
@@ -303,13 +306,42 @@ describe("writing something new", () => {
       expect(screen.queryByRole("button", { name: "Paste it there and send" })).toBeNull();
       cleanup();
 
-      native.settings.mockResolvedValue({ "anywhere.pressEnter": true });
+      native.settings.mockResolvedValue({
+        "anywhere.pressEnter": true,
+        "anywhere.draftAtOnce": false,
+      });
       native.pasteBack.mockResolvedValue(null);
       await draftFromAnywhere();
       fireEvent.click(await screen.findByRole("button", { name: "Paste it there and send" }));
       await waitFor(() => expect(native.pasteBack).toHaveBeenCalledWith("yes, see you at 7", true));
       expect(native.resolveDraft).not.toHaveBeenCalled();
       expect(await screen.findByText("The reply you copied")).toBeInTheDocument();
+    });
+
+    it("writes a draft at once when opened from anywhere, and puts the keyboard on pasting it", async () => {
+      native.settings.mockResolvedValue({
+        "anywhere.pressEnter": false,
+        "anywhere.draftAtOnce": true,
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter
+            initialEntries={[{ pathname: "/write", state: { pasted: "are we still on for 7?" } }]}
+          >
+            <ComposePanel />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      // Nothing pressed: the draft is written once the model is ready.
+      expect(await screen.findByDisplayValue("yes, see you at 7")).toBeInTheDocument();
+      expect(native.generateDraft).toHaveBeenCalledTimes(1);
+      expect(native.generateDraft.mock.calls[0]![0]).toMatchObject({
+        incomingMessage: "are we still on for 7?",
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Paste it there" })).toHaveFocus(),
+      );
     });
 
     it("records a reply that didn't go, and nothing for one changed after copying", async () => {

@@ -34,6 +34,11 @@ pub const SETTING: &str = "anywhere.shortcut";
 /// paste, which sends in most chat apps (0.10.0-alpha.58). Off by default.
 pub const PRESS_ENTER: &str = "anywhere.pressEnter";
 
+/// Whether Write writes a draft as soon as it opens on a message from
+/// anywhere (0.10.0-alpha.63). On by default: pressing the shortcut is asking
+/// for a reply.
+pub const DRAFT_AT_ONCE: &str = "anywhere.draftAtOnce";
+
 /// The shortcuts offered, as the screen names them and as the plugin reads
 /// them. Each takes three modifiers, so none is one an app is likely to use
 /// already, none is one of Windows' own (most of those take the Windows key),

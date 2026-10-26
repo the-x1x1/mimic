@@ -39,6 +39,8 @@ pub fn defaults() -> Map<String, Value> {
     m.insert(crate::anywhere::SETTING.into(), json!(""));
     // Paste it there and send: Enter after the paste (0.10.0-alpha.58). Off.
     m.insert(crate::anywhere::PRESS_ENTER.into(), json!(false));
+    // A draft written as soon as Write opens from anywhere (0.10.0-alpha.63).
+    m.insert(crate::anywhere::DRAFT_AT_ONCE.into(), json!(true));
     // Seconds a reply the user sent waits, to be taken back (0.10.0-alpha.40).
     m.insert(UNDO_SECONDS.into(), json!(5));
     m
@@ -175,5 +177,10 @@ mod tests {
         assert_eq!(defaults().get(key), Some(&json!(false)));
         assert!(check(key, &json!(true)).is_ok());
         assert!(check(key, &json!("yes")).is_err());
+        assert_eq!(
+            defaults().get(crate::anywhere::DRAFT_AT_ONCE),
+            Some(&json!(true)),
+            "a draft at once, unless turned off"
+        );
     }
 }

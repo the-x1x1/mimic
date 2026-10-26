@@ -62,6 +62,10 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   // pressing Enter after pasting.
   const settings = useSettings();
   const pressEnter = settings.data?.["anywhere.pressEnter"] === true;
+  // Straight to a draft (0.10.0-alpha.63): opened from anywhere, one is
+  // written as soon as it can be, unless the user turned that off.
+  const settingsLoaded = settings.data !== undefined;
+  const draftAtOnce = settings.data?.["anywhere.draftAtOnce"] !== false;
 
   // Opened from anywhere (the shortcut, `anywhere.rs`): what was copied is
   // the message being answered, and a draft for something else goes —
@@ -101,11 +105,15 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   // in, and said while it stays chosen.
   const windowTitle = (location.state as { windowTitle?: unknown } | null)?.windowTitle;
   const guessedFor = useRef<string | null>(null);
+  // The navigation whose window title has been looked at, so a draft written
+  // at once is written to whoever it names.
+  const [guessDone, setGuessDone] = useState<string | null>(null);
   const listed = people.data?.people;
   useEffect(() => {
     if (typeof pasted !== "string" || typeof windowTitle !== "string" || !listed) return;
     if (guessedFor.current === location.key) return;
     guessedFor.current = location.key;
+    setGuessDone(location.key);
     const found = personFromTitle(
       windowTitle,
       listed.map((p) => ({ id: p.participant.id, name: p.participant.displayName })),
@@ -162,6 +170,42 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     setDraft(result);
     setEdited(result.generatedText);
   }
+
+  // The latest `run`, for the draft written at once: an effect that named
+  // `run` would run again on every render.
+  const runLatest = useRef(run);
+  useEffect(() => {
+    runLatest.current = run;
+  });
+  const autoFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof pasted !== "string" || !settingsLoaded || !draftAtOnce) return;
+    if (autoFor.current === location.key) return;
+    // After the message is in, and the window's title has been read.
+    if (incoming !== pasted || draft !== null) return;
+    if (typeof windowTitle === "string" && guessDone !== location.key) return;
+    if (!readiness.ready || generate.isPending) return;
+    autoFor.current = location.key;
+    void runLatest.current().catch(() => undefined);
+  }, [
+    pasted,
+    settingsLoaded,
+    draftAtOnce,
+    location.key,
+    incoming,
+    draft,
+    windowTitle,
+    guessDone,
+    readiness.ready,
+    generate.isPending,
+  ]);
+
+  // A draft for a message from anywhere puts the keyboard on putting it
+  // back: Enter pastes it (and sends it, when that is on).
+  const pasteButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (draft && fromAnywhere) pasteButton.current?.focus();
+  }, [draft, fromAnywhere]);
 
   async function markSent() {
     if (!draft) return;
@@ -420,13 +464,14 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
               />
               <div className="row gap-2">
                 {fromAnywhere && pressEnter ? (
-                  <Button variant="primary" onClick={() => void pasteThere(true)}>
+                  <Button ref={pasteButton} variant="primary" onClick={() => void pasteThere(true)}>
                     Paste it there and send
                   </Button>
                 ) : null}
                 {fromAnywhere ? (
                   <>
                     <Button
+                      ref={pressEnter ? undefined : pasteButton}
                       variant={pressEnter ? "ghost" : "primary"}
                       onClick={() => void pasteThere()}
                     >
