@@ -40,6 +40,7 @@ import {
   SituationFiling,
   MailSignIns,
   SignInSetup,
+  MailboxFolders,
   EncoderView,
   VoiceOverview,
   Dashboard,
@@ -127,6 +128,17 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
   it("parses which providers this copy can sign in to a mailbox with", () => {
     const view = MailSignIns.parse(read(contractFixture("mail_sign_ins.json")));
     expect(view).toEqual({ microsoft: false, google: true });
+  });
+
+  it("parses the other folders a mailbox may be read in", () => {
+    const view = MailboxFolders.parse(read(contractFixture("mailbox_folders.json")));
+    expect(view.folders.map((f) => [f.shown, f.chosen])).toEqual([
+      ["Receipts", true],
+      ["Études", true],
+    ]);
+    expect(view.gone).toEqual(["Old rules"]);
+    expect(view.unopened).toEqual(["Receipts"]);
+    expect(view.most).toBe(10);
   });
 
   it("parses what each provider signs mailboxes in as, without a secret", () => {

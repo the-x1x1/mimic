@@ -59,6 +59,8 @@ export const qk = {
   sent: ["sent"] as const,
   autoReply: ["autoReply"] as const,
   mailboxSending: (sourceId: string) => ["sources", "sending", sourceId] as const,
+  // Not under "sources": asking signs in to the mailbox, so only when shown.
+  mailboxFolders: (sourceId: string) => ["mailboxFolders", sourceId] as const,
   draftOutcomes: ["draftOutcomes"] as const,
   providers: ["providers"] as const,
   providerHealth: (id: string) => ["providerHealth", id] as const,

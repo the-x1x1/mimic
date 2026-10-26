@@ -15,6 +15,7 @@ import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
 import { ConnectSlackDialog, SlackToken } from "./ConnectSlackDialog";
 import { ConnectTeamsDialog, TeamsSignInAgain } from "./ConnectTeamsDialog";
 import { MailboxPassword, MailboxSignInAgain } from "./MailboxPassword";
+import { MailboxFolders } from "./MailboxFolders";
 import { MailboxSending } from "./MailboxSending";
 import { SentList } from "./SentList";
 import { ServerTranscript } from "./ServerTranscript";
@@ -114,7 +115,10 @@ export function SourcesPage() {
                       <ServerTranscript lines={s.lastError.transcript} />
                     ) : null}
                     {s.connector === "imap" ? (
-                      <MailboxSending sourceId={s.id} name={s.name} />
+                      <>
+                        <MailboxFolders sourceId={s.id} name={s.name} />
+                        <MailboxSending sourceId={s.id} name={s.name} />
+                      </>
                     ) : null}
                   </td>
                   <td>{CHANNEL_LABELS[s.channel as Channel] ?? s.channel}</td>

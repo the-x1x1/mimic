@@ -705,6 +705,8 @@ mod tests {
                 copy_to_sent: Some(false),
             }),
             signature: None,
+            also_read: Vec::new(),
+            passed_over: Vec::new(),
         };
         let mailbox = db
             .create_source(&NewSource {

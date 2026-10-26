@@ -1,0 +1,17 @@
+{
+  "folders": [
+    {
+      "name": "Receipts",
+      "shown": "Receipts",
+      "chosen": true
+    },
+    {
+      "name": "&AMk-tudes",
+      "shown": "Études",
+      "chosen": true
+    }
+  ],
+  "gone": ["Old rules"],
+  "unopened": ["Receipts"],
+  "most": 10
+}

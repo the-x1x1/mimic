@@ -67,6 +67,10 @@ pub(crate) struct Mail {
     /// It carries an attachment or an invitation (0.10.0-alpha.53,
     /// `mime::has_attachments`): `metadata.attachments`.
     pub(crate) attachments: bool,
+    /// The folder it was read in, as people read its name, when that is one
+    /// the user chose to have read as well as the inbox (0.10.0-alpha.73,
+    /// `imap::ImapSourceConfig::also_read`): `metadata.folder`.
+    pub(crate) folder: Option<String>,
 }
 
 impl CommunicationSource for MboxSource {
@@ -263,6 +267,7 @@ pub(crate) fn parse_raw(raw: &[u8]) -> Option<Mail> {
         sent_on_its_own: false,
         list: get("list-id").is_some() || get("list-post").is_some(),
         attachments: super::mime::has_attachments(&headers, &raw_body),
+        folder: None,
     })
 }
 
@@ -443,6 +448,11 @@ pub(crate) fn thread(mut mails: Vec<Mail>) -> Vec<DiscoveredConversation> {
                             // either way, so mail read before this was looked
                             // for is told apart from mail without any.
                             meta.insert("attachments".into(), json!(m.attachments));
+                            // Filed by the user's own rules away from the
+                            // inbox: waits for them (`autoreply::FILED`).
+                            if let Some(folder) = &m.folder {
+                                meta.insert("folder".into(), json!(folder));
+                            }
                             // Read by the dashboard to leave the thread out of
                             // what is waiting; absent means a person wrote it.
                             if m.sent_on_its_own {

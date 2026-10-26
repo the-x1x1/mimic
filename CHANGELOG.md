@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.73] — 2026-10-26
+
+Other folders.
+
+### Added
+
+- **Mail your rules file away.** Under each mailbox in Your mail, **Other folders to read** lists the folders I can read besides your inbox and Sent folder — leaving out drafts, deleted and junk mail wherever the server or the folder's name says that's what it holds — and reads the ones you tick (up to ten) on every check, the newest 500 of each the first time. What I find there waits for you: I never reply to it by myself. A folder the server won't open is passed over, and said, without stopping your inbox from being read.
+
 ## [0.10.0-alpha.72] — 2026-10-26
 
 Tightened.

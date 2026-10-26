@@ -54,6 +54,90 @@ use crate::import::{ImportError, Importer};
 pub const CONNECTOR: &str = "imap";
 /// Messages read from a folder the first time it is checked.
 pub const FIRST_SYNC_LIMIT: usize = 2000;
+
+/// The most folders read as well as the inbox and the sent folder
+/// (`ImapSourceConfig::also_read`), so a check stays a check.
+pub const MOST_ALSO_READ: usize = 10;
+
+/// How much of a chosen folder the first check reads (`also_read`): the
+/// newest this many, as `FIRST_SYNC_LIMIT` is for the inbox.
+pub const FIRST_FILED_LIMIT: usize = 500;
+
+/// What a folder never offered to be read as well is marked with: drafts
+/// (not sent), deleted and junk mail, Gmail's All Mail, Starred and
+/// Important (copies of what is elsewhere), a sent folder, and a name that
+/// can't be opened.
+const NOT_OFFERED: [&str; 9] =
+    ["\\drafts", "\\trash", "\\junk", "\\all", "\\flagged", "\\important", "\\sent", "\\noselect", "\\nonexistent"];
+
+/// The same, by the usual names, for servers that mark nothing: the last
+/// part of the name, as people read it, in lower case.
+/// In the languages `is_sent_folder_name` knows: a mark is the surer
+/// sign, and most servers give one.
+const NOT_OFFERED_NAMES: [&str; 57] = [
+    // Drafts.
+    "drafts",
+    "draft",
+    "brouillons",
+    "entwürfe",
+    "borradores",
+    "bozze",
+    "concepten",
+    "rascunhos",
+    "utkast",
+    "kladder",
+    "luonnokset",
+    "szkice",
+    // Deleted.
+    "trash",
+    "bin",
+    "deleted",
+    "deleted items",
+    "deleted messages",
+    "papierkorb",
+    "gelöschte elemente",
+    "gelöschte objekte",
+    "corbeille",
+    "éléments supprimés",
+    "papelera",
+    "elementos eliminados",
+    "cestino",
+    "posta eliminata",
+    "prullenbak",
+    "verwijderde items",
+    "lixeira",
+    "lixo",
+    "itens excluídos",
+    "papperskorgen",
+    "borttaget",
+    "kosz",
+    // Junk.
+    "junk",
+    "junk e-mail",
+    "junk email",
+    "junk mail",
+    "spam",
+    "bulk mail",
+    "junk-e-mail",
+    "courrier indésirable",
+    "correo no deseado",
+    "posta indesiderata",
+    "ongewenste e-mail",
+    "lixo eletrônico",
+    "skräppost",
+    // Not yet sent.
+    "outbox",
+    "postausgang",
+    "boîte d'envoi",
+    "bandeja de salida",
+    "posta in uscita",
+    "postvak uit",
+    "caixa de saída",
+    // Copies of everything else.
+    "all mail",
+    "starred",
+    "important",
+];
 /// Messages fetched per round trip.
 const CHUNK: usize = 50;
 /// Bytes fetched per round trip, whatever the count: fifty newsletters with
@@ -177,6 +261,17 @@ pub struct ImapSourceConfig {
     /// one.
     #[serde(default)]
     pub signature: Option<String>,
+    /// Folders the user chose to have read as well as the inbox and the sent
+    /// folder, as the server names them (0.10.0-alpha.73): where their own
+    /// rules file mail. Only those `offered_folders` still lists are read,
+    /// at most `MOST_ALSO_READ`; what comes from them is marked `folder` and
+    /// is never answered by itself (`autoreply::FILED`).
+    #[serde(default)]
+    pub also_read: Vec<String>,
+    /// Those of `also_read` the last check couldn't open, as the server names
+    /// them: passed over, the rest read (0.10.0-alpha.73).
+    #[serde(default)]
+    pub passed_over: Vec<String>,
 }
 
 impl ImapSourceConfig {
@@ -892,21 +987,54 @@ pub fn choose_folders(listed: &[(Vec<String>, String)]) -> (Vec<String>, Option<
                 .iter()
                 .find_map(|want| listed.iter().find(|(a, n)| folder_name(n).to_lowercase() == *want && selectable(a)))
         })
-        .or_else(|| {
-            // The last part of the name, for servers that keep folders under
-            // the inbox (`INBOX.Gesendet`).
-            let last = |n: &str| {
-                let n = folder_name(n);
-                n.rsplit(['/', '.']).next().unwrap_or(&n).to_string()
-            };
-            listed.iter().find(|(a, n)| super::is_sent_folder_name(&last(n)) && selectable(a))
-        })
+        .or_else(|| listed.iter().find(|(a, n)| super::is_sent_folder_name(&last_part(n)) && selectable(a)))
         .map(|(_, n)| n.clone());
     let mut folders = vec![inbox];
     if let Some(s) = &sent {
         folders.push(s.clone());
     }
     (folders, sent)
+}
+
+/// The last part of a folder's name as people read it, for servers that
+/// keep folders under the inbox (`INBOX.Gesendet`).
+fn last_part(raw: &str) -> String {
+    let n = folder_name(raw);
+    n.rsplit(['/', '.']).next().unwrap_or(&n).to_string()
+}
+
+/// The folders a mailbox may be read in as well (0.10.0-alpha.73,
+/// `ImapSourceConfig::also_read`): every folder the server lists that can
+/// be opened, other than the inbox and the sent folder `choose_folders`
+/// reads, and none that holds drafts, deleted or junk mail, mail not yet
+/// sent or copies of everything — by the server's mark, or by the usual
+/// names where it gives none. As the server names them, in its order.
+pub fn offered_folders(listed: &[(Vec<String>, String)]) -> Vec<String> {
+    let (read, _) = choose_folders(listed);
+    let mut offered: Vec<String> = Vec::new();
+    for (attrs, name) in listed {
+        let last = last_part(name).to_lowercase();
+        if read.contains(name)
+            || name.eq_ignore_ascii_case("INBOX")
+            || offered.contains(name)
+            || attrs.iter().any(|a| NOT_OFFERED.contains(&a.as_str()))
+            || NOT_OFFERED_NAMES.contains(&last.as_str())
+            || super::is_sent_folder_name(&last)
+        {
+            continue;
+        }
+        offered.push(name.clone());
+    }
+    offered
+}
+
+/// The folders `account` may be read in as well (`offered_folders`):
+/// signed in to, listed, and nothing opened.
+pub fn other_folders(account: &ImapAccount, credential: &Credential) -> Result<Vec<String>, ImapError> {
+    let mut conn = Connection::open(account, credential)?;
+    let listed = conn.list()?;
+    conn.logout();
+    Ok(offered_folders(&listed))
 }
 
 // --------------------------------------------------------------- connecting
@@ -1256,6 +1384,10 @@ pub struct SyncSummary {
     pub from_self: usize,
     /// UIDVALIDITY changed and the folder was read again from the start.
     pub renumbered: Vec<String>,
+    /// Chosen folders the server wouldn't open, or stopped answering for,
+    /// as people read them: passed over (0.10.0-alpha.73).
+    #[serde(default)]
+    pub passed_over: Vec<String>,
 }
 
 /// Check a mailbox for new mail and import it.
@@ -1305,6 +1437,7 @@ pub fn sync(
     {
         config.sending = latest.sending;
         config.signature = latest.signature;
+        config.also_read = latest.also_read;
     }
     db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
     match &result {
@@ -1386,15 +1519,33 @@ fn sync_inner(
     // Folders are looked up every time: a sent folder renamed, or shown in
     // another language after a settings change, should not break every check
     // that follows.
-    let (folders, sent) = choose_folders(&conn.list()?);
+    let listed = conn.list()?;
+    let (mut folders, sent) = choose_folders(&listed);
+    // And those the user chose, while the server still offers them.
+    let offered = offered_folders(&listed);
+    let filed: Vec<String> =
+        config.also_read.iter().filter(|f| offered.contains(f)).take(MOST_ALSO_READ).cloned().collect();
+    folders.extend(filed.iter().cloned());
     config.folders = folders.clone();
     config.sent_folder = sent.clone();
 
     let mut summary = SyncSummary::default();
     // What is new, per folder: (folder, uidvalidity, uids to read, highest uid seen).
     let mut plan: Vec<(String, u32, Vec<u32>, u32)> = Vec::new();
+    // A chosen folder the server won't open, or stops answering for part
+    // way, is passed over with its mark where it was, and the rest read
+    // (0.10.0-alpha.73): only the inbox and the sent folder fail a check.
+    let passes_over = |folder: &String, e: &ImapError| filed.contains(folder) && matches!(e, ImapError::Refused(_));
+    let mut given_up: Vec<String> = Vec::new();
     for folder in &folders {
-        let (validity, exists) = conn.examine(folder)?;
+        let (validity, exists) = match conn.examine(folder) {
+            Ok(v) => v,
+            Err(e) if passes_over(folder, &e) => {
+                given_up.push(folder.clone());
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let mark = config.marks.entry(folder.clone()).or_default();
         if mark.uid_validity != validity {
             if mark.uid_validity != 0 {
@@ -1407,24 +1558,45 @@ fn sync_inner(
             plan.push((folder.clone(), validity, Vec::new(), 0));
             continue;
         }
-        let mut uids = conn.uids_after(mark.last_uid)?;
-        if mark.last_uid == 0 && uids.len() > FIRST_SYNC_LIMIT {
-            uids = uids.split_off(uids.len() - FIRST_SYNC_LIMIT);
+        let first = if filed.contains(folder) { FIRST_FILED_LIMIT } else { FIRST_SYNC_LIMIT };
+        let mut uids = match conn.uids_after(mark.last_uid) {
+            Ok(u) => u,
+            Err(e) if passes_over(folder, &e) => {
+                given_up.push(folder.clone());
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        if mark.last_uid == 0 && uids.len() > first {
+            uids = uids.split_off(uids.len() - first);
         }
         let highest = uids.iter().copied().max().unwrap_or(0);
         plan.push((folder.clone(), validity, uids, highest));
     }
 
     let mut mails: Vec<Mail> = Vec::new();
-    for (folder, _, uids, _) in &plan {
+    'folders: for (folder, _, uids, _) in &plan {
         if uids.is_empty() {
             summary.folders.push((folder.clone(), 0));
             continue;
         }
-        conn.examine(folder)?;
+        if let Err(e) = conn.examine(folder) {
+            if passes_over(folder, &e) {
+                given_up.push(folder.clone());
+                continue;
+            }
+            return Err(e);
+        }
         let mut sizes: HashMap<u32, u64> = HashMap::new();
         for chunk in uids.chunks(500) {
-            sizes.extend(conn.sizes(chunk)?);
+            match conn.sizes(chunk) {
+                Ok(s) => sizes.extend(s),
+                Err(e) if passes_over(folder, &e) => {
+                    given_up.push(folder.clone());
+                    continue 'folders;
+                }
+                Err(e) => return Err(e),
+            }
         }
         let mut batch: Vec<u32> = Vec::new();
         let mut batch_bytes = 0u64;
@@ -1451,7 +1623,14 @@ fn sync_inner(
                 conn.logout();
                 return Err(ImapError::Canceled);
             }
-            let fetched = conn.fetch(&b)?;
+            let fetched = match conn.fetch(&b) {
+                Ok(f) => f,
+                Err(e) if passes_over(folder, &e) => {
+                    given_up.push(folder.clone());
+                    continue 'folders;
+                }
+                Err(e) => return Err(e),
+            };
             summary.fetched += fetched.len();
             read += fetched.len();
             for (_, bytes) in &fetched {
@@ -1464,6 +1643,9 @@ fn sync_inner(
                 match std::panic::catch_unwind(|| parse_raw(bytes)) {
                     Ok(Some(mut m)) => {
                         m.sent |= sent.as_deref() == Some(folder.as_str());
+                        if filed.contains(folder) {
+                            m.folder = Some(folder_name(folder));
+                        }
                         mails.push(m);
                     }
                     Ok(None) => summary.without_text += 1,
@@ -1489,8 +1671,14 @@ fn sync_inner(
     summary.duplicates = imported.duplicates;
     summary.from_self = imported.from_self;
 
-    // Everything is in; only now move the position past it.
+    // Everything is in; only now move the position past it — not for a
+    // folder given up on, which is read again from where it was.
+    summary.passed_over = given_up.iter().map(|f| folder_name(f)).collect();
+    config.passed_over = given_up.clone();
     for (folder, validity, _, highest) in plan {
+        if given_up.contains(&folder) {
+            continue;
+        }
         let mark = config.marks.entry(folder).or_default();
         mark.uid_validity = validity;
         mark.last_uid = mark.last_uid.max(highest);
@@ -2001,15 +2189,20 @@ mod tests {
                         let name = arg.trim().trim_matches('"');
                         selected = boxes.iter().position(|b| b.name == name);
                         let b = &boxes[selected.unwrap()];
-                        w.write_all(
-                            format!(
-                                "* {} EXISTS\r\n* OK [UIDVALIDITY {}] ok\r\n{tag} OK [READ-ONLY] done\r\n",
-                                b.messages.len(),
-                                b.validity
+                        // A folder this server won't open has validity 0.
+                        if b.validity == 0 {
+                            w.write_all(format!("{tag} NO [NOPERM] You may not open that\r\n").as_bytes()).unwrap();
+                        } else {
+                            w.write_all(
+                                format!(
+                                    "* {} EXISTS\r\n* OK [UIDVALIDITY {}] ok\r\n{tag} OK [READ-ONLY] done\r\n",
+                                    b.messages.len(),
+                                    b.validity
+                                )
+                                .as_bytes(),
                             )
-                            .as_bytes(),
-                        )
-                        .unwrap();
+                            .unwrap();
+                        }
                     } else if let Some(range) = upper.strip_prefix("UID SEARCH UID ") {
                         let from: u32 = range.split(':').next().unwrap().parse().unwrap();
                         let b = &boxes[selected.unwrap()];
@@ -2107,6 +2300,8 @@ mod tests {
             last_read_at: None,
             sending: None,
             signature: None,
+            also_read: Vec::new(),
+            passed_over: Vec::new(),
         };
         let source = db
             .create_source(&crate::db::NewSource {
@@ -2186,6 +2381,139 @@ mod tests {
         let second = sync(&db, &source, &pw("app-pass"), &mut |_, _| {}, &|| false).unwrap();
         assert_eq!(second.fetched, 0);
         assert_eq!(second.inserted, 0);
+    }
+
+    #[test]
+    fn folders_offered_to_read_as_well_leave_out_drafts_deleted_junk_and_copies() {
+        let attrs = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let listed = vec![
+            (attrs(&["\\hasnochildren"]), "INBOX".to_string()),
+            (attrs(&["\\hasnochildren", "\\sent"]), "Sent".to_string()),
+            (attrs(&["\\hasnochildren", "\\drafts"]), "Brouillons".to_string()),
+            (attrs(&["\\noselect", "\\haschildren"]), "[Gmail]".to_string()),
+            (attrs(&["\\hasnochildren", "\\all"]), "[Gmail]/All Mail".to_string()),
+            (attrs(&["\\hasnochildren", "\\important"]), "[Gmail]/Important".to_string()),
+            (attrs(&["\\hasnochildren"]), "Receipts".to_string()),
+            (attrs(&["\\hasnochildren"]), "INBOX.Newsletters".to_string()),
+            (attrs(&["\\hasnochildren"]), "Deleted Items".to_string()),
+            (attrs(&["\\hasnochildren"]), "Junk E-mail".to_string()),
+            (attrs(&["\\hasnochildren"]), "Outbox".to_string()),
+            (attrs(&["\\hasnochildren"]), "INBOX.Papierkorb".to_string()),
+            (attrs(&["\\hasnochildren"]), "Courrier ind&AOk-sirable".to_string()),
+            (attrs(&["\\hasnochildren"]), "Sent Items".to_string()),
+            (attrs(&["\\hasnochildren", "\\archive"]), "Archive".to_string()),
+            (attrs(&["\\hasnochildren"]), "&AMk-tudes".to_string()),
+        ];
+        assert_eq!(
+            offered_folders(&listed),
+            vec!["Receipts", "INBOX.Newsletters", "Archive", "&AMk-tudes"],
+            "named as the server names them; shown with folder_name"
+        );
+        assert_eq!(folder_name("&AMk-tudes"), "\u{c9}tudes");
+    }
+
+    #[test]
+    fn a_folder_the_user_chose_is_read_as_well_and_what_comes_from_it_is_marked() {
+        let inbox = Mailbox {
+            name: "INBOX",
+            validity: 7,
+            messages: vec![(
+                1,
+                mail(
+                    "q1@x",
+                    "Ada <ada@example.com>",
+                    None,
+                    "Mon, 2 Mar 2026 09:00:00 +0000",
+                    "can you make the offsite?",
+                ),
+            )],
+        };
+        let sent = Mailbox { name: "Sent", validity: 3, messages: vec![] };
+        let receipts = Mailbox {
+            name: "Receipts",
+            validity: 5,
+            messages: vec![(
+                4,
+                mail("r1@x", "Bob <bob@example.com>", None, "Mon, 2 Mar 2026 10:00:00 +0000", "your table is booked"),
+            )],
+        };
+        let drafts = Mailbox {
+            name: "Drafts",
+            validity: 9,
+            messages: vec![(
+                2,
+                mail("d1@x", "C <c@example.com>", Some("q1@x"), "Mon, 2 Mar 2026 09:10:00 +0000", "half-written"),
+            )],
+        };
+        let (port, seen) = serve(vec![inbox, sent, receipts, drafts], "app-pass");
+        let (db, source) = db_for(port);
+        let mut cfg: ImapSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        // Drafts is never read, and a folder gone from the server is passed over.
+        cfg.also_read = vec!["Receipts".into(), "Drafts".into(), "Gone".into()];
+        db.set_source_config(&source, &serde_json::to_value(&cfg).unwrap()).unwrap();
+
+        let summary = sync(&db, &source, &pw("app-pass"), &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!((summary.fetched, summary.inserted), (2, 2));
+        assert!(summary.folders.contains(&("Receipts".to_string(), 1)), "{:?}", summary.folders);
+        let commands = seen.recv().unwrap();
+        assert!(commands.iter().any(|c| c.contains("EXAMINE \"Receipts\"")), "{commands:?}");
+        assert!(!commands.iter().any(|c| c.contains("Drafts") || c.contains("Gone")), "{commands:?}");
+        let folder_of = |id: &str| -> Option<String> {
+            db.conn()
+                .query_row(
+                    "SELECT json_extract(metadata_json, '$.folder') FROM messages WHERE external_id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(folder_of("r1@x").as_deref(), Some("Receipts"));
+        assert_eq!(folder_of("q1@x"), None, "the inbox's mail is not marked");
+        let cfg: ImapSourceConfig = serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        assert_eq!(cfg.marks["Receipts"], FolderMark { uid_validity: 5, last_uid: 4 });
+        assert_eq!(cfg.also_read, vec!["Receipts", "Drafts", "Gone"], "the user's choice is theirs to change");
+        assert!(cfg.passed_over.is_empty());
+    }
+
+    #[test]
+    fn a_chosen_folder_the_server_wont_open_is_passed_over_and_the_inbox_still_read() {
+        let inbox = Mailbox {
+            name: "INBOX",
+            validity: 7,
+            messages: vec![(
+                1,
+                mail(
+                    "q1@x",
+                    "Ada <ada@example.com>",
+                    None,
+                    "Mon, 2 Mar 2026 09:00:00 +0000",
+                    "can you make the offsite?",
+                ),
+            )],
+        };
+        let sent = Mailbox { name: "Sent", validity: 3, messages: vec![] };
+        let shared = Mailbox {
+            name: "Shared/Team",
+            validity: 0,
+            messages: vec![(
+                1,
+                mail("t1@x", "Bob <bob@example.com>", None, "Mon, 2 Mar 2026 10:00:00 +0000", "hi team"),
+            )],
+        };
+        let (port, _seen) = serve(vec![inbox, sent, shared], "app-pass");
+        let (db, source) = db_for(port);
+        let mut cfg: ImapSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        cfg.also_read = vec!["Shared/Team".into()];
+        db.set_source_config(&source, &serde_json::to_value(&cfg).unwrap()).unwrap();
+
+        let summary = sync(&db, &source, &pw("app-pass"), &mut |_, _| {}, &|| false).unwrap();
+        assert_eq!((summary.inserted, summary.passed_over.clone()), (1, vec!["Shared/Team".to_string()]));
+        assert_eq!(db.get_source(&source).unwrap().unwrap().status, "imported");
+        let cfg: ImapSourceConfig = serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        assert_eq!(cfg.passed_over, vec!["Shared/Team"]);
+        assert!(!cfg.marks.contains_key("Shared/Team"), "read from the start once it opens");
     }
 
     /// Credentials for tests: secrets in memory, saves recorded, Microsoft's
@@ -3145,6 +3473,8 @@ mod tests {
             last_read_at: None,
             sending: None,
             signature: None,
+            also_read: Vec::new(),
+            passed_over: Vec::new(),
         };
         let second = db
             .create_source(&crate::db::NewSource {
@@ -3233,6 +3563,8 @@ mod tests {
             last_read_at: None,
             sending: None,
             signature: None,
+            also_read: Vec::new(),
+            passed_over: Vec::new(),
         };
         let reply = b"From: c@example.com\r\nTo: ada@example.com\r\nSubject: Re: Lunch\r\n\r\nsee you there\r\n";
         copy_to_sent(&config, &pw("pw"), reply).unwrap();

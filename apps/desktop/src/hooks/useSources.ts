@@ -194,3 +194,31 @@ export function summarizeImport(result: unknown): string | null {
   const parsed = ImportSummary.safeParse(result);
   return parsed.success ? describeImport(parsed.data) : null;
 }
+
+/**
+ * The folders a mailbox may be read in as well (0.10.0-alpha.73). Asking
+ * signs in to the mailbox, so only while `shown`, and not again on focus.
+ */
+export function useMailboxFolders(sourceId: string, shown: boolean) {
+  return useQuery({
+    queryKey: qk.mailboxFolders(sourceId),
+    queryFn: () => ipc.mailboxFolders(sourceId),
+    enabled: shown,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}
+
+export function useSetMailboxFolders(sourceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (folders: string[]) => ipc.setMailboxFolders(sourceId, folders),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.mailboxFolders(sourceId), data);
+      // A check has started.
+      qc.invalidateQueries({ queryKey: qk.sources });
+      qc.invalidateQueries({ queryKey: qk.jobs });
+    },
+  });
+}

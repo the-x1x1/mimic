@@ -118,7 +118,7 @@ impl MailboxSending {
 /// letter.
 const SIGNATURE_MOST: usize = 1000;
 
-fn mailbox_config(state: &crate::AppState, source_id: &str) -> CommandResult<ImapSourceConfig> {
+pub(crate) fn mailbox_config(state: &crate::AppState, source_id: &str) -> CommandResult<ImapSourceConfig> {
     let source = state
         .db
         .get_source(source_id)?

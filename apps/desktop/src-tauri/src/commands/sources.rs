@@ -205,6 +205,8 @@ fn add_mailbox(
         // one (`sending_account`), until the user sets another.
         sending: None,
         signature: None,
+        also_read: Vec::new(),
+        passed_over: Vec::new(),
     };
     let source = state.db.create_source(&mimic_core::db::NewSource {
         connector: imap::CONNECTOR.into(),

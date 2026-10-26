@@ -51,6 +51,7 @@ import {
   CommandError,
   AutoReplyState,
   MailboxSending,
+  MailboxFolders,
   MailExchangers,
   MailSignIns,
   SignInSetup,
@@ -378,6 +379,11 @@ export const ipc = {
   mailboxSending: (sourceId: string) => call("get_mailbox_sending", MailboxSending, { sourceId }),
   /** Sign in to the mailbox's outgoing server and send nothing; its name when it worked. */
   testMailboxSending: (sourceId: string) => call("test_mailbox_sending", z_string, { sourceId }),
+  /** The folders a mailbox may be read in as well, and which are; signs in, opens nothing. */
+  mailboxFolders: (sourceId: string) => call("mailbox_folders", MailboxFolders, { sourceId }),
+  /** Read these as well from now on (none for none); a check starts. */
+  setMailboxFolders: (sourceId: string, folders: string[]) =>
+    call("set_mailbox_folders", MailboxFolders, { sourceId, folders }),
   /** Sign in to a connected mailbox and look at its folders, opening nothing. */
   testMailboxReading: (sourceId: string) => call("test_mailbox_reading", ImapProbe, { sourceId }),
   /** Checked first — signed in to, nothing sent — and kept only if that worked. */

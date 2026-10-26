@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod encoder;
 pub mod jobs;
 pub mod localmodel;
+pub mod mail_folders;
 pub mod people;
 pub mod providers;
 pub mod sending;
