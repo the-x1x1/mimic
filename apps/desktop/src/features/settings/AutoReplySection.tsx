@@ -65,14 +65,14 @@ export function AutoReplySection() {
         message it answers, where you can stop it or send it at once, and it doesn&rsquo;t go until
         I&rsquo;ve checked your mailbox again, in case you answered from somewhere else; then I
         check everything once more, under your rules as they are then. I only answer mail that
-        arrives after you turn this on, that I read the same day, and that was sent to you by name
-        &mdash; never mail that looks automated, a mailing list, a message with an attachment or an
-        invitation, a thread you said needs no reply, a reply you asked me to write, or the same
-        message twice. A reply with a gap left to fill in, a link they didn&rsquo;t send, or talk of
-        being an AI waits for you. I stop at your daily limit; each reply tells other mail programs
-        it was sent automatically, so their automatic replies don&rsquo;t answer it; and nothing I
-        send by myself is read as how you write. You can rehearse it first: I do all of this, and
-        send nothing.
+        arrives after you turn this on, that I read the same day, and that was sent to you by name,
+        not only copied to you &mdash; never mail that looks automated, a mailing list, a message
+        with an attachment or an invitation, a thread you said needs no reply, a reply you asked me
+        to write, or the same message twice. A reply with a gap left to fill in, a link they
+        didn&rsquo;t send, or talk of being an AI waits for you. I stop at your daily limit; each
+        reply tells other mail programs it was sent automatically, so their automatic replies
+        don&rsquo;t answer it; and nothing I send by myself is read as how you write. You can
+        rehearse it first: I do all of this, and send nothing.
       </p>
 
       {rules.enabled ? (

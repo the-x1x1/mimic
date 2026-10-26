@@ -79,8 +79,8 @@
     "overrides": [],
     "examples": [
       {
-        "id": "43ea5058-2a27-45b7-97ae-839fdd9a2e55",
-        "messageId": "321e3347-591f-4013-8cc5-7de8bbac1337",
+        "id": "863ba953-e8b9-434e-8d12-347c3150cffb",
+        "messageId": "f2aefd72-d78e-425c-bc88-6dec25775326",
         "layer": "global",
         "scopeKey": "",
         "participantId": null,
@@ -90,19 +90,8 @@
         "sentAt": "2026-01-24T09:08:00Z"
       },
       {
-        "id": "a9ad88ae-7a29-4f83-9a55-6466baec82ea",
-        "messageId": "ddb3280e-7cf3-4ba4-bee4-49bb83b2b1a7",
-        "layer": "global",
-        "scopeKey": "",
-        "participantId": null,
-        "reason": "typical length, a phrase you repeat",
-        "score": 1.175,
-        "body": "probably not, let me know if you disagree",
-        "sentAt": "2026-01-11T09:07:00Z"
-      },
-      {
-        "id": "fde344f9-4ff7-4b19-8399-3c4936d1d6ed",
-        "messageId": "0f38d1b8-a748-4643-9109-2451fca65eea",
+        "id": "8254d2fb-5d39-49bc-bb23-ff1444997fd6",
+        "messageId": "c1554f97-4e76-46ea-aa32-360f210fcaf3",
         "layer": "global",
         "scopeKey": "",
         "participantId": null,
@@ -112,8 +101,19 @@
         "sentAt": "2026-01-08T09:05:00Z"
       },
       {
-        "id": "82b176bc-36b1-4e3e-b386-04eefe3f7a4e",
-        "messageId": "eea312d1-3e83-4403-9403-496ba3a59395",
+        "id": "4175d02e-ed9e-4a8a-9cec-448ce02f6725",
+        "messageId": "4daa3d14-7403-479f-a787-98e7556157af",
+        "layer": "global",
+        "scopeKey": "",
+        "participantId": null,
+        "reason": "typical length, a phrase you repeat",
+        "score": 1.175,
+        "body": "probably not, let me know if you disagree",
+        "sentAt": "2026-01-11T09:07:00Z"
+      },
+      {
+        "id": "c5e6c6e5-3fc9-4416-bc49-444f9333feeb",
+        "messageId": "d2917a9a-1fb8-4d87-825b-30d1a8945431",
         "layer": "global",
         "scopeKey": "",
         "participantId": null,
@@ -123,8 +123,19 @@
         "sentAt": "2026-01-20T09:04:00Z"
       },
       {
-        "id": "f0053204-b9bd-487f-b092-045749219f6a",
-        "messageId": "87cc4178-8392-43c3-abcd-b28b3c1abaa8",
+        "id": "76ec7d20-2839-422c-b7ab-8e8f9bc54a5e",
+        "messageId": "1f557adf-e312-4ac7-9a4f-d86da4a450e0",
+        "layer": "global",
+        "scopeKey": "",
+        "participantId": null,
+        "reason": "typical length",
+        "score": 1.0,
+        "body": "agreed, i'll pull it back a bit",
+        "sentAt": "2026-01-15T09:03:00Z"
+      },
+      {
+        "id": "7984f6e2-0606-475b-ba00-9601b0cca0fe",
+        "messageId": "17a55a6d-8b85-4c2b-a0a5-837dc9bcf5c3",
         "layer": "global",
         "scopeKey": "",
         "participantId": null,
@@ -132,17 +143,6 @@
         "score": 1.0,
         "body": "sure, i'll take a look this afternoon",
         "sentAt": "2026-01-09T09:06:00Z"
-      },
-      {
-        "id": "2b6f3eec-0e1e-4fd0-a8ad-081033b37c12",
-        "messageId": "2cb360dd-1ac2-4e55-9df7-75a6d258371d",
-        "layer": "global",
-        "scopeKey": "",
-        "participantId": null,
-        "reason": "typical length, a phrase you repeat",
-        "score": 1.0,
-        "body": "not really, let me know if you want the breakdown",
-        "sentAt": "2026-01-06T10:03:00Z"
       }
     ]
   },
@@ -175,50 +175,50 @@
   },
   "examples": [
     {
-      "replyMessageId": "87cc4178-8392-43c3-abcd-b28b3c1abaa8",
+      "replyMessageId": "17a55a6d-8b85-4c2b-a0a5-837dc9bcf5c3",
       "reply": "sure, i'll take a look this afternoon",
       "incoming": "can you review the appendix",
-      "participantId": "6c3afd0f-5783-4cf5-b9f5-d8a0a571b297",
+      "participantId": "8a59eb1f-5503-4888-9998-0eaa8ab1b829",
       "channel": "chat",
       "sentAt": "2026-01-09T09:06:00Z",
       "score": 0.583,
       "reason": "similar wording: can, you"
     },
     {
-      "replyMessageId": "cbe36a96-2057-4ca6-ba51-be425fe22b75",
+      "replyMessageId": "e7fd13d8-a571-4dce-8758-a97de369015f",
       "reply": "yeah sending it over in a bit",
       "incoming": "morning! can you send the quarterly deck when you get a sec",
-      "participantId": "6c3afd0f-5783-4cf5-b9f5-d8a0a571b297",
+      "participantId": "8a59eb1f-5503-4888-9998-0eaa8ab1b829",
       "channel": "chat",
       "sentAt": "2026-01-05T09:04:00Z",
       "score": 0.583,
       "reason": "similar wording: can, you"
     },
     {
-      "replyMessageId": "97a19b11-bf42-4349-8fdd-712b1adacbd3",
+      "replyMessageId": "0ef7de1c-d5de-4e29-b1e8-7ac0ce7b6333",
       "reply": "tuesday works, 2pm suits me",
       "incoming": "are you free tuesday for a call",
-      "participantId": "6c3afd0f-5783-4cf5-b9f5-d8a0a571b297",
+      "participantId": "8a59eb1f-5503-4888-9998-0eaa8ab1b829",
       "channel": "chat",
       "sentAt": "2026-01-07T11:02:00Z",
       "score": 0.263,
       "reason": "similar wording: you"
     },
     {
-      "replyMessageId": "321e3347-591f-4013-8cc5-7de8bbac1337",
+      "replyMessageId": "f2aefd72-d78e-425c-bc88-6dec25775326",
       "reply": "any time, let me know what's next",
       "incoming": "thanks for all the help this month",
-      "participantId": "6c3afd0f-5783-4cf5-b9f5-d8a0a571b297",
+      "participantId": "8a59eb1f-5503-4888-9998-0eaa8ab1b829",
       "channel": "chat",
       "sentAt": "2026-01-24T09:08:00Z",
       "score": -0.0,
       "reason": "same channel"
     },
     {
-      "replyMessageId": "4cc004b3-55fe-4124-b4ca-e5edf2fd99cf",
+      "replyMessageId": "1cd22cd8-f039-4f9a-9ea3-6ebff922d17c",
       "reply": "fine by me",
       "incoming": "they might",
-      "participantId": "6c3afd0f-5783-4cf5-b9f5-d8a0a571b297",
+      "participantId": "8a59eb1f-5503-4888-9998-0eaa8ab1b829",
       "channel": "chat",
       "sentAt": "2026-01-23T09:01:00Z",
       "score": -0.0,
