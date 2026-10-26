@@ -10,6 +10,7 @@ mod error;
 #[cfg(test)]
 mod fixtures;
 mod logging;
+mod mail_dns;
 mod providers_config;
 mod secrets;
 mod startup;
@@ -126,6 +127,7 @@ pub fn run() {
             commands::sources::connect_mailbox,
             commands::sources::set_mailbox_password,
             commands::sources::mail_sign_in_available,
+            commands::sources::mail_exchangers,
             commands::sources::sign_in_to_mailbox,
             commands::sources::connect_signed_in_mailbox,
             commands::sources::cancel_mail_sign_in,

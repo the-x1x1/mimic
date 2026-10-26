@@ -77,6 +77,19 @@ export function useMailSignIn() {
 }
 
 /**
+ * Who handles mail for a domain no provider is known for, asked once per
+ * domain while Mimic runs; nothing is asked while `domain` is null.
+ */
+export function useMailExchangers(domain: string | null) {
+  return useQuery({
+    queryKey: qk.mailExchangers(domain ?? ""),
+    queryFn: () => ipc.mailExchangers(domain ?? ""),
+    enabled: domain !== null,
+    staleTime: Infinity,
+  });
+}
+
+/**
  * Sign a connected Microsoft or Google mailbox in again. Resolves once the browser has
  * come back and the new sign-in opened the mailbox.
  */

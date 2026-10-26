@@ -42,9 +42,14 @@ rand.workspace = true
 hex.workspace = true
 sha2.workspace = true
 
-# DPAPI, to seal saved credentials to the user's Windows account (secrets.rs).
+# DPAPI, to seal saved credentials to the user's Windows account (secrets.rs);
+# DnsQuery_W, for who handles an address's mail (mail_dns.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security_Cryptography",
+  "Win32_NetworkManagement_Dns",
+] }
 
 # The login Keychain, to seal saved credentials on macOS (secrets.rs). Never
 # yet run on a Mac.

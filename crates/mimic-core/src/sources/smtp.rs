@@ -597,6 +597,10 @@ pub fn known_for(imap_host: &str, username: &str) -> Option<SmtpAccount> {
         "imap.aol.com" => ("smtp.aol.com", 465, SmtpSecurity::Tls),
         "imap.fastmail.com" => ("smtp.fastmail.com", 465, SmtpSecurity::Tls),
         "imap.zoho.com" => ("smtp.zoho.com", 465, SmtpSecurity::Tls),
+        "imap.zoho.eu" => ("smtp.zoho.eu", 465, SmtpSecurity::Tls),
+        // GoDaddy's Workspace Email, and Namecheap's Private Email.
+        "imap.secureserver.net" => ("smtpout.secureserver.net", 465, SmtpSecurity::Tls),
+        "mail.privateemail.com" => ("mail.privateemail.com", 465, SmtpSecurity::Tls),
         "imap.gmx.com" => ("mail.gmx.com", 465, SmtpSecurity::Tls),
         "imap.mail.ru" => ("smtp.mail.ru", 465, SmtpSecurity::Tls),
         // Proton Mail Bridge, on this computer, on its default ports.
@@ -987,6 +991,16 @@ mod tests {
         assert_eq!(hotmail_uk.host, "smtp-mail.outlook.com");
         let work = known_for("outlook.office365.com", "c@contoso.com").unwrap();
         assert_eq!(work.host, "smtp.office365.com");
+        let workspace = known_for("imap.gmail.com", "c@formicaria.us").unwrap();
+        assert_eq!((workspace.host.as_str(), workspace.from_address.as_str()), ("smtp.gmail.com", "c@formicaria.us"));
+        for (imap, smtp) in [
+            ("imap.zoho.eu", "smtp.zoho.eu"),
+            ("imap.secureserver.net", "smtpout.secureserver.net"),
+            ("mail.privateemail.com", "mail.privateemail.com"),
+        ] {
+            let found = known_for(imap, "c@example.org").unwrap();
+            assert_eq!((found.host.as_str(), found.port, found.security), (smtp, 465, SmtpSecurity::Tls));
+        }
         assert!(known_for("mail.example.org", "c@example.org").is_none(), "anything else is set up by hand");
         assert_eq!(
             known_for("imap.gmail.com", "c").unwrap().from_address,

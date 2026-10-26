@@ -223,6 +223,14 @@ pub async fn mail_sign_in_available() -> CommandResult<MailSignIns> {
     Ok(MailSignIns { microsoft: Auth::Microsoft.client_id().is_some(), google: Auth::Google.client_id().is_some() })
 }
 
+/// Who handles mail for a domain no provider is known for: its mail
+/// exchangers, most preferred first, from this computer's own resolver
+/// (`mail_dns`, 0.10.0-alpha.34); none when that can't be told.
+#[tauri::command]
+pub async fn mail_exchangers(domain: String) -> CommandResult<Vec<String>> {
+    Ok(tauri::async_runtime::spawn_blocking(move || crate::mail_dns::exchangers(&domain)).await.unwrap_or_default())
+}
+
 /// The provider a sign-in is with: Microsoft or Google, never a password.
 fn provider_of(auth: Auth) -> CommandResult<oauth::Provider> {
     auth.provider().ok_or_else(|| CommandError::new("invalid", "That isn't a way of signing in."))

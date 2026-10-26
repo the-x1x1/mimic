@@ -229,6 +229,38 @@ export interface KnownMailHost {
   noPassword?: true;
 }
 
+const ICLOUD: KnownMailHost = {
+  host: "imap.mail.me.com",
+  port: 993,
+  help: "appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
+};
+
+const YAHOO: KnownMailHost = {
+  host: "imap.mail.yahoo.com",
+  port: 993,
+  help: "Yahoo Account security → Generate app password.",
+};
+
+const FASTMAIL: KnownMailHost = {
+  host: "imap.fastmail.com",
+  port: 993,
+  help: "Fastmail → Settings → Privacy & Security → App passwords.",
+};
+
+const ZOHO: KnownMailHost = {
+  host: "imap.zoho.com",
+  port: 993,
+  help: "Zoho Mail → Settings → Security → App passwords.",
+};
+
+/** Google Workspace at a domain of its own: signs in with Google, or takes an app password where the organisation allows them. */
+const GOOGLE_WORKSPACE: KnownMailHost = {
+  host: "imap.gmail.com",
+  port: 993,
+  help: "Google Account → Security → 2-Step Verification → App passwords, if your organisation allows them.",
+  signIn: "google",
+};
+
 export const KNOWN_MAIL_HOSTS: Record<string, KnownMailHost> = {
   "gmail.com": {
     host: "imap.gmail.com",
@@ -248,27 +280,97 @@ export const KNOWN_MAIL_HOSTS: Record<string, KnownMailHost> = {
   "hotmail.com": OUTLOOK,
   "live.com": OUTLOOK,
   "msn.com": OUTLOOK,
-  "icloud.com": {
-    host: "imap.mail.me.com",
+  "icloud.com": ICLOUD,
+  "me.com": ICLOUD,
+  "fastmail.com": FASTMAIL,
+  "mac.com": ICLOUD,
+  "yahoo.com": YAHOO,
+  "ymail.com": YAHOO,
+  "rocketmail.com": YAHOO,
+  "yahoo.co.uk": YAHOO,
+  "yahoo.fr": YAHOO,
+  "yahoo.de": YAHOO,
+  "yahoo.it": YAHOO,
+  "yahoo.es": YAHOO,
+  "yahoo.ca": YAHOO,
+  "yahoo.com.au": YAHOO,
+  "yahoo.in": YAHOO,
+  "aol.com": {
+    host: "imap.aol.com",
     port: 993,
-    help: "appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
+    help: "AOL Account security → Generate app password.",
   },
-  "me.com": {
-    host: "imap.mail.me.com",
-    port: 993,
-    help: "appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
-  },
-  "fastmail.com": {
-    host: "imap.fastmail.com",
-    port: 993,
-    help: "Fastmail → Settings → Privacy & Security → App passwords.",
-  },
-  "yahoo.com": {
-    host: "imap.mail.yahoo.com",
-    port: 993,
-    help: "Yahoo Account security → Generate app password.",
-  },
+  "zoho.com": ZOHO,
+  "zohomail.com": ZOHO,
 };
+
+/** A domain's mail exchangers, most preferred first (desktop `mail_exchangers`). */
+export const MailExchangers = z.array(z.string());
+
+/** A provider found for an address at a domain of its own, and its name. */
+export interface FoundMailHost extends KnownMailHost {
+  /** Whose servers they are, as the dialog says it: "Google Workspace". */
+  name: string;
+}
+
+/**
+ * Whose mail servers a domain's mail exchangers (MX records, most preferred
+ * first, as the desktop's `mail_exchangers` gives them) are, matched by the
+ * exchanger's own domain and nothing looser: the first exchanger that is
+ * one of these says. Null when none is.
+ */
+const BY_EXCHANGER: readonly (readonly [string, FoundMailHost])[] = [
+  ["google.com", { name: "Google Workspace", ...GOOGLE_WORKSPACE }],
+  ["googlemail.com", { name: "Google Workspace", ...GOOGLE_WORKSPACE }],
+  [
+    "mail.protection.outlook.com",
+    {
+      name: "Microsoft 365",
+      host: "outlook.office365.com",
+      port: 993,
+      help: "Microsoft 365 doesn't let apps like this sign in with a password. You sign in with Microsoft in your browser instead.",
+      signIn: "microsoft",
+      noPassword: true,
+    },
+  ],
+  ["zoho.com", { name: "Zoho Mail", ...ZOHO }],
+  ["zoho.eu", { name: "Zoho Mail", ...ZOHO, host: "imap.zoho.eu" }],
+  ["messagingengine.com", { name: "Fastmail", ...FASTMAIL }],
+  ["mail.icloud.com", { name: "iCloud Mail", ...ICLOUD }],
+  [
+    "secureserver.net",
+    {
+      name: "GoDaddy",
+      host: "imap.secureserver.net",
+      port: 993,
+      help: "GoDaddy's Workspace Email signs in with your email password.",
+    },
+  ],
+  [
+    "privateemail.com",
+    {
+      name: "Namecheap Private Email",
+      host: "mail.privateemail.com",
+      port: 993,
+      help: "Namecheap's Private Email signs in with your mailbox password.",
+    },
+  ],
+];
+
+export function mailHostFromExchangers(exchangers: readonly string[]): FoundMailHost | null {
+  for (const raw of exchangers) {
+    const mx = raw.trim().toLowerCase().replace(/\.$/, "");
+    const found = BY_EXCHANGER.find(([d]) => mx === d || mx.endsWith(`.${d}`));
+    if (found) return found[1];
+  }
+  return null;
+}
+
+/** The domain of an address, lower-cased, or null when it has none yet. */
+export function mailDomainOf(address: string): string | null {
+  const domain = address.split("@")[1]?.trim().toLowerCase().replace(/\.$/, "");
+  return domain && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) ? domain : null;
+}
 
 /**
  * Microsoft's own mail domains in other countries, which sign in as

@@ -17,6 +17,7 @@ const native = vi.hoisted(() => ({
   signInToMailbox: vi.fn(),
   connectSignedInMailbox: vi.fn(),
   cancelMailSignIn: vi.fn(),
+  mailExchangers: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -221,5 +222,75 @@ describe("a Gmail or Google Workspace mailbox can sign in with Google", () => {
     await waitFor(() =>
       expect(native.signInToMailbox).toHaveBeenCalledWith("c@formicaria.us", "google"),
     );
+  });
+});
+
+describe("an address at a domain of its own", () => {
+  const found: ImapProbe = {
+    folders: ["INBOX", "[Gmail]/Sent Mail"],
+    sentFolder: "[Gmail]/Sent Mail",
+    counts: [["INBOX", 4]],
+    warnings: [],
+  };
+
+  beforeEach(() => {
+    for (const f of Object.values(native)) f.mockReset();
+    native.providerState.mockResolvedValue(state("account"));
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: true });
+    native.cancelMailSignIn.mockResolvedValue(undefined);
+  });
+
+  function leaveAddress(address: string) {
+    const field = screen.getByLabelText("Your email address");
+    fireEvent.change(field, { target: { value: address } });
+    fireEvent.blur(field, { target: { value: address } });
+  }
+
+  it("asks who handles its mail, and signs Google Workspace in with Google", async () => {
+    native.mailExchangers.mockResolvedValue(["aspmx.l.google.com", "alt1.aspmx.l.google.com"]);
+    native.signInToMailbox.mockResolvedValue(found);
+    renderDialog();
+    leaveAddress("c@Formicaria.us");
+    expect(
+      await screen.findByText("Mail for formicaria.us is handled by Google Workspace."),
+    ).toBeInTheDocument();
+    expect(native.mailExchangers).toHaveBeenCalledWith("formicaria.us");
+    expect(screen.queryByLabelText("App password")).toBeNull();
+    expect(screen.getByRole("button", { name: "Use an app password instead" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+    await waitFor(() =>
+      expect(native.signInToMailbox).toHaveBeenCalledWith("c@Formicaria.us", "google"),
+    );
+  });
+
+  it("says nothing it didn't find, and asks for the server as before", async () => {
+    native.mailExchangers.mockResolvedValue(["mx1.hosting.example.net"]);
+    const client = renderDialog();
+    leaveAddress("c@formicaria.us");
+    await waitFor(() =>
+      expect(client.getQueryState(qk.mailExchangers("formicaria.us"))?.status).toBe("success"),
+    );
+    expect(screen.queryByText(/is handled by/)).toBeNull();
+    expect(screen.getByLabelText("App password")).toBeInTheDocument();
+    expect(screen.getByText("Server settings")).toBeInTheDocument();
+  });
+
+  it("says when Microsoft 365 handles it and this copy can't sign in there", async () => {
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: false });
+    native.mailExchangers.mockResolvedValue(["formicaria-us.mail.protection.outlook.com"]);
+    renderDialog();
+    leaveAddress("c@formicaria.us");
+    expect(
+      await screen.findByText("Mail for formicaria.us is handled by Microsoft 365."),
+    ).toBeInTheDocument();
+    expect(screen.getByText(MICROSOFT_UNAVAILABLE)).toBeInTheDocument();
+    expect(screen.queryByLabelText("App password")).toBeNull();
+  });
+
+  it("doesn't ask about a provider it already knows", async () => {
+    const client = renderDialog();
+    leaveAddress("c@gmail.com");
+    await waitFor(() => expect(client.getQueryState(qk.mailSignIn)?.status).toBe("success"));
+    expect(native.mailExchangers).not.toHaveBeenCalled();
   });
 });
