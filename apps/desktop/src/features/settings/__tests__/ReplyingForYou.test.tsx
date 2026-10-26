@@ -85,6 +85,7 @@ describe("replying for you, set up in one place", () => {
       "assist.autoDraft": true,
       "app.keepRunning": true,
       "notify.enabled": false,
+      "send.undoSeconds": 5,
     });
     native.sources.mockResolvedValue([
       mailbox("s1", "c@gmail.com"),
@@ -126,5 +127,43 @@ describe("replying for you, set up in one place", () => {
       ).toBeInTheDocument(),
     );
     expect(within(list).getByText(/I don't tell you with notifications/)).toBeInTheDocument();
+    expect(
+      within(list).getByText("When you press Send it, I wait 5 seconds, so you can take it back."),
+    ).toBeInTheDocument();
+  });
+
+  it("says the hours, the people left out and the signatures too", async () => {
+    native.settings.mockResolvedValue({ "assist.autoDraft": true, "send.undoSeconds": 0 });
+    native.sources.mockResolvedValue([mailbox("s1", "c@gmail.com")]);
+    const on = rules(true);
+    native.autoReply.mockResolvedValue({
+      ...on,
+      rules: { ...on.rules, hours: { from: 8, to: 20 }, never: ["p1", "p2"] },
+    });
+    native.mailboxSending.mockResolvedValue({
+      sending: {
+        host: "smtp.gmail.com",
+        port: 465,
+        security: "tls",
+        username: "c@gmail.com",
+        fromAddress: "c@gmail.com",
+      },
+      setByUser: false,
+      keepsSent: true,
+      signature: "C Haynes",
+    });
+    renderIt();
+    const list = await screen.findByRole("list", { name: "Replying for you" });
+    expect(
+      await within(list).findByText(
+        "I send some by myself, after holding each for 10 minutes, only between 8:00 and 20:00, never to the 2 people you named.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      await within(list).findByText("Replies can be sent from c@gmail.com, with your signature."),
+    ).toBeInTheDocument();
+    expect(
+      within(list).getByText("Send it sends at once, with no moment to take it back."),
+    ).toBeInTheDocument();
   });
 });
