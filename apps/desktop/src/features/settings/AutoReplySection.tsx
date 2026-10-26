@@ -12,6 +12,10 @@ import { usePeople } from "@/hooks/usePeople";
  * it on is two steps: the first says exactly what it will do, in the same
  * words as `docs/PRODUCT.md`, and only the second turns it on. Turning it off
  * is one step, and stops every reply still held at once.
+ *
+ * It can be rehearsed first (0.10.0-alpha.45, `rehearse`): everything as for
+ * real, held and shown, and stopped when it would go. Stopping rehearsing
+ * leaves what was held while rehearsing to the user.
  */
 export function AutoReplySection() {
   const state = useAutoReply();
@@ -82,18 +86,28 @@ export function AutoReplySection() {
           <p>
             I&rsquo;ll send replies as you without asking each time, to the people and through the
             mailboxes below. Replies prepared in advance will be turned on too, since those are the
-            ones I send. You can turn this off here at any time.
+            ones I send. You can turn this off here at any time. Or rehearse first: I hold and show
+            each reply as if I&rsquo;d send it, and send none.
           </p>
           <div className="row gap-2">
             <Button
               variant="primary"
               disabled={save.isPending}
               onClick={() => {
-                change({ enabled: true });
+                change({ enabled: true, rehearse: false });
                 setConfirming(false);
               }}
             >
               Turn it on
+            </Button>
+            <Button
+              disabled={save.isPending}
+              onClick={() => {
+                change({ enabled: true, rehearse: true });
+                setConfirming(false);
+              }}
+            >
+              Rehearse first
             </Button>
             <Button variant="ghost" onClick={() => setConfirming(false)}>
               Not now
@@ -294,6 +308,23 @@ export function AutoReplySection() {
           <p className="muted small">
             A reply that would go outside them waits until they start, on the home screen, where you
             can still stop it or send it at once.
+          </p>
+        ) : null}
+      </div>
+      <div className="stack gap-1">
+        <label className="row gap-2">
+          <input
+            type="checkbox"
+            checked={Boolean(rules.rehearse)}
+            disabled={save.isPending}
+            onChange={(e) => change({ rehearse: e.target.checked })}
+          />
+          <span>Rehearse: hold and show each reply as if I&rsquo;d send it, and send none</span>
+        </label>
+        {rules.rehearse ? (
+          <p className="muted small">
+            When you stop rehearsing, the replies I held while rehearsing wait for you; only new
+            ones go by themselves.
           </p>
         ) : null}
       </div>

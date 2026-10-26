@@ -60,6 +60,11 @@ const SCAN: usize = 500;
 
 /// Why a held reply was stopped, or a draft not held: what the user is shown.
 pub const TURNED_OFF: &str = "Replying by myself is off, so this wasn't sent.";
+/// Rehearsing (0.10.0-alpha.45): the moment it would have gone.
+pub const REHEARSED: &str = "Rehearsing: I'd have sent this by myself now, and didn't. It waits for you.";
+/// Held while rehearsing, and rehearsing was turned off: shown as a
+/// rehearsal, it doesn't go for real.
+pub const REHEARSAL_OVER: &str = "I held this while rehearsing, so it waits for you rather than going for real.";
 pub const DEALT_WITH: &str = "You dealt with this message yourself before it went.";
 pub const NOT_WAITING: &str =
     "They aren't waiting on this reply any more — something came in or went out since — so it wasn't sent.";
@@ -128,6 +133,12 @@ pub struct Rules {
     /// computer's time (0.10.0-alpha.39); any time when none.
     #[serde(default)]
     pub hours: Option<Hours>,
+    /// Rehearsing (0.10.0-alpha.45): everything as when replying by itself
+    /// — held, shown, checked again and timed — but at the moment a reply
+    /// would go it is stopped instead (`REHEARSED`), and its draft waits for
+    /// the user. Nothing is sent.
+    #[serde(default)]
+    pub rehearse: bool,
 }
 
 /// From `from` o'clock up to `to` o'clock, across midnight when `to` is the
@@ -179,6 +190,7 @@ impl Default for Rules {
             daily_limit: DEFAULT_DAILY_LIMIT,
             enabled_at: None,
             hours: None,
+            rehearse: false,
         }
     }
 }
@@ -212,12 +224,21 @@ pub fn set_rules(db: &Db, rules: Rules) -> Result<Rules, DbError> {
         (true, true) => before.enabled_at.or_else(|| Some(crate::ids::now_rfc3339())),
         (false, true) => Some(crate::ids::now_rfc3339()),
     };
-    if rules.enabled {
-        db.set_setting(SETTING, &rules)?;
+    // Saved and stopped together: a look that reads the rules after finds
+    // nothing held under the ones before — off, or what was shown as a
+    // rehearsal, which doesn't go for real.
+    let stop = if !rules.enabled {
+        Some(TURNED_OFF)
+    } else if before.rehearse && !rules.rehearse {
+        Some(REHEARSAL_OVER)
     } else {
-        // Saved and stopped together: a look that reads the rules after
-        // finds nothing held under the ones before.
-        db.set_setting_stopping_held(SETTING, &rules, TURNED_OFF)?;
+        None
+    };
+    match stop {
+        Some(why) => {
+            db.set_setting_stopping_held(SETTING, &rules, why)?;
+        }
+        None => db.set_setting(SETTING, &rules)?,
     }
     Ok(rules)
 }
@@ -241,6 +262,9 @@ pub struct Run {
     /// Held replies that may or may not have gone (0.10.0-alpha.44): never
     /// sent again until the user says they didn't.
     pub unsure: usize,
+    /// Held replies whose time came while rehearsing (0.10.0-alpha.45):
+    /// stopped, not sent.
+    pub rehearsed: usize,
     /// Mailboxes with a reply whose hold has ended, waiting for the mailbox
     /// to be read again: a check of each is asked for, so it goes close to
     /// on time.
@@ -250,7 +274,7 @@ pub struct Run {
 
 impl Run {
     pub fn changed_anything(&self) -> bool {
-        self.held + self.sent + self.stopped + self.failed + self.unsure > 0
+        self.held + self.sent + self.stopped + self.failed + self.unsure + self.rehearsed > 0
     }
 }
 
@@ -544,6 +568,11 @@ pub fn send_due(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Resul
         }
         if !goes_to_them(db, draft.participant_id.as_deref(), &entry.to)? {
             run.stopped += usize::from(db.stop_held_outgoing(&entry.id, NOT_THEIRS)?);
+            continue;
+        }
+        // Rehearsing: everything up to here, and no further.
+        if rules.rehearse {
+            run.rehearsed += usize::from(db.stop_held_outgoing(&entry.id, REHEARSED)?);
             continue;
         }
         // Held → sending, unless it was stopped or taken a moment ago, or its
@@ -1135,12 +1164,87 @@ mod tests {
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
     }
 
+    /// A reply sent by itself an hour before the tests' clock, in
+    /// `conversation` or none of these.
+    fn sent_by_itself_earlier(w: &World, conversation: Option<&str>) {
+        let t = fmt_rfc3339(at(-60));
+        w.db.conn()
+            .execute(
+                "INSERT INTO outbox(id, source_id, conversation_id, from_address, to_json, subject, body, message_id,
+                                    how, status, send_after, created_at, updated_at, sent_at)
+                 VALUES (?1, ?2, ?3, 'c@example.com', '[\"ada@example.com\"]', 'Re: Lunch', 'ok', ?4,
+                         'autonomous', 'sent', ?5, ?5, ?5, ?5)",
+                rusqlite::params![
+                    crate::ids::new_id(),
+                    w.mailbox,
+                    conversation,
+                    format!("<{}@x.example>", crate::ids::new_id()),
+                    t
+                ],
+            )
+            .unwrap();
+    }
+
     #[test]
     fn the_daily_limit_holds_back_the_rest() {
         let w = world(Behaviour::default());
         set_rules(&w.db, Rules { daily_limit: 0, ..rules(&w.db).unwrap() }).unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
         assert!(w.db.recent_outgoing(10).unwrap().is_empty());
+
+        // One a day, and one already went today, elsewhere.
+        let w = world(Behaviour::default());
+        set_rules(&w.db, Rules { daily_limit: 1, ..rules(&w.db).unwrap() }).unwrap();
+        sent_by_itself_earlier(&w, None);
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0);
+
+        // None yet: held, and when it comes due its own row doesn't count.
+        let w = world(Behaviour::default());
+        set_rules(&w.db, Rules { daily_limit: 1, ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1);
+        checked(&w);
+        assert_eq!(tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap().sent, 1);
+    }
+
+    #[test]
+    fn it_replies_by_itself_at_most_twice_in_a_conversation_a_day() {
+        let w = world(Behaviour::default());
+        let conversation = w.draft.conversation_id.clone().unwrap();
+        sent_by_itself_earlier(&w, Some(&conversation));
+        sent_by_itself_earlier(&w, Some(&conversation));
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 0, "{LOOPING}");
+
+        let w = world(Behaviour::default());
+        let conversation = w.draft.conversation_id.clone().unwrap();
+        sent_by_itself_earlier(&w, Some(&conversation));
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1, "once before is not a loop");
+    }
+
+    #[test]
+    fn rehearsing_goes_through_everything_and_sends_nothing() {
+        let w = world(Behaviour::default());
+        set_rules(&w.db, Rules { rehearse: true, ..rules(&w.db).unwrap() }).unwrap();
+        assert_eq!(tick(&w.db, &credentials(), at(0)).unwrap().held, 1, "held, as for real");
+        let early = tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap();
+        assert_eq!((early.rehearsed, early.waiting_for_check.len()), (0, 1), "and waits for a check, as for real");
+        checked(&w);
+        let run = tick(&w.db, &credentials(), at(DEFAULT_HOLD_MINUTES)).unwrap();
+        assert_eq!((run.sent, run.rehearsed), (0, 1));
+        assert!(run.changed_anything());
+        let entry = only_entry(&w.db);
+        assert_eq!((entry.status, entry.error.as_deref()), (SendStatus::Canceled, Some(REHEARSED)));
+        assert!(w.seen.try_recv().is_err(), "nothing was said to the server");
+        assert_eq!(w.db.get_draft(&w.draft.id).unwrap().unwrap().outcome, None, "its draft waits for the user");
+        assert_eq!(tick(&w.db, &credentials(), at(30)).unwrap(), Run::default(), "and it isn't held again");
+
+        // Held while rehearsing, then rehearsing turned off: it doesn't go
+        // for real.
+        let w = world(Behaviour::default());
+        set_rules(&w.db, Rules { rehearse: true, ..rules(&w.db).unwrap() }).unwrap();
+        tick(&w.db, &credentials(), at(0)).unwrap();
+        set_rules(&w.db, Rules { rehearse: false, ..rules(&w.db).unwrap() }).unwrap();
+        let entry = only_entry(&w.db);
+        assert_eq!((entry.status, entry.error.as_deref()), (SendStatus::Canceled, Some(REHEARSAL_OVER)));
     }
 
     #[test]

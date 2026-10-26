@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.45] — 2026-10-26
+
+Rehearse before I reply by myself.
+
+### Added
+
+- **Rehearse first**, when you turn on replying by myself, or **Rehearse** under it at any time: I do everything as if I were replying by myself — hold each reply on the home screen, wait for your mailbox to be read again, check every rule — and at the moment it would go, I stop it and leave it for you. Nothing is sent. What I'd have sent, and when, is under Your mail; a notification says when one comes due. When you stop rehearsing, the replies held while rehearsing wait for you rather than going for real.
+
+### Changed
+
+- A reply stopped before it went says why under Your mail.
+
 ## [0.10.0-alpha.44] — 2026-10-26
 
 Replying by myself, checked harder.

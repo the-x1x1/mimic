@@ -133,7 +133,10 @@ export function describeOutboxEntry(e: OutboxEntry): string {
     case "held":
       return `Waiting to go to ${to}. You can stop it until then.`;
     case "canceled":
-      return `Stopped before it went to ${to}.`;
+      // Why, when Mimic stopped it: the rules, the user, or a rehearsal.
+      return e.error
+        ? `Stopped before it went to ${to}. ${e.error}`
+        : `Stopped before it went to ${to}.`;
     case "unsure":
       return `May have gone to ${to} — I couldn't tell. Look in your Sent folder.`;
     case "failed":

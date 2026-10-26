@@ -124,6 +124,23 @@ describe("a reply held to go by itself", () => {
     expect(screen.getByText(/Stop it first if you'd rather send your own/)).toBeInTheDocument();
   });
 
+  it("says it is a rehearsal while rehearsing, and offers no Send it now", async () => {
+    native.autoReply.mockResolvedValue({
+      rules: { ...rules, rehearse: true },
+      running: true,
+      lastDay: 1,
+    });
+    renderReview();
+    const box = await screen.findByRole("group", { name: "Held to send by itself" });
+    expect(
+      await within(box).findByText(
+        /^Rehearsing: I'd send this to ada@example.com by myself in 9 minutes/,
+      ),
+    ).toBeInTheDocument();
+    expect(within(box).queryByRole("button", { name: "Send it now" })).toBeNull();
+    expect(within(box).getByRole("button", { name: "Stop it" })).toBeInTheDocument();
+  });
+
   it("can be stopped, or sent now", async () => {
     native.stopHeldReply.mockResolvedValue({ ...held, status: "canceled" });
     native.sendHeldReplyNow.mockResolvedValue({ ...held, status: "sent" });

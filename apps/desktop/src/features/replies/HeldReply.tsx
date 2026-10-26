@@ -11,12 +11,17 @@ import { useAutoReply, useHeldReply, useSetAutoReply } from "@/hooks/useSending"
  * It can also be stopped for good for its person (0.10.0-alpha.37): they go
  * on the rules' `never` list, and come off the chosen ones, so nothing to
  * them goes by itself again until the user says so in Settings.
+ *
+ * While rehearsing (0.10.0-alpha.45) it says so, and offers no Send it now:
+ * nothing goes, and the reply is the user's once its time comes or it is
+ * stopped.
  */
 export function HeldReply({ entry }: { entry: OutboxEntry }) {
   const { stop, now } = useHeldReply();
   const auto = useAutoReply();
   const save = useSetAutoReply();
   const rules = auto.data?.rules;
+  const rehearsing = Boolean(rules?.rehearse);
   const person = entry.participantId;
   const busy = stop.isPending || now.isPending || save.isPending;
   const error = stop.error ?? now.error ?? save.error;
@@ -32,11 +37,13 @@ export function HeldReply({ entry }: { entry: OutboxEntry }) {
   }
   return (
     <div className="thread__held" role="group" aria-label="Held to send by itself">
-      <p className="small">{describeHeld(entry)}</p>
+      <p className="small">{describeHeld(entry, new Date(), rehearsing)}</p>
       <div className="row gap-2">
-        <Button size="sm" variant="primary" disabled={busy} onClick={() => now.mutate(entry.id)}>
-          Send it now
-        </Button>
+        {rehearsing ? null : (
+          <Button size="sm" variant="primary" disabled={busy} onClick={() => now.mutate(entry.id)}>
+            Send it now
+          </Button>
+        )}
         <Button size="sm" variant="ghost" disabled={busy} onClick={() => stop.mutate(entry.id)}>
           Stop it
         </Button>
