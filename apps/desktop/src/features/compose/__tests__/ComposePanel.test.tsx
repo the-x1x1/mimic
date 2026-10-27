@@ -278,7 +278,62 @@ describe("writing something new", () => {
       fireEvent.click(screen.getByRole("button", { name: "Copy from WhatsApp" }));
       expect(await screen.findByDisplayValue("or 8?")).toBeInTheDocument();
       expect(screen.getByLabelText("Recipient")).toHaveValue("");
-      expect(screen.queryByText(/this looks like/)).toBeNull();
+      expect(screen.queryByText(/this looks like Ada/)).toBeNull();
+      // What WhatsApp is, its title still says.
+      expect(
+        screen.getByText("From the window you copied it in, this looks like a chat."),
+      ).toBeInTheDocument();
+    });
+
+    it("answers a chat as a chat, by the window's title, and lets go of that after", async () => {
+      native.settings.mockResolvedValue({
+        "anywhere.pressEnter": false,
+        "anywhere.draftAtOnce": true,
+      });
+      function CopyFromNotepad() {
+        const navigate = useNavigate();
+        return (
+          <button
+            type="button"
+            onClick={() =>
+              navigate("/write", { state: { pasted: "or 8?", windowTitle: "Untitled - Notepad" } })
+            }
+          >
+            Copy from Notepad
+          </button>
+        );
+      }
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter
+            initialEntries={[
+              {
+                pathname: "/write",
+                state: {
+                  pasted: "are we still on for 7?",
+                  windowTitle: "Ada Lovelace | Messenger",
+                },
+              },
+            ]}
+          >
+            <ComposePanel />
+            <CopyFromNotepad />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      expect(
+        await screen.findByText("From the window you copied it in, this looks like a chat."),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Channel")).toHaveValue("chat");
+      // The draft written at once is written for a chat.
+      await waitFor(() => expect(native.generateDraft).toHaveBeenCalledTimes(1));
+      expect(native.generateDraft.mock.calls[0]![0]).toMatchObject({ channel: "chat" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy from Notepad" }));
+      expect(await screen.findByDisplayValue("or 8?")).toBeInTheDocument();
+      expect(screen.getByLabelText("Channel")).toHaveValue("email");
+      expect(screen.queryByText(/this looks like a chat/)).toBeNull();
     });
 
     it("pastes the reply into the window the message came from, then asks whether it went", async () => {

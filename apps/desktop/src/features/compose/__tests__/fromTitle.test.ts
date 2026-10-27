@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { personFromTitle } from "../fromTitle";
+import { channelFromTitle, personFromTitle } from "../fromTitle";
 
 const people = [
   { id: "p1", name: "Ada Lovelace" },
@@ -23,5 +23,33 @@ describe("who a copied message is from, by its window's title", () => {
     expect(personFromTitle("Al - Signal", people)).toBeNull();
     expect(personFromTitle(null, people)).toBeNull();
     expect(personFromTitle("Ada Lovelace and Bob Stone - Group", people)).toBeNull();
+  });
+});
+
+describe("what kind of conversation a copied message is from, by its window's title", () => {
+  it("knows chat apps, texts and mail by the app's own part of the title", () => {
+    expect(channelFromTitle("WhatsApp")).toBe("chat");
+    expect(channelFromTitle("Ada Lovelace | Messenger")).toBe("chat");
+    expect(channelFromTitle("@ada - Discord")).toBe("chat");
+    expect(channelFromTitle("#general | Acme - Discord")).toBe("chat");
+    expect(channelFromTitle("Chat | Ada Lovelace | Microsoft Teams")).toBe("chat");
+    expect(channelFromTitle("Bob Stone (DM) - Acme - Slack")).toBe("chat");
+    expect(channelFromTitle("Phone Link")).toBe("sms");
+    expect(channelFromTitle("(2) Messages for web - Google Chrome")).toBe("sms");
+    expect(channelFromTitle("Inbox - ada@example.com - Outlook")).toBe("email");
+    expect(channelFromTitle("Inbox (3) - ada@gmail.com - Gmail - Google Chrome")).toBe("email");
+    expect(channelFromTitle("Inbox - Mozilla Thunderbird")).toBe("email");
+    expect(
+      channelFromTitle("Mail - Ada Lovelace - Outlook - Personal - Microsoft\u200b Edge"),
+    ).toBe("email");
+  });
+
+  it("reads the app, not a word in the subject, and says nothing it doesn't know", () => {
+    expect(channelFromTitle("Your WhatsApp code - ada@gmail.com - Gmail")).toBe("email");
+    expect(channelFromTitle("WhatsApp - ada@gmail.com - Gmail")).toBe("email");
+    expect(channelFromTitle("Signal processing notes.docx - Word")).toBeNull();
+    expect(channelFromTitle("Untitled - Notepad")).toBeNull();
+    expect(channelFromTitle("")).toBeNull();
+    expect(channelFromTitle(null)).toBeNull();
   });
 });

@@ -23,8 +23,17 @@ import {
 import { useSettings } from "@/hooks/useSystem";
 import { ipc } from "@/lib/ipc";
 import { useAnywhere } from "@/state/anywhere";
-import { personFromTitle } from "./fromTitle";
+import { channelFromTitle, personFromTitle } from "./fromTitle";
 import { toast } from "@/state/toast";
+
+/** What a channel read from a window's title is said to be. */
+const GUESSED_AS: Record<Channel, string> = {
+  chat: "a chat",
+  sms: "a text message",
+  email: "an email",
+  forum: "a forum",
+  other: "a message",
+};
 
 /**
  * Writing something new: four inputs, one output, and a panel that says what
@@ -78,6 +87,11 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   }, [draft]);
   const handled = useRef<string | null>(null);
   const lastGuess = useRef<string | null>(null);
+  const windowTitle = (location.state as { windowTitle?: unknown } | null)?.windowTitle;
+  // What kind of conversation the window's title says it is, while that is
+  // still the channel chosen (0.10.0-alpha.83).
+  const [channelGuessed, setChannelGuessed] = useState<Channel | null>(null);
+  const lastChannelGuess = useRef<Channel | null>(null);
   const resolveAsync = resolve.mutateAsync;
   useEffect(() => {
     if (typeof pasted !== "string" || handled.current === location.key) return;
@@ -98,12 +112,19 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     if (before) setParticipantId((id) => (id === before ? "" : id));
     lastGuess.current = null;
     setGuessed(null);
-  }, [location.key, pasted, resolveAsync]);
+    // A chat answered as a chat, a text as a text, by the window's title;
+    // what the last window said goes with its message.
+    const kind = typeof windowTitle === "string" ? channelFromTitle(windowTitle) : null;
+    const was = lastChannelGuess.current;
+    if (kind) setChannel(kind);
+    else if (was) setChannel((c) => (c === was ? "email" : c));
+    lastChannelGuess.current = kind;
+    setChannelGuessed(kind);
+  }, [location.key, pasted, windowTitle, resolveAsync]);
 
   // Who it's from, when the title of the window it was copied in names one
   // person on the list (0.10.0-alpha.52): chosen for them once the list is
   // in, and said while it stays chosen.
-  const windowTitle = (location.state as { windowTitle?: unknown } | null)?.windowTitle;
   const guessedFor = useRef<string | null>(null);
   // The navigation whose window title has been looked at, so a draft written
   // at once is written to whoever it names.
@@ -401,6 +422,11 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                     </option>
                   ))}
                 </select>
+                {channelGuessed && channelGuessed === channel ? (
+                  <span className="muted small">
+                    {`From the window you copied it in, this looks like ${GUESSED_AS[channelGuessed]}.`}
+                  </span>
+                ) : null}
               </Field>
             </div>
           </Card>
