@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.98] — 2026-10-26
+
+Other ways of saying it in Write, side by side.
+
+### Changed
+
+- **Shorter, Longer, More casual and More professional in Write now write beside your draft instead of over it.** Pick which one is in the editor; what you typed into each is kept while you look at the others. Whichever you send, paste or copy away is the one recorded — the rest are passed over, and which way you chose counts toward how Mimic writes your first drafts. **Not this one** puts one aside, **None of these** puts them all aside, and **Regenerate** starts the set again.
+
 ## [0.10.0-alpha.97] — 2026-10-26
 
 Mimic learns from which way you choose.

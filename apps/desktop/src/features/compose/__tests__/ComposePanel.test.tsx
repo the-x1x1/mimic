@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ const native = vi.hoisted(() => ({
   checkProvider: vi.fn(),
   generationContext: vi.fn(),
   generateDraft: vi.fn(),
+  writeAnotherDraft: vi.fn(),
   resolveDraft: vi.fn(),
   stepAside: vi.fn(),
   pasteBack: vi.fn(),
@@ -87,10 +88,99 @@ describe("writing something new", () => {
     expect(await screen.findByDisplayValue("yes, thursday works")).toBeInTheDocument();
     expect(native.resolveDraft).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Shorter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
     expect(await screen.findByDisplayValue("thursday!")).toBeInTheDocument();
     expect(native.resolveDraft).toHaveBeenCalledWith("d1", "regenerated", null);
     expect(native.resolveDraft).toHaveBeenCalledTimes(1);
+  });
+
+  describe("other ways of saying it, beside the draft", () => {
+    const shorter = (): Draft => ({
+      ...draft("d2", "thursday!"),
+      alternativeTo: "d1",
+      context: { adjustment: "shorter" },
+    });
+
+    async function writeTwoWays() {
+      native.generateDraft.mockResolvedValueOnce(draft("d1", "yes, thursday works"));
+      native.writeAnotherDraft.mockResolvedValueOnce(shorter());
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <ComposePanel />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      const write = await screen.findByRole("button", { name: "Write a draft" });
+      await waitFor(() => expect(write).toBeEnabled());
+      fireEvent.click(write);
+      expect(await screen.findByDisplayValue("yes, thursday works")).toBeInTheDocument();
+      const ways = screen.getByRole("group", { name: "Write it another way" });
+      fireEvent.click(within(ways).getByRole("button", { name: "Shorter" }));
+      expect(await screen.findByDisplayValue("thursday!")).toBeInTheDocument();
+      expect(native.writeAnotherDraft).toHaveBeenCalledWith("d1", "shorter");
+    }
+
+    it("writes it shorter beside the first, puts nothing aside, and offers only what isn't there", async () => {
+      await writeTwoWays();
+      expect(native.resolveDraft).not.toHaveBeenCalled();
+      expect(screen.getByRole("radio", { name: "Shorter" })).toBeChecked();
+      const ways = screen.getByRole("group", { name: "Write it another way" });
+      expect(within(ways).queryByRole("button", { name: "Shorter" })).toBeNull();
+      expect(within(ways).getByRole("button", { name: "Longer" })).toBeInTheDocument();
+
+      // Back to the first, as it was left; then the shorter one, as edited.
+      fireEvent.change(screen.getByDisplayValue("thursday!"), { target: { value: "thursday!!" } });
+      fireEvent.click(screen.getByRole("radio", { name: "As I first wrote it" }));
+      expect(screen.getByDisplayValue("yes, thursday works")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("radio", { name: "Shorter" }));
+      expect(screen.getByDisplayValue("thursday!!")).toBeInTheDocument();
+    });
+
+    it("records the way used as sent, which decides the rest", async () => {
+      await writeTwoWays();
+      fireEvent.click(screen.getByRole("button", { name: "I sent this" }));
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d2", "sent_unedited", "thursday!"),
+      );
+      expect(native.resolveDraft).toHaveBeenCalledTimes(1);
+    });
+
+    it("puts one way aside on its own, and all of them with None of these", async () => {
+      await writeTwoWays();
+      fireEvent.click(screen.getByRole("button", { name: "Not this one" }));
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d2", "discarded", null),
+      );
+      expect(await screen.findByDisplayValue("yes, thursday works")).toBeInTheDocument();
+      expect(screen.queryByRole("radio")).toBeNull();
+
+      native.writeAnotherDraft.mockResolvedValueOnce({
+        ...draft("d3", "Thursday suits me well."),
+        alternativeTo: "d1",
+        context: { adjustment: "moreProfessional" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "More professional" }));
+      expect(await screen.findByDisplayValue("Thursday suits me well.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "None of these" }));
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d1", "discarded", null),
+      );
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "None of these" })).toBeNull(),
+      );
+    });
+
+    it("writes the whole set again on Regenerate, putting it aside as passed over", async () => {
+      await writeTwoWays();
+      native.generateDraft.mockResolvedValueOnce(draft("d4", "thursday works for me"));
+      fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+      expect(await screen.findByDisplayValue("thursday works for me")).toBeInTheDocument();
+      expect(native.resolveDraft).toHaveBeenCalledWith("d1", "regenerated", null);
+      expect(native.resolveDraft).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("radio")).toBeNull();
+    });
   });
 
   it("opens on a message copied from anywhere, as the message being answered", async () => {
@@ -445,6 +535,26 @@ describe("writing something new", () => {
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Paste it there" })).toHaveFocus(),
       );
+    });
+
+    it("puts the whole set aside when another way copied away didn't go", async () => {
+      await draftFromAnywhere();
+      native.writeAnotherDraft.mockResolvedValueOnce({
+        ...draft("d2", "yes! 7 it is"),
+        alternativeTo: "d1",
+        context: { adjustment: "moreCasual" },
+      });
+      const ways = screen.getByRole("group", { name: "Write it another way" });
+      fireEvent.click(within(ways).getByRole("button", { name: "More casual" }));
+      expect(await screen.findByDisplayValue("yes! 7 it is")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Copy and go back" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith("yes! 7 it is"));
+      fireEvent.click(await screen.findByRole("button", { name: "It didn’t go" }));
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d1", "discarded", null),
+      );
+      expect(native.resolveDraft).toHaveBeenCalledWith("d2", "discarded", null);
+      expect(native.resolveDraft).toHaveBeenCalledTimes(2);
     });
 
     it("records a reply that didn't go, and nothing for one changed after copying", async () => {
