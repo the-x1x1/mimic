@@ -11,6 +11,7 @@ import {
 import { PageHeader } from "@/components/PageHeader";
 import { usePeople } from "@/hooks/usePeople";
 import { ipc } from "@/lib/ipc";
+import { useFindWith, type FindWith } from "@/state/find";
 import { qk } from "@/app/queryClient";
 import { formatRelative } from "@/lib/format";
 import { RestOfThread } from "@/features/replies/RepliesPage";
@@ -43,7 +44,15 @@ interface Asked {
 export function FindPage() {
   const [typed, setTyped] = useState("");
   const [who, setWho] = useState<SearchWho>("anyone");
-  const [withPerson, setWithPerson] = useState("");
+  // Asked for from People (0.10.0-alpha.102): read as Find opens, and
+  // offered by name even when they aren't among the people listed. It is
+  // let go of once Find is open (not while reading it, which React may do
+  // twice), so the next time Find opens it opens on anyone again.
+  const [named] = useState<FindWith | null>(() => useFindWith.getState().pending);
+  useEffect(() => {
+    if (useFindWith.getState().pending) useFindWith.getState().ask(null);
+  }, []);
+  const [withPerson, setWithPerson] = useState(named?.id ?? "");
   const [asked, setAsked] = useState<Asked | null>(null);
   const [nothingToFind, setNothingToFind] = useState(false);
   const inputId = useId();
@@ -95,8 +104,12 @@ export function FindPage() {
     if (asked) setAsked({ ...asked, withPerson: next });
   };
   const listed = people.data?.people ?? [];
-  const withName = listed.find((p) => p.participant.id === asked?.withPerson)?.participant
-    .displayName;
+  const choices: FindWith[] = listed.map((p) => ({
+    id: p.participant.id,
+    name: p.participant.displayName,
+  }));
+  if (named && !choices.some((c) => c.id === named.id)) choices.unshift(named);
+  const withName = choices.find((c) => c.id === asked?.withPerson)?.name;
 
   const read = pages.data?.pages ?? [];
   const found = read.flatMap((p) => p.found);
@@ -168,9 +181,9 @@ export function FindPage() {
             </label>
             <select id={withId} value={withPerson} onChange={(e) => chooseWith(e.target.value)}>
               <option value="">Anyone</option>
-              {listed.map((p) => (
-                <option key={p.participant.id} value={p.participant.id}>
-                  {p.participant.displayName}
+              {choices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
                 </option>
               ))}
             </select>

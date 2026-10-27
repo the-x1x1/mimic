@@ -13,6 +13,7 @@ import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { useMarkThread } from "@/hooks/useDashboard";
 import { formatRelative } from "@/lib/format";
+import { useFindWith } from "@/state/find";
 import { ThreadMessages } from "@/features/replies/ThreadMessages";
 
 const PAGE = 20;
@@ -30,7 +31,8 @@ function isGone(e: unknown): boolean {
  * reading the home screen makes, and each readable in full. One left off the
  * list — it looks automated, it has gone quiet, or the user said it needs no
  * reply — can be put back on it from here, which is how a reply gets drafted
- * for it.
+ * for it. **Find something said in them** opens Find on just these
+ * conversations (0.10.0-alpha.102).
  */
 export function PersonConversations({
   participantId,
@@ -93,6 +95,18 @@ export function PersonConversations({
             </button>
           ) : null}
           <div className="row gap-2 dialog__actions">
+            {conversations.length > 0 ? (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  useFindWith.getState().ask({ id: participantId, name });
+                  onClose();
+                  window.location.hash = "#/find";
+                }}
+              >
+                Find something said in them
+              </Button>
+            ) : null}
             <Button variant="ghost" onClick={onClose}>
               Close
             </Button>

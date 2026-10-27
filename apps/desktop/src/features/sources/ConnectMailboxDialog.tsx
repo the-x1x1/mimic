@@ -289,6 +289,9 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                 {!known && signIns?.google
                   ? "A Google Workspace account can sign in with Google instead: say so under Server settings."
                   : null}
+                {known?.signIn === "google" && signIns && !signIns.google
+                  ? "Or sign in with Google instead, with no app password, once this copy is set up to: Settings, under Signing in with Microsoft and Google, says how."
+                  : null}
               </p>
               {known?.signIn === "google" && signIns?.google ? (
                 <div className="row">
