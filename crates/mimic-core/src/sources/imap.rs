@@ -272,6 +272,12 @@ pub struct ImapSourceConfig {
     /// them: passed over, the rest read (0.10.0-alpha.73).
     #[serde(default)]
     pub passed_over: Vec<String>,
+    /// Replies go through Microsoft Graph rather than the SMTP server: the
+    /// organisation turned off sending from apps by SMTP, found on a send
+    /// (0.10.0-alpha.94, `smtp::turned_off_for_apps`). Signing this mailbox
+    /// in again then asks for Graph's `Mail.Send` too.
+    #[serde(default)]
+    pub through_graph: bool,
 }
 
 impl ImapSourceConfig {
@@ -1455,6 +1461,7 @@ pub fn sync(
         config.sending = latest.sending;
         config.signature = latest.signature;
         config.also_read = latest.also_read;
+        config.through_graph = latest.through_graph;
     }
     db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
     match &result {
@@ -1838,6 +1845,9 @@ pub type PasswordFor = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Saves a secret: a refresh token the provider replaced when it was used.
 pub type SaveSecret = Arc<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync>;
 
+/// A Microsoft mailbox signed in before Mimic asked to send through Graph.
+pub const GRAPH_SIGN_IN_AGAIN: &str = "Your organization turned off sending from apps by SMTP, so I send through Microsoft 365 itself — and for that Microsoft wants you to sign in to this mailbox again. Use Sign in again under Your mail.";
+
 /// What mailboxes sign in with, worked out per check.
 pub struct Credentials {
     password_for: PasswordFor,
@@ -1848,7 +1858,17 @@ pub struct Credentials {
     sign_ins: std::sync::RwLock<Vec<(Auth, super::oauth::Provider, Option<String>)>>,
     /// Access tokens still good, per mailbox, and when to stop trusting
     /// each: a check every few minutes needn't ask for a new one every time.
+    /// A Microsoft mailbox's token for sending through Graph is kept beside
+    /// its own under `graph_key` (0.10.0-alpha.94).
     kept: std::sync::Mutex<HashMap<String, (String, std::time::Instant)>>,
+    /// Where a reply goes through Microsoft Graph (`graph_mail::SEND_MAIL`;
+    /// a test's server in tests).
+    graph_send_url: String,
+}
+
+/// Where a mailbox's Graph token is kept, beside its own.
+fn graph_key(source_id: &str) -> String {
+    format!("{source_id}#graph")
 }
 
 impl Credentials {
@@ -1863,7 +1883,62 @@ impl Credentials {
             save,
             sign_ins: std::sync::RwLock::new(vec![(Auth::Microsoft, microsoft, microsoft_client)]),
             kept: Default::default(),
+            graph_send_url: super::graph_mail::SEND_MAIL.to_string(),
         }
+    }
+
+    /// Replies through Graph go to `url` instead: a test's server.
+    pub fn sending_through_graph_at(mut self, url: &str) -> Self {
+        self.graph_send_url = url.to_string();
+        self
+    }
+
+    /// Where a reply goes through Microsoft Graph.
+    pub fn graph_send_url(&self) -> &str {
+        &self.graph_send_url
+    }
+
+    /// An access token for sending as a Microsoft mailbox's user through
+    /// Graph (0.10.0-alpha.94), from the same sign-in as its own: kept while
+    /// it has five minutes left, else traded for the refresh token
+    /// (`oauth::refresh_for` with `GRAPH_SEND`), whose replacement is saved.
+    /// A sign-in from before Mimic asked for it is asked for again.
+    pub fn graph_send_token(&self, source_id: &str) -> Result<String, String> {
+        let key = secret_key(source_id);
+        let now = std::time::Instant::now();
+        let mut kept = self.kept.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((token, until)) = kept.get(&graph_key(source_id)) {
+            if *until > now {
+                return Ok(token.clone());
+            }
+        }
+        let found = {
+            let sign_ins = self.sign_ins.read().unwrap_or_else(|p| p.into_inner());
+            sign_ins.iter().find(|(a, _, _)| *a == Auth::Microsoft).map(|(_, p, c)| (p.clone(), c.clone()))
+        };
+        let Some((provider, Some(client))) = found else {
+            return Err(
+                "This copy of Mimic can't sign in with Microsoft, so I can't send through Microsoft 365.".into()
+            );
+        };
+        let Some(refresh) = (self.password_for)(&key) else {
+            return Err(
+                "I don't have a Microsoft sign-in I can use for this mailbox. Sign in again under Your mail.".into()
+            );
+        };
+        let tokens =
+            super::oauth::refresh_for(&provider, &client, &refresh, super::oauth::GRAPH_SEND).map_err(|e| match e {
+                super::oauth::OAuthError::SignInAgain(_) => GRAPH_SIGN_IN_AGAIN.to_string(),
+                other => other.to_string(),
+            })?;
+        if let Some(next) = tokens.refresh_token.as_deref().filter(|t| *t != refresh) {
+            if let Err(e) = (self.save)(&key, next) {
+                tracing::warn!(target: "secrets", error = %e, "a mailbox's new sign-in could not be saved");
+            }
+        }
+        let lasts = std::time::Duration::from_secs(tokens.expires_in.saturating_sub(300));
+        kept.insert(graph_key(source_id), (tokens.access_token.clone(), now + lasts));
+        Ok(tokens.access_token)
     }
 
     /// Mailboxes that sign in with `auth` do it with `provider`, and this
@@ -1950,7 +2025,9 @@ impl Credentials {
     /// Forget a mailbox's kept access token: the server turned it down, or
     /// the mailbox was signed in again.
     pub fn forget(&self, source_id: &str) {
-        self.kept.lock().unwrap_or_else(|p| p.into_inner()).remove(source_id);
+        let mut kept = self.kept.lock().unwrap_or_else(|p| p.into_inner());
+        kept.remove(source_id);
+        kept.remove(&graph_key(source_id));
     }
 
     /// Change what a mailbox signs in with — keep a new sign-in, or remove
@@ -1962,6 +2039,7 @@ impl Credentials {
         let mut kept = self.kept.lock().unwrap_or_else(|p| p.into_inner());
         let changed = change();
         kept.remove(source_id);
+        kept.remove(&graph_key(source_id));
         changed
     }
 }
@@ -2322,6 +2400,7 @@ mod tests {
             signature: None,
             also_read: Vec::new(),
             passed_over: Vec::new(),
+            through_graph: false,
         };
         let source = db
             .create_source(&crate::db::NewSource {
@@ -3495,6 +3574,7 @@ mod tests {
             signature: None,
             also_read: Vec::new(),
             passed_over: Vec::new(),
+            through_graph: false,
         };
         let second = db
             .create_source(&crate::db::NewSource {
@@ -3609,6 +3689,7 @@ mod tests {
             signature: None,
             also_read: Vec::new(),
             passed_over: Vec::new(),
+            through_graph: false,
         };
         let reply = b"From: c@example.com\r\nTo: ada@example.com\r\nSubject: Re: Lunch\r\n\r\nsee you there\r\n";
         copy_to_sent(&config, &pw("pw"), reply).unwrap();

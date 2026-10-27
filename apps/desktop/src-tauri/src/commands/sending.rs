@@ -125,6 +125,9 @@ pub struct MailboxSending {
     pub keeps_sent: bool,
     /// What goes under each reply sent from it (0.10.0-alpha.36).
     pub signature: Option<String>,
+    /// Its organisation turned off sending from apps by SMTP, so replies go
+    /// through Microsoft 365 itself (0.10.0-alpha.94).
+    pub through_graph: bool,
 }
 
 impl MailboxSending {
@@ -137,6 +140,7 @@ impl MailboxSending {
             set_by_user: config.sending.is_some(),
             keeps_sent,
             signature: config.signature().map(str::to_string),
+            through_graph: config.through_graph && config.account.auth == imap::Auth::Microsoft,
         }
     }
 }
@@ -243,20 +247,39 @@ pub async fn test_mailbox_sending(state: State<'_, SharedState>, source_id: Stri
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let credential = credentials.credential(auth, &id).map_err(|why| CommandError::new("mailbox", why))?;
-        transcript::kept_if_it_fails(&db, "sending_probe_failed", &account.host.clone(), || {
+        let probed = transcript::kept_if_it_fails(&db, "sending_probe_failed", &account.host.clone(), || {
             smtp::probe(&account, &credential)
-        })
-        .map_err(|e| {
-            if matches!(e, smtp::SmtpError::SignIn(_)) {
-                credentials.forget(&id);
+        });
+        match probed {
+            Ok(()) => Ok(host),
+            // Microsoft 365 with sending from apps by SMTP turned off: replies
+            // go through Graph instead (0.10.0-alpha.94), and a token for it
+            // is what can be tried without sending.
+            Err(e) if auth == imap::Auth::Microsoft && smtp::turned_off_for_apps(&e) => {
+                db.set_source_config_key(&id, "throughGraph", &serde_json::Value::Bool(true))
+                    .map_err(CommandError::from)?;
+                credentials
+                    .graph_send_token(&id)
+                    .map(|_| THROUGH_GRAPH.to_string())
+                    .map_err(|why| CommandError::new("mailbox", why))
             }
-            CommandError::new("send_failed", e.to_string())
-        })
+            Err(e) => {
+                if matches!(e, smtp::SmtpError::SignIn(_)) {
+                    credentials.forget(&id);
+                }
+                Err(CommandError::new("send_failed", e.to_string()))
+            }
+        }
     })
     .await
-    .map_err(|e| CommandError::new("internal", e.to_string()))??;
-    Ok(host)
+    .map_err(|e| CommandError::new("internal", e.to_string()))?
 }
+
+/// Where a Microsoft 365 mailbox's replies go when its organisation turned
+/// off sending by SMTP, as `test_mailbox_sending` names it: what was tried
+/// is Microsoft's sign-in for sending that way, not Graph itself.
+const THROUGH_GRAPH: &str =
+    "Microsoft to send through Microsoft 365 itself (your organization turned off sending from apps by SMTP)";
 
 /// Sign in to a connected mailbox with its own credential and look at its
 /// folders, opening no message and changing nothing (0.10.0-alpha.51):

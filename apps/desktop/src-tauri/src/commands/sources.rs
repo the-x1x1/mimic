@@ -215,6 +215,7 @@ fn add_mailbox(
         signature: None,
         also_read: Vec::new(),
         passed_over: Vec::new(),
+        through_graph: false,
     };
     let source = state.db.create_source(&mimic_core::db::NewSource {
         connector: imap::CONNECTOR.into(),
@@ -449,7 +450,9 @@ pub async fn cancel_mail_sign_in(state: State<'_, SharedState>) -> CommandResult
 /// Sign a connected Microsoft or Google mailbox in again — the provider
 /// asked for it, or the saved sign-in can't be unlocked on this Windows account — without
 /// removing it and everything read from it. The new sign-in is tried on the
-/// mailbox first, and kept only if it opens it.
+/// mailbox first, and kept only if it opens it. A Microsoft mailbox whose
+/// organisation turned off sending by SMTP (`through_graph`) is asked for
+/// Graph's sending as well (0.10.0-alpha.94).
 #[tauri::command]
 pub async fn sign_in_mailbox_again(
     app: tauri::AppHandle,
@@ -469,6 +472,8 @@ pub async fn sign_in_mailbox_again(
         return Err(CommandError::new("mailbox", "This mailbox uses a password. Give it a new one instead."));
     }
     let (provider, client) = client_for(&state, auth)?;
+    let provider =
+        if config.through_graph && auth == imap::Auth::Microsoft { provider.with_graph_send() } else { provider };
     let signing_in = SigningIn::begin(state.inner())?;
     let tokens = browser_sign_in(&app, &signing_in, provider.clone(), client, &config.account.username).await?;
     let refresh_token = tokens.refresh_token.clone().ok_or_else(|| no_refresh_token(&provider))?;

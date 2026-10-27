@@ -147,6 +147,23 @@ impl SmtpError {
     }
 }
 
+/// Whether Microsoft 365 turned down the sign-in because the organisation
+/// turned off sending from apps by SMTP — `SmtpClientAuthentication is
+/// disabled`, or "locked by your organization's security defaults policy"
+/// — then nothing was sent, and the same message can go through Microsoft
+/// Graph (0.10.0-alpha.94, `graph_mail`).
+pub fn turned_off_for_apps(e: &SmtpError) -> bool {
+    match e {
+        SmtpError::SignIn(why) => {
+            let why = why.to_ascii_lowercase();
+            why.contains("smtpclientauthentication")
+                || why.contains("smtp_auth_disabled")
+                || why.contains("security defaults")
+        }
+        _ => false,
+    }
+}
+
 /// A server's text, cut to one short line: it goes into error messages.
 fn one_line(s: &str) -> String {
     let line = s.lines().next().unwrap_or_default().trim();
@@ -694,6 +711,9 @@ pub(crate) mod test_server {
         /// Close the connection once the message is in, without answering.
         pub(crate) drop_after_data: bool,
         pub(crate) size: Option<usize>,
+        /// Refuse every sign-in as Microsoft 365 does for an organisation
+        /// that turned off sending from apps (0.10.0-alpha.94).
+        pub(crate) turned_off: bool,
     }
 
     impl Default for Behaviour {
@@ -705,6 +725,7 @@ pub(crate) mod test_server {
                 refuse_rcpt: None,
                 drop_after_data: false,
                 size: None,
+                turned_off: false,
             }
         }
     }
@@ -718,6 +739,10 @@ pub(crate) mod test_server {
 
     /// A tiny SMTP server: enough of EHLO, AUTH, MAIL, RCPT and DATA to drive
     /// the real client over a real socket, recording every line it was sent.
+    /// What Microsoft 365 says to a sign-in when the organisation turned off
+    /// sending from apps.
+    pub(crate) const TURNED_OFF: &str = "535 5.7.139 Authentication unsuccessful, SmtpClientAuthentication is disabled for the Tenant. Visit https://aka.ms/smtp_auth_disabled for more information.\r\n";
+
     pub(crate) fn serve(b: Behaviour) -> (u16, mpsc::Receiver<Transcript>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -768,7 +793,9 @@ pub(crate) mod test_server {
                 } else if upper == "AUTH XOAUTH2" {
                     w.write_all(b"334 \r\n").unwrap();
                     let said = String::from_utf8_lossy(&decode_base64(&next(&mut r, &mut t).unwrap())).into_owned();
-                    if said == format!("user=c@example.com\x01auth=Bearer {}\x01\x01", b.secret) {
+                    if b.turned_off {
+                        TURNED_OFF.into()
+                    } else if said == format!("user=c@example.com\x01auth=Bearer {}\x01\x01", b.secret) {
                         "235 2.7.0 Authentication successful\r\n".into()
                     } else {
                         // The reason as a challenge, as Gmail and Microsoft do.
@@ -913,6 +940,28 @@ mod tests {
         let t = seen.recv().unwrap();
         assert_eq!(t.commands[1], "AUTH LOGIN");
         assert!(!t.commands.iter().any(|c| c.starts_with("MAIL")), "a probe sends nothing");
+    }
+
+    #[test]
+    fn microsoft_365_with_sending_from_apps_off_is_told_from_a_sign_in_turned_down() {
+        let (port, seen) = serve(Behaviour { secret: "token-1", turned_off: true, ..Behaviour::default() });
+        let token = Credential::AccessToken("token-1".into());
+        let e =
+            send(&account(port, SmtpSecurity::Plain), &token, "c@example.com", &["ada@example.com".into()], MESSAGE)
+                .unwrap_err();
+        assert!(turned_off_for_apps(&e), "{e}");
+        assert!(!e.may_have_gone());
+        let t = seen.recv().unwrap();
+        assert!(!t.commands.iter().any(|c| c.starts_with("MAIL")), "nothing was sent");
+        // A token or password turned down for itself is not that.
+        let (port, _seen) = serve(Behaviour { secret: "token-1", ..Behaviour::default() });
+        let e = probe(&account(port, SmtpSecurity::Plain), &Credential::AccessToken("token-0".into())).unwrap_err();
+        assert!(!turned_off_for_apps(&e), "{e}");
+        assert!(!turned_off_for_apps(&SmtpError::Unsure));
+        // Security defaults say it their own way.
+        assert!(turned_off_for_apps(&SmtpError::SignIn(
+            "535 5.7.139 Authentication unsuccessful, user is locked by your organization's security defaults policy. Contact your administrator.".into()
+        )));
     }
 
     #[test]

@@ -39,8 +39,8 @@ pub use repo_messages::{
     word_count, ConversationPage, ImportCounts, NewMessage, Reading, SelfScope, ThreadMessage, Toward,
 };
 pub use repo_outbox::{
-    InDoubt, NewOutgoing, OutboxEntry, SendHow, SendStatus, ALREADY_SENDING, DID_NOT_GO, HELD_BY_ITSELF, INTERRUPTED,
-    MAY_HAVE_GONE, NOT_UNSURE, TOO_LATE,
+    InDoubt, NewOutgoing, OutboxEntry, SendHow, SendStatus, SentUnread, ALREADY_SENDING, DID_NOT_GO, HELD_BY_ITSELF,
+    INTERRUPTED, MAY_HAVE_GONE, NOT_UNSURE, TOO_LATE,
 };
 pub use repo_people::{IdentifierInput, PeopleCounts, PeopleFilter, PeopleView};
 pub use repo_search::{search_query, FoundMessage, SearchPage, SearchWho, SnippetPiece, COUNT_CAP as SEARCH_COUNT_CAP};

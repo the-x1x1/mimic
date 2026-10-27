@@ -46,7 +46,8 @@ use crate::db::{
     Db, DbError, Draft, IdentifierInput, IdentifierKind, Message, NewEvent, NewOutgoing, OutboxEntry, SendHow,
     ALREADY_DECIDED, MAY_HAVE_GONE,
 };
-use crate::sources::imap::{self, Credentials, ImapSourceConfig};
+use crate::sources::graph_mail::{self, GraphSendError};
+use crate::sources::imap::{self, Auth, Credentials, ImapSourceConfig};
 use crate::sources::outgoing::{self, Mailbox, Outgoing, OutgoingError};
 use crate::sources::smtp::{self, SmtpAccount, SmtpError};
 
@@ -191,6 +192,7 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
     for s in db.list_sources()?.into_iter().filter(|s| s.connector == imap::CONNECTOR) {
         let config = serde_json::from_value::<ImapSourceConfig>(s.config.clone()).ok();
         let signature = config.as_ref().and_then(|c| c.signature()).map(str::to_string);
+        let through_graph = config.as_ref().is_some_and(|c| c.through_graph && c.account.auth == Auth::Microsoft);
         let account = config
             .ok_or(UNREADABLE)
             .and_then(|c| c.sending_account().ok_or(NOT_SET_UP))
@@ -201,7 +203,8 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
                 source_id: s.id,
                 name: s.name,
                 from_address: Some(a.from_address),
-                server: Some(a.host),
+                // Sent through Microsoft Graph (0.10.0-alpha.94).
+                server: Some(if through_graph { THROUGH_GRAPH.to_string() } else { a.host }),
                 why_not: None,
                 signature,
             },
@@ -540,6 +543,10 @@ pub(crate) fn written_out(db: &Db, entry: &OutboxEntry, auto_replied: bool) -> R
     Ok(mail.to_bytes()?)
 }
 
+/// The server a mailbox sending through Microsoft Graph is said to send
+/// through (0.10.0-alpha.94).
+pub const THROUGH_GRAPH: &str = "Microsoft 365 itself";
+
 /// Hand a recorded reply to the mail server and record what happened.
 pub(crate) fn deliver(
     db: &Db,
@@ -549,6 +556,11 @@ pub(crate) fn deliver(
     entry: &OutboxEntry,
     bytes: &[u8],
 ) -> Result<(), SendError> {
+    // Known to send through Microsoft Graph: its organisation turned off
+    // sending from apps by SMTP (0.10.0-alpha.94).
+    if config.through_graph && config.account.auth == Auth::Microsoft {
+        return through_graph(db, credentials, entry, bytes);
+    }
     let credential = match credentials.credential(config.account.auth, &entry.source_id) {
         Ok(c) => c,
         Err(why) => {
@@ -562,6 +574,14 @@ pub(crate) fn deliver(
             smtp::send(account, &credential, &entry.from_address, &recipients, bytes)
         }))
     });
+    // Microsoft 365 with sending from apps by SMTP turned off — security
+    // defaults turn it off — refused the sign-in, so nothing went: the same
+    // message goes through Microsoft Graph instead, now and from now on
+    // (0.10.0-alpha.94).
+    if config.account.auth == Auth::Microsoft && matches!(&sent, Ok(Err(e)) if smtp::turned_off_for_apps(e)) {
+        db.set_source_config_key(&entry.source_id, "throughGraph", &Value::Bool(true))?;
+        return through_graph(db, credentials, entry, bytes);
+    }
     if !matches!(sent, Ok(Ok(()))) {
         // What the server said, for working out why (never the password or
         // the message: `sources::transcript`).
@@ -594,6 +614,54 @@ pub(crate) fn deliver(
     }
 }
 
+/// Send `bytes` — the message SMTP would have carried — through Microsoft
+/// Graph as the mailbox's user (0.10.0-alpha.94), recorded as SMTP's is,
+/// with `via` `graph` said first: `sent`, `failed`, or `unsure` when Graph's
+/// answer was lost or was its own failure; what Graph said is kept when it
+/// fails.
+fn through_graph(db: &Db, credentials: &Credentials, entry: &OutboxEntry, bytes: &[u8]) -> Result<(), SendError> {
+    let token = match credentials.graph_send_token(&entry.source_id) {
+        Ok(t) => t,
+        Err(why) => {
+            db.outgoing_failed(&entry.id, &why)?;
+            return Err(SendError::Cannot(why));
+        }
+    };
+    db.outgoing_via(&entry.id, graph_mail::VIA)?;
+    let url = credentials.graph_send_url().to_string();
+    let (sent, said) = crate::sources::transcript::recording(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| graph_mail::send(&url, &token, bytes)))
+    });
+    if !matches!(sent, Ok(Ok(()))) {
+        let _ = db.log_event(
+            &NewEvent::warn("mail", "send_failed", json!({ "server": "graph.microsoft.com", "transcript": said }))
+                .entity("outbox", &entry.id),
+        );
+    }
+    match sent {
+        Ok(Ok(())) => {
+            db.outgoing_sent(&entry.id)?;
+            Ok(())
+        }
+        Ok(Err(e)) => {
+            if matches!(e, GraphSendError::SignIn(_)) {
+                credentials.forget(&entry.source_id);
+            }
+            if e.may_have_gone() {
+                db.outgoing_unsure(&entry.id, &e.to_string())?;
+                Err(SendError::ServiceUnsure(e.to_string()))
+            } else {
+                db.outgoing_failed(&entry.id, &e.to_string())?;
+                Err(SendError::Service(e.to_string()))
+            }
+        }
+        Err(_) => {
+            db.outgoing_unsure(&entry.id, PANICKED)?;
+            Err(SendError::Cannot(PANICKED.into()))
+        }
+    }
+}
+
 /// Put a copy of a reply that went in the mailbox's Sent folder, when its
 /// provider keeps none (`SmtpAccount::copies_to_sent`). A copy that can't be
 /// made costs the copy, not the reply: it is noted on the reply's record
@@ -607,6 +675,10 @@ pub(crate) fn file_a_copy(
     bytes: &[u8],
 ) {
     if !account.copies_to_sent() {
+        return;
+    }
+    // Through Graph: Exchange keeps the copy itself (0.10.0-alpha.94).
+    if db.outgoing(&entry.id).ok().flatten().is_some_and(|e| e.via.is_some()) {
         return;
     }
     let copied = credentials.credential(config.account.auth, &entry.source_id).and_then(|c| {
@@ -718,6 +790,7 @@ mod tests {
             signature: None,
             also_read: Vec::new(),
             passed_over: Vec::new(),
+            through_graph: false,
         };
         let mailbox = db
             .create_source(&NewSource {
@@ -1046,5 +1119,143 @@ mod tests {
         assert!(envelope.mailboxes.is_empty());
         assert_eq!(envelope.why_not.as_deref(), Some(NO_MAILBOX));
         assert_eq!(envelope.to, vec!["ada@work.example".to_string()], "an export's mail is mail all the same");
+    }
+
+    /// A Microsoft mailbox whose sign-in comes from `token_url` and whose
+    /// replies go through Graph at `graph`.
+    fn microsoft(w: &World, token_url: String, graph: &str) -> Credentials {
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
+        config.account.auth = imap::Auth::Microsoft;
+        w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
+        Credentials::new(
+            Arc::new(|_: &str| Some("refresh-1".to_string())),
+            Arc::new(|_: &str, _: &str| Ok(())),
+            crate::sources::oauth::Provider { token_url, ..crate::sources::oauth::Provider::microsoft() },
+            Some("m-1".into()),
+        )
+        .sending_through_graph_at(graph)
+    }
+
+    #[test]
+    fn microsoft_365_with_sending_from_apps_off_sends_through_graph_and_its_copy_is_kept_once() {
+        use crate::sources::teams::fake::{graph as graph_server, TOKEN};
+        let (port, seen) = serve(Behaviour { secret: "token-1", turned_off: true, ..Behaviour::default() });
+        let w = world(port);
+        let (token_url, _forms) = crate::sources::oauth::fake::token_endpoint(vec![
+            (200, r#"{"access_token":"token-1","expires_in":3599}"#.into()),
+            (200, format!(r#"{{"access_token":"{TOKEN}","expires_in":3599}}"#)),
+        ]);
+        let handed: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
+        let kept = handed.clone();
+        let (base, _) = graph_server(Box::new(move |path, body| match path {
+            "/me/sendMail" => {
+                *kept.lock().unwrap() = crate::sources::mime::decode_base64(body);
+                (202, String::new())
+            }
+            _ => (404, "{}".into()),
+        }));
+        let credentials = microsoft(&w, token_url, &format!("{base}/me/sendMail"));
+
+        let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+        let sent = send_reply(&w.db, &credentials, &approved(&w, &envelope, "Yes, I'll be there at nine.")).unwrap();
+        assert_eq!((sent.status, sent.via.as_deref()), (SendStatus::Sent, Some("graph")));
+        let t = seen.recv().unwrap();
+        assert!(!t.commands.iter().any(|c| c.starts_with("MAIL")), "SMTP sent nothing: {:?}", t.commands);
+        let message = String::from_utf8(handed.lock().unwrap().clone()).unwrap();
+        assert!(
+            message.contains("\r\nIn-Reply-To: <q1@x.example>\r\n"),
+            "the same message SMTP would carry: {message}"
+        );
+        assert!(message.contains(&format!("Message-ID: <{}>", sent.message_id)), "{message}");
+        let config: ImapSourceConfig =
+            serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
+        assert!(config.through_graph, "from now on, straight through Graph");
+
+        // Its copy in the Sent folder, under an id Exchange gave it: known by
+        // its words, and not kept a second time.
+        let own = |db: &Db| -> i64 {
+            db.conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1 AND direction = 'self'",
+                    [&w.conversation],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(own(&w.db), 1);
+        let copy = |id: &str| {
+            let date = chrono::Utc::now().to_rfc2822();
+            format!(
+                "From: C Haynes <c@example.com>\r\nTo: <ada@work.example>\r\nSubject: Re: Offsite\r\nDate: {date}\r\nMessage-ID: <{id}>\r\nIn-Reply-To: <q1@x.example>\r\nReferences: <q0@x.example> <q1@x.example>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nYes, I'll be there at nine.\r\n"
+            )
+        };
+        read_in(&w.db, &w.mailbox, copy("AM0PR01MB0001@eur.prod.outlook.com").as_bytes());
+        assert_eq!(own(&w.db), 1, "the copy is the reply already kept");
+        let read_back: Option<String> =
+            w.db.conn().query_row("SELECT read_back FROM outbox WHERE id = ?1", [&sent.id], |r| r.get(0)).unwrap();
+        assert_eq!(read_back.as_deref(), Some("AM0PR01MB0001@eur.prod.outlook.com"));
+        // Once: the same words from the user later are theirs.
+        read_in(&w.db, &w.mailbox, copy("later@example.com").as_bytes());
+        assert_eq!(own(&w.db), 2);
+    }
+
+    #[test]
+    fn a_reply_whose_answer_from_graph_was_lost_is_found_by_its_copy_and_kept_once() {
+        use crate::sources::teams::fake::{graph as graph_server, TOKEN};
+        let w = world(1);
+        let (token_url, _forms) = crate::sources::oauth::fake::token_endpoint(vec![(
+            200,
+            format!(r#"{{"access_token":"{TOKEN}","expires_in":3599}}"#),
+        )]);
+        // No answer: it may have gone.
+        let (base, _) = graph_server(Box::new(|_, _| (0, String::new())));
+        let credentials = microsoft(&w, token_url, &format!("{base}/me/sendMail"));
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
+        config.through_graph = true;
+        w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
+
+        let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+        let e = send_reply(&w.db, &credentials, &approved(&w, &envelope, "Yes, see you then.")).unwrap_err();
+        assert!(e.may_have_gone(), "{e}");
+        let entry = w.db.recent_outgoing(10).unwrap().remove(0);
+        assert_eq!((entry.status, entry.via.as_deref()), (SendStatus::Unsure, Some("graph")));
+
+        // It went after all, and Exchange gave it its own id: its copy is
+        // the reply, kept once, and the reply is known to have gone.
+        let date = chrono::Utc::now().to_rfc2822();
+        let copy = format!(
+            "From: C Haynes <c@example.com>\r\nTo: <ada@work.example>\r\nSubject: Re: Offsite\r\nDate: {date}\r\nMessage-ID: <AM0PR01MB0002@eur.prod.outlook.com>\r\nIn-Reply-To: <q1@x.example>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nYes, see you then.\r\n"
+        );
+        read_in(&w.db, &w.mailbox, copy.as_bytes());
+        let entry = w.db.outgoing(&entry.id).unwrap().unwrap();
+        assert_eq!((entry.status, entry.message_id.as_str()), (SendStatus::Sent, "AM0PR01MB0002@eur.prod.outlook.com"));
+        let own: i64 =
+            w.db.conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1 AND direction = 'self'",
+                    [&w.conversation],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert_eq!(own, 1);
+    }
+
+    #[test]
+    fn a_microsoft_sign_in_from_before_graph_was_asked_for_is_asked_again_and_nothing_goes() {
+        let (port, _seen) = serve(Behaviour { secret: "token-1", turned_off: true, ..Behaviour::default() });
+        let w = world(port);
+        let (token_url, _forms) = crate::sources::oauth::fake::token_endpoint(vec![
+            (200, r#"{"access_token":"token-1","expires_in":3599}"#.into()),
+            (400, r#"{"error":"invalid_grant","error_description":"AADSTS65001: The user or administrator has not consented to use the application."}"#.into()),
+        ]);
+        let credentials = microsoft(&w, token_url, "http://127.0.0.1:9/me/sendMail");
+        let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+        let e = send_reply(&w.db, &credentials, &approved(&w, &envelope, "Yes.")).unwrap_err();
+        assert!(matches!(e, SendError::Cannot(ref why) if why == imap::GRAPH_SIGN_IN_AGAIN), "{e}");
+        assert!(!e.may_have_gone());
+        let entry = &w.db.recent_outgoing(10).unwrap()[0];
+        assert_eq!(entry.status, SendStatus::Failed, "it didn't go, and can be sent again once signed in");
     }
 }

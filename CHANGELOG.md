@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.94] — 2026-10-26
+
+Sending from Microsoft 365 when SMTP is off.
+
+### Added
+
+- **A Microsoft 365 mailbox sends even where the organization turned off sending from apps.** Many organizations have it off — Microsoft's security defaults turn it off — and until now a reply from such a mailbox failed at the sign-in. Mimic now sends the very same message through Microsoft 365 itself (Microsoft Graph), which keeps it in Sent Items as usual, and Your mail says it went that way. The first time it's needed, Mimic asks you to sign in to that mailbox again, to let it send through Microsoft 365; no one else is asked. From then on its replies go that way, and its copy read back from the Sent folder is kept once, whatever id Microsoft gave it — as Mimic's, never as your writing, when it went by itself. **Try it (sends nothing)** checks that way too.
+
 ## [0.10.0-alpha.93] — 2026-10-26
 
 The server check and the reading check, said more exactly.

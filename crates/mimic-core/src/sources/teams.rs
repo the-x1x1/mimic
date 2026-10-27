@@ -76,6 +76,7 @@ pub fn provider() -> Provider {
         redirect_host: "localhost",
         authorize_extra: &[("response_mode", "query")],
         scope_in_token_requests: true,
+        consent_also: "",
         client_secret: None,
     }
 }

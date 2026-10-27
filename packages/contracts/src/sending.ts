@@ -31,6 +31,11 @@ export const MailboxSending = z.object({
   keepsSent: z.boolean(),
   /** What goes under each reply sent from it (0.10.0-alpha.36). */
   signature: z.string().nullable().optional(),
+  /**
+   * Its organization turned off sending from apps by SMTP, so replies go
+   * through Microsoft 365 itself (0.10.0-alpha.94).
+   */
+  throughGraph: z.boolean().optional(),
 });
 export type MailboxSending = z.infer<typeof MailboxSending>;
 
@@ -72,6 +77,12 @@ export const OutboxEntry = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   sentAt: z.string().nullable(),
+  /**
+   * How it went, when not the usual way: `graph`, through Microsoft 365
+   * itself, for a mailbox whose organization turned off sending by SMTP
+   * (0.10.0-alpha.94).
+   */
+  via: z.string().nullable().optional(),
 });
 export type OutboxEntry = z.infer<typeof OutboxEntry>;
 
@@ -130,7 +141,11 @@ export function describeOutboxEntry(e: OutboxEntry): string {
       : listAddresses(e.to);
   switch (e.status) {
     case "sent": {
-      const said = e.how === "autonomous" ? `I sent this to ${to} by myself.` : `Sent to ${to}.`;
+      const through = e.via === "graph" ? ", through Microsoft 365" : "";
+      const said =
+        e.how === "autonomous"
+          ? `I sent this to ${to} by myself${through}.`
+          : `Sent to ${to}${through}.`;
       // A note on a reply that went: its copy in the Sent folder couldn't be made.
       return e.error ? `${said} ${e.error}` : said;
     }
