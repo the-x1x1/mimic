@@ -34,17 +34,13 @@ pub async fn send_reply(state: State<'_, SharedState>, request: SendRequest) -> 
     let connector = state.db.get_source(&request.source_id)?.map(|s| s.connector);
     // Into Telegram, through the account's own session (0.10.0-alpha.75).
     if connector.as_deref() == Some(mimic_core::sources::telegram_account::CONNECTOR) {
-        use mimic_core::sources::telegram_account::LivePost;
-        let (app, session) = crate::commands::telegram::session_for(&state, &request.source_id)
+        let account = crate::commands::telegram::session_for(&state, &request.source_id)
             .ok_or_else(|| CommandError::new("cannot_send", crate::commands::telegram::NO_SESSION))?;
         let shared = state.inner().clone();
         let handle = tokio::runtime::Handle::current();
         return tauri::async_runtime::spawn_blocking(move || {
-            let post = LivePost::start(handle, &app, std::sync::Arc::new(session));
-            let sent = sending::telegram::send_reply(&shared.db, &post, &request);
-            crate::commands::telegram::keep_session(&shared, &request.source_id, post.session());
-            post.close();
-            sent
+            let post = crate::commands::telegram::KeptPost::start(handle, shared.clone(), &request.source_id, account);
+            sending::telegram::send_reply(&shared.db, &post, &request)
         })
         .await
         .map_err(|e| CommandError::new("internal", e.to_string()))?

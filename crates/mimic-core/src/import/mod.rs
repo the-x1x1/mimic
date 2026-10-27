@@ -253,6 +253,17 @@ fn same_ids(connector: &str) -> Option<&'static [&'static str]> {
     SAME_IDS_FAMILIES.iter().copied().find(|family| family.contains(&connector))
 }
 
+/// The account a conversation's messages were read through, when its ids
+/// are that account's own (`telegramAccount`): Telegram numbers a one-to-one
+/// chat's messages per account, and calls the chat by the other person, so
+/// two of the user's accounts each talking to Ada have the same ids for
+/// different messages. Such a conversation joins, and is kept once with,
+/// only what was read through the same account, or through a source that
+/// didn't say whose (0.10.0-alpha.77).
+fn account_of(convo: &DiscoveredConversation) -> Option<&str> {
+    convo.messages.iter().find_map(|m| m.metadata.get("telegramAccount").and_then(serde_json::Value::as_str))
+}
+
 /// Connectors besides mail whose messages Mimic sends, under the id the
 /// service gave them (`Db::outgoing_sent_as`), so one it sent on its own is
 /// known when it is read back (Slack, 0.10.0-alpha.66; Teams, .68;
@@ -304,13 +315,13 @@ impl ImportState<'_> {
             }
             self.db.email_conversation_holding(&wanted)?
         } else if let Some(family) = self.same_ids {
-            match self.db.conversation_holding_in(family, &ids)? {
+            match self.db.conversation_holding_in(family, &ids, account_of(&convo))? {
                 Some(found) => Some(found),
                 // None of these was read through another of them, but the
                 // chat itself may have been: it has the same id there (a
                 // later check of a chat first read from an export,
                 // 0.10.0-alpha.74).
-                None => self.db.family_conversation(family, &convo.external_id)?,
+                None => self.db.family_conversation(family, &convo.external_id, account_of(&convo))?,
             }
         } else {
             None
@@ -327,7 +338,7 @@ impl ImportState<'_> {
         let elsewhere = if is_email {
             self.db.email_ids_in_other_sources(&self.source_id, &ids)?
         } else if let Some(family) = self.same_ids {
-            self.db.ids_in_other_sources_of(family, &self.source_id, &ids)?
+            self.db.ids_in_other_sources_of(family, &self.source_id, &ids, account_of(&convo))?
         } else {
             HashSet::new()
         };

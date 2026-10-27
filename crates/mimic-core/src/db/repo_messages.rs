@@ -63,6 +63,18 @@ pub enum Toward {
     Later,
 }
 
+/// A message `m` read through the account `?3` (0.10.0-alpha.77), or
+/// through a source that didn't say whose; any message when no account is
+/// asked about.
+const SAME_ACCOUNT: &str = "(?3 IS NULL OR json_extract(m.metadata_json, '$.telegramAccount') IS NULL
+     OR json_extract(m.metadata_json, '$.telegramAccount') = ?3)";
+
+/// Conversation `c` holds nothing read through an account other than `?3`.
+const ONLY_THIS_ACCOUNT: &str = "(?3 IS NULL OR NOT EXISTS (
+     SELECT 1 FROM messages o WHERE o.conversation_id = c.id
+       AND json_extract(o.metadata_json, '$.telegramAccount') IS NOT NULL
+       AND json_extract(o.metadata_json, '$.telegramAccount') <> ?3))";
+
 impl Toward {
     /// The messages on this side of the one at position `?2` with id `?3`,
     /// in the conversation's order: position, then id — the way the waiting
@@ -391,8 +403,15 @@ impl Db {
 
     /// The conversation already holding any of these messages, read through
     /// any source of the `connectors` — whose ids are the same in each of
-    /// their sources (`import::SAME_IDS_FAMILIES`, 0.10.0-alpha.61, .74).
-    pub fn conversation_holding_in(&self, connectors: &[&str], external_ids: &[String]) -> DbResult<Option<String>> {
+    /// their sources (`import::SAME_IDS_FAMILIES`, 0.10.0-alpha.61, .74) —
+    /// and, for ids that are an `account`'s own, holding nothing read
+    /// through another account (0.10.0-alpha.77).
+    pub fn conversation_holding_in(
+        &self,
+        connectors: &[&str],
+        external_ids: &[String],
+        account: Option<&str>,
+    ) -> DbResult<Option<String>> {
         if external_ids.is_empty() {
             return Ok(None);
         }
@@ -401,13 +420,16 @@ impl Db {
         Ok(self
             .conn()
             .query_row(
-                "SELECT c.id FROM messages m
-                 JOIN conversations c ON c.id = m.conversation_id
-                 JOIN sources s ON s.id = m.source_id
-                 WHERE s.connector IN (SELECT value FROM json_each(?1))
-                   AND m.external_id IN (SELECT value FROM json_each(?2))
-                 ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1",
-                params![connectors, ids],
+                &format!(
+                    "SELECT c.id FROM messages m
+                     JOIN conversations c ON c.id = m.conversation_id
+                     JOIN sources s ON s.id = m.source_id
+                     WHERE s.connector IN (SELECT value FROM json_each(?1))
+                       AND m.external_id IN (SELECT value FROM json_each(?2))
+                       AND {SAME_ACCOUNT} AND {ONLY_THIS_ACCOUNT}
+                     ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1"
+                ),
+                params![connectors, ids, account],
                 |r| r.get(0),
             )
             .optional()?)
@@ -415,41 +437,55 @@ impl Db {
 
     /// The conversation a source of the `connectors` keeps under
     /// `external_id`, the earliest if several do: the same chat, read through
-    /// another of them, before any of these messages was (0.10.0-alpha.74).
-    pub fn family_conversation(&self, connectors: &[&str], external_id: &str) -> DbResult<Option<String>> {
+    /// another of them, before any of these messages was (0.10.0-alpha.74);
+    /// for an `account`'s own ids, one holding nothing read through another
+    /// account (0.10.0-alpha.77).
+    pub fn family_conversation(
+        &self,
+        connectors: &[&str],
+        external_id: &str,
+        account: Option<&str>,
+    ) -> DbResult<Option<String>> {
         let connectors = serde_json::to_string(connectors).unwrap_or_else(|_| "[]".into());
         Ok(self
             .conn()
             .query_row(
-                "SELECT c.id FROM conversations c JOIN sources s ON s.id = c.source_id
-                 WHERE s.connector IN (SELECT value FROM json_each(?1)) AND c.external_id = ?2
-                 ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1",
-                params![connectors, external_id],
+                &format!(
+                    "SELECT c.id FROM conversations c JOIN sources s ON s.id = c.source_id
+                     WHERE s.connector IN (SELECT value FROM json_each(?1)) AND c.external_id = ?2
+                       AND {ONLY_THIS_ACCOUNT}
+                     ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1"
+                ),
+                params![connectors, external_id, account],
                 |r| r.get(0),
             )
             .optional()?)
     }
 
     /// Which of these messages another source of the `connectors` already
-    /// stores.
+    /// stores — for an `account`'s own ids, read through the same account
+    /// or a source that didn't say whose (0.10.0-alpha.77).
     pub fn ids_in_other_sources_of(
         &self,
         connectors: &[&str],
         source_id: &str,
         external_ids: &[String],
+        account: Option<&str>,
     ) -> DbResult<std::collections::HashSet<String>> {
         if external_ids.is_empty() {
             return Ok(Default::default());
         }
         let conn = self.conn();
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT DISTINCT m.external_id FROM messages m JOIN sources s ON s.id = m.source_id
              WHERE s.connector IN (SELECT value FROM json_each(?1)) AND m.source_id <> ?2
-               AND m.external_id IN (SELECT value FROM json_each(?3))",
-        )?;
+               AND m.external_id IN (SELECT value FROM json_each(?3))
+               AND {}",
+            SAME_ACCOUNT.replace("?3", "?4")
+        ))?;
         let ids = serde_json::to_string(external_ids).unwrap_or_else(|_| "[]".into());
         let connectors = serde_json::to_string(connectors).unwrap_or_else(|_| "[]".into());
-        let rows = stmt.query_map(params![connectors, source_id, ids], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![connectors, source_id, ids, account], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

@@ -5,6 +5,7 @@
 //! asked is held in memory (`AppState.telegram`); what the sign-in leaves,
 //! and the app's id and hash, go to the secret store, never the database.
 
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -31,7 +32,16 @@ pub struct PendingTelegram {
     login: LoginToken,
     password: Option<PasswordToken>,
     started: Instant,
+    /// Which sign-in it is (`SIGN_IN`).
+    number: u64,
 }
+
+/// Moves on with each sign-in started, and each one stopped: a step that
+/// finds it moved on while Telegram was being asked belongs to a sign-in the
+/// user stopped, or started again, and goes no further (0.10.0-alpha.77).
+static SIGN_IN: AtomicU64 = AtomicU64::new(0);
+
+const STOPPED: &str = "You stopped that sign-in, so I didn't connect the account.";
 
 /// Whether the app's registration is kept, and its id (never its hash).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,33 +93,49 @@ pub(crate) const NO_SESSION: &str =
 
 /// What sends into an account, or asks it before a reply goes by itself
 /// (0.10.0-alpha.75): the app's registration and the account's session, as
-/// kept.
-pub(crate) fn session_for(state: &crate::AppState, source_id: &str) -> Option<(AppCredentials, KeptSession)> {
+/// kept — and the session as it was read, so a newer one kept meanwhile
+/// isn't written over (`keep_session`, 0.10.0-alpha.77).
+pub(crate) struct AccountSession {
+    app: AppCredentials,
+    session: KeptSession,
+    read: String,
+}
+
+pub(crate) fn session_for(state: &crate::AppState, source_id: &str) -> Option<AccountSession> {
     let app = saved_app(state)?;
-    let session =
-        state.secrets.get(&telegram::secret_key(source_id)).and_then(|raw| KeptSession::from_kept(&raw).ok())?;
-    Some((app, session))
+    let read = state.secrets.get(&telegram::secret_key(source_id))?;
+    let session = KeptSession::from_kept(&read).ok()?;
+    Some(AccountSession { app, session, read })
 }
 
 /// Keep what Telegram changed in a session after it was used — unless the
-/// account was removed meanwhile.
-pub(crate) fn keep_session(state: &crate::AppState, source_id: &str, session: &KeptSession) {
+/// account was removed meanwhile, or another session was kept for it since
+/// this one was read (a sign-in again, a check): the newer one stands
+/// (0.10.0-alpha.77).
+fn keep_session(state: &crate::AppState, source_id: &str, session: &KeptSession, read: &str) {
     if state.db.get_source(source_id).ok().flatten().is_none() {
         return;
     }
+    let key = telegram::secret_key(source_id);
+    if state.secrets.get(&key).as_deref() != Some(read) {
+        return;
+    }
     if let Ok(kept) = session.to_kept() {
-        if let Err(e) = state.secrets.set(&telegram::secret_key(source_id), &kept) {
+        if let Err(e) = state.secrets.set(&key, &kept) {
             tracing::warn!(target: "telegram", error = %e, "couldn't keep the session");
         }
     }
 }
 
 /// A connection through an account's session that, when it is dropped,
-/// keeps what Telegram changed in the session and closes (0.10.0-alpha.76).
+/// keeps what Telegram changed in the session — not once Telegram said it
+/// is signed out (0.10.0-alpha.77) — and closes (0.10.0-alpha.76).
 pub(crate) struct KeptPost {
     post: Option<telegram::LivePost>,
     state: SharedState,
     source_id: String,
+    read: String,
+    signed_out: AtomicBool,
 }
 
 impl KeptPost {
@@ -117,34 +143,52 @@ impl KeptPost {
         handle: tokio::runtime::Handle,
         state: SharedState,
         source_id: &str,
-        app: &AppCredentials,
-        session: KeptSession,
+        account: AccountSession,
     ) -> Self {
-        let post = telegram::LivePost::start(handle, app, Arc::new(session));
-        KeptPost { post: Some(post), state, source_id: source_id.to_string() }
+        let post = telegram::LivePost::start(handle, &account.app, Arc::new(account.session));
+        KeptPost {
+            post: Some(post),
+            state,
+            source_id: source_id.to_string(),
+            read: account.read,
+            signed_out: AtomicBool::new(false),
+        }
     }
 
     fn live(&self) -> Result<&telegram::LivePost, TelegramError> {
         self.post.as_ref().ok_or_else(|| TelegramError::Network("the connection was closed".into()))
     }
+
+    fn noted<T>(&self, answer: Result<T, TelegramError>) -> Result<T, TelegramError> {
+        if matches!(answer, Err(TelegramError::SignIn(_))) {
+            self.signed_out.store(true, Ordering::SeqCst);
+        }
+        answer
+    }
 }
 
 impl TelegramPost for KeptPost {
     fn me(&self) -> Result<Me, TelegramError> {
-        self.live()?.me()
+        self.noted(self.live()?.me())
     }
     fn post(&self, chat: &telegram::ChatRef, text: &str) -> Result<(i32, i64), telegram::PostError> {
-        self.live().map_err(telegram::PostError::NotSent)?.post(chat, text)
+        let posted = self.live().map_err(telegram::PostError::NotSent)?.post(chat, text);
+        if matches!(posted, Err(telegram::PostError::NotSent(TelegramError::SignIn(_)))) {
+            self.signed_out.store(true, Ordering::SeqCst);
+        }
+        posted
     }
     fn after(&self, chat: &telegram::ChatRef, after: i32) -> Result<Vec<telegram::Said>, TelegramError> {
-        self.live()?.after(chat, after)
+        self.noted(self.live()?.after(chat, after))
     }
 }
 
 impl Drop for KeptPost {
     fn drop(&mut self) {
         if let Some(post) = self.post.take() {
-            keep_session(&self.state, &self.source_id, post.session());
+            if !self.signed_out.load(Ordering::SeqCst) {
+                keep_session(&self.state, &self.source_id, post.session(), &self.read);
+            }
             post.close();
         }
     }
@@ -196,12 +240,19 @@ pub async fn start_telegram_sign_in(
     if phone.chars().filter(char::is_ascii_digit).count() < 6 {
         return Err(CommandError::new("invalid", "Your phone number, with its country code, like +1 808 555 0123."));
     }
-    // One sign-in at a time: an earlier one is closed.
+    // One sign-in at a time: an earlier one is closed, and a step of it
+    // still waiting on Telegram goes no further.
+    let number = SIGN_IN.fetch_add(1, Ordering::SeqCst) + 1;
     if let Some(earlier) = take_pending(&state) {
         earlier.live.close().await;
     }
     let live = Live::start(&app, Arc::new(KeptSession::default()));
-    match live.request_code(&phone, &app.api_hash).await {
+    let asked = live.request_code(&phone, &app.api_hash).await;
+    if SIGN_IN.load(Ordering::SeqCst) != number {
+        live.close().await;
+        return Err(CommandError::new("ended", STOPPED));
+    }
+    match asked {
         Ok(login) => {
             // Telegram took the registration: it is kept for next time.
             if given.is_some() {
@@ -211,7 +262,7 @@ pub async fn start_telegram_sign_in(
                     .set(telegram::APP_KEY, &raw)
                     .map_err(|e| CommandError::new("secrets", format!("I couldn't keep the app's id and hash: {e}")))?;
             }
-            put_back(&state, PendingTelegram { live, login, password: None, started: Instant::now() });
+            put_back(&state, PendingTelegram { live, login, password: None, started: Instant::now(), number });
             Ok(TelegramStep::code())
         }
         Err(e) => {
@@ -225,7 +276,11 @@ pub async fn start_telegram_sign_in(
 #[tauri::command]
 pub async fn telegram_sign_in_code(state: State<'_, SharedState>, code: String) -> CommandResult<TelegramStep> {
     let pending = take_pending(&state).ok_or_else(|| CommandError::new("ended", START_AGAIN))?;
-    match pending.live.sign_in(&pending.login, &code).await {
+    let step = pending.live.sign_in(&pending.login, &code).await;
+    if SIGN_IN.load(Ordering::SeqCst) != pending.number {
+        return Err(stopped(pending, matches!(step, Ok(Step::Done(_)))).await);
+    }
+    match step {
         Ok(Step::Done(me)) => finish(state.inner(), pending, me).await,
         Ok(Step::Password { token, hint, wrong }) => {
             put_back(&state, PendingTelegram { password: Some(token), ..pending });
@@ -252,7 +307,12 @@ pub async fn telegram_sign_in_password(state: State<'_, SharedState>, password: 
         put_back(&state, pending);
         return Err(CommandError::new("ended", "Telegram hasn't asked for a password. Give it the code first."));
     };
-    match pending.live.check_password(token, &password).await {
+    let step = pending.live.check_password(token, &password).await;
+    drop(password);
+    if SIGN_IN.load(Ordering::SeqCst) != pending.number {
+        return Err(stopped(pending, matches!(step, Ok(Step::Done(_)))).await);
+    }
+    match step {
         Ok(Step::Done(me)) => finish(state.inner(), pending, me).await,
         Ok(Step::Password { token, hint, .. }) => {
             put_back(&state, PendingTelegram { password: Some(token), ..pending });
@@ -277,11 +337,11 @@ pub async fn test_telegram(state: State<'_, SharedState>, source_id: String) -> 
         .ok_or_else(|| CommandError::new("not_found", "That account isn't connected any more."))?;
     let config: telegram::TelegramSourceConfig = serde_json::from_value(source.config)
         .map_err(|_| CommandError::new("unreadable", "I can't read its settings; remove it and connect it again."))?;
-    let (app, session) = session_for(&state, &source_id).ok_or_else(|| CommandError::new("telegram", NO_SESSION))?;
+    let account = session_for(&state, &source_id).ok_or_else(|| CommandError::new("telegram", NO_SESSION))?;
     let shared = state.inner().clone();
     let handle = tokio::runtime::Handle::current();
     let me = tauri::async_runtime::spawn_blocking(move || {
-        let post = KeptPost::start(handle, shared, &source_id, &app, session);
+        let post = KeptPost::start(handle, shared, &source_id, account);
         post.me()
     })
     .await
@@ -296,13 +356,26 @@ pub async fn test_telegram(state: State<'_, SharedState>, source_id: String) -> 
     Ok(format!("Signed in to Telegram as {}. Nothing was sent.", me.name))
 }
 
-/// Stop a sign-in under way.
+/// Stop a sign-in under way — also one whose code or password Telegram is
+/// checking right now (0.10.0-alpha.77).
 #[tauri::command]
 pub async fn cancel_telegram_sign_in(state: State<'_, SharedState>) -> CommandResult<()> {
+    SIGN_IN.fetch_add(1, Ordering::SeqCst);
     if let Some(pending) = take_pending(&state) {
         pending.live.close().await;
     }
     Ok(())
+}
+
+/// A sign-in the user stopped while Telegram was checking its code or
+/// password: closed, and if Telegram had already let it in, signed out
+/// again, so it isn't left among the account's sessions.
+async fn stopped(pending: PendingTelegram, signed_in: bool) -> CommandError {
+    if signed_in {
+        pending.live.sign_out().await;
+    }
+    pending.live.close().await;
+    CommandError::new("ended", STOPPED)
 }
 
 fn check_soon(state: &crate::AppState, source_id: &str) -> CommandResult<()> {
