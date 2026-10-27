@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.86] — 2026-10-26
+
+The rest of what a model does, run for real.
+
+### Added
+
+- **The live test also has the models on your computer file your messages, put your numbers into words, and be measured.** On the owner's desktop: llama3.2:3b filed 21 of the sample's 22 messages (one answer it gave couldn't be read), put three layers into words, and was measured on six replies; qwen3:14b filed all 22, put three layers into words, and was measured on two. One of llama3.2:3b's readings called a lowercase, contraction-heavy writer "formal and highly polished" — which is why a reading is always shown as a reading, beside the numbers, never instead of them.
+
 ## [0.10.0-alpha.85] — 2026-10-26
 
 Drafted by a real model.
