@@ -420,13 +420,18 @@ impl Db {
         Ok(self
             .conn()
             .query_row(
+                // The conversations holding them first, then whether each
+                // holds another account's: once per conversation, not per
+                // message (0.10.0-alpha.78).
                 &format!(
-                    "SELECT c.id FROM messages m
-                     JOIN conversations c ON c.id = m.conversation_id
-                     JOIN sources s ON s.id = m.source_id
-                     WHERE s.connector IN (SELECT value FROM json_each(?1))
-                       AND m.external_id IN (SELECT value FROM json_each(?2))
-                       AND {SAME_ACCOUNT} AND {ONLY_THIS_ACCOUNT}
+                    "SELECT c.id FROM conversations c
+                     WHERE c.id IN (
+                       SELECT DISTINCT m.conversation_id FROM messages m
+                       JOIN sources s ON s.id = m.source_id
+                       WHERE s.connector IN (SELECT value FROM json_each(?1))
+                         AND m.external_id IN (SELECT value FROM json_each(?2))
+                         AND {SAME_ACCOUNT})
+                       AND {ONLY_THIS_ACCOUNT}
                      ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1"
                 ),
                 params![connectors, ids, account],

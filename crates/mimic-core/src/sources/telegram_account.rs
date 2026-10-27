@@ -53,9 +53,10 @@ pub const MOST_NEW: usize = 2_000;
 pub const MOST_CHATS: usize = 200;
 /// How far down the chat list a check looks at all.
 const MOST_DIALOGS: usize = 1_000;
-/// How much Telegram's clock and this computer's may differ, as far as
-/// where a check stops looking down the chat list goes.
-const CLOCKS_DIFFER_BY: i64 = 10 * 60;
+/// How far below the newest message the last full read saw a chat's own
+/// newest may sit and still be looked at: messages of the same moment, by
+/// Telegram's one clock (0.10.0-alpha.78).
+const SAME_MOMENT: i64 = 60;
 /// How long one request to Telegram may take.
 const TIMEOUT: Duration = Duration::from_secs(60);
 /// The longest Telegram's "slow down" the client waits out by itself, well
@@ -136,12 +137,15 @@ impl From<ImportError> for TelegramError {
 
 /// Telegram's answer, as Mimic reads it: the sign-in (401), slowing down
 /// (420 for longer than the client waits by itself), the app's registration,
-/// and anything else Telegram refused, by its name; the rest is the network.
+/// its own failures (500 and up, and the -500s it says "Timeout" with),
+/// which pass, like the network's (0.10.0-alpha.78), and anything else
+/// Telegram refused, by its name.
 fn read_error(e: grammers_client::InvocationError) -> TelegramError {
     use grammers_client::InvocationError as E;
     match &e {
         E::Rpc(rpc) if rpc.code == 401 => TelegramError::SignIn(rpc.name.clone()),
         E::Rpc(rpc) if rpc.code == 420 => TelegramError::RateLimited,
+        E::Rpc(rpc) if rpc.code >= 500 || rpc.code <= -500 => TelegramError::Network(rpc.name.clone()),
         E::Rpc(rpc) if rpc.name.starts_with("API_ID") => TelegramError::App(rpc.name.clone()),
         E::Rpc(rpc) => TelegramError::Refused(rpc.name.clone()),
         _ => TelegramError::Network(e.to_string()),
@@ -189,6 +193,11 @@ pub struct TelegramSourceConfig {
     /// When the last check that read everything through began.
     #[serde(default)]
     pub last_read_at: Option<String>,
+    /// The newest message, by Telegram's clock (seconds since 1970), that
+    /// the last check that read everything through saw: a chat whose own
+    /// newest is older was read then (0.10.0-alpha.78).
+    #[serde(default)]
+    pub read_through: Option<i64>,
 }
 
 impl TelegramSourceConfig {
@@ -274,6 +283,11 @@ pub struct Fetched {
     pub refused: Vec<String>,
     /// Telegram asked to slow down before every chat was read.
     pub partial: bool,
+    /// The newest message among the chats listed, by Telegram's clock.
+    pub newest_at: Option<i64>,
+    /// The list was read down to where the last full read had read
+    /// everything: the rest had nothing new (0.10.0-alpha.78).
+    pub rest_unchanged: bool,
 }
 
 /// What one check did.
@@ -323,10 +337,14 @@ pub fn finish(
     began: &str,
     fetched: Result<Fetched, TelegramError>,
 ) -> Result<TelegramSummary, TelegramError> {
+    let newest_at = fetched.as_ref().ok().and_then(|f| f.newest_at);
     let result = fetched.and_then(|f| import(db, source_id, &mut config, f));
     config.last_checked_at = Some(crate::ids::now_rfc3339());
     if matches!(&result, Ok(s) if !s.partial) {
         config.last_read_at = Some(began.to_string());
+        if let Some(at) = newest_at {
+            config.read_through = Some(config.read_through.map_or(at, |was| was.max(at)));
+        }
     }
     db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
     match &result {
@@ -369,8 +387,10 @@ fn import(
         ..Default::default()
     };
     // Not one chat Telegram would give, and none passed over for having
-    // nothing new: that is the account, not a chat.
-    if fetched.chats.is_empty() && !fetched.refused.is_empty() && fetched.unchanged == 0 {
+    // nothing new or not being a conversation: that is the account, not a
+    // chat.
+    let gave_some = fetched.unchanged > 0 || fetched.left > 0 || fetched.rest_unchanged;
+    if fetched.chats.is_empty() && !fetched.refused.is_empty() && !gave_some {
         return Err(TelegramError::Refused(format!(
             "it gave none of your chats ({})",
             fetched.refused.last().cloned().unwrap_or_default()
@@ -593,14 +613,17 @@ impl KeptSession {
 
     /// The whole session, to keep. It holds the keys that sign in as the
     /// account: only for the secret store.
+    /// Written out in one order, so a session nothing changed in is the
+    /// same text as when it was read (0.10.0-alpha.78).
     pub fn to_kept(&self) -> Result<String, SessionPoisoned> {
         let state = self.state()?;
-        let kept = Kept {
-            home_dc: state.home_dc,
-            dc_options: state.dc.values().cloned().collect(),
-            peers: state.peers.values().cloned().collect(),
-            updates: state.updates.clone(),
-        };
+        let mut dc_options: Vec<DcOption> = state.dc.values().cloned().collect();
+        dc_options.sort_by_key(|o| o.id);
+        let mut peers: Vec<PeerInfo> = state.peers.values().cloned().collect();
+        peers.sort_by_cached_key(|p| serde_json::to_string(p).unwrap_or_default());
+        let mut updates = state.updates.clone();
+        updates.channels.sort_by_key(|c| c.id);
+        let kept = Kept { home_dc: state.home_dc, dc_options, peers, updates };
         serde_json::to_string(&kept).map_err(|_| SessionPoisoned)
     }
 }
@@ -903,9 +926,13 @@ impl Live {
     pub async fn check_password(&self, token: PasswordToken, password: &str) -> Result<Step, TelegramError> {
         use grammers_client::SignInError as S;
         let (client, password) = (self.client.clone(), password.as_bytes().to_vec());
-        let checked = tokio::spawn(async move { client.check_password(token, password).await });
-        let answer = match tokio::time::timeout(TIMEOUT, checked).await {
-            Err(_) => return Err(TelegramError::Network("Telegram didn't answer in time".into())),
+        let mut checked = tokio::spawn(async move { client.check_password(token, password).await });
+        let answer = match tokio::time::timeout(TIMEOUT, &mut checked).await {
+            // Not left to finish on its own (0.10.0-alpha.78).
+            Err(_) => {
+                checked.abort();
+                return Err(TelegramError::Network("Telegram didn't answer in time".into()));
+            }
             Ok(Err(_)) => return Err(TelegramError::Refused("its answer about the password couldn't be read".into())),
             Ok(Ok(answer)) => answer,
         };
@@ -990,11 +1017,11 @@ impl Live {
     pub async fn fetch(
         &self,
         marks: BTreeMap<String, i32>,
-        read_since: Option<i64>,
+        read_through: Option<i64>,
         stop: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Result<Fetched, TelegramError> {
         let client = self.client.clone();
-        match tokio::spawn(fetch_with(client, marks, read_since, stop)).await {
+        match tokio::spawn(fetch_with(client, marks, read_through, stop)).await {
             Ok(fetched) => fetched,
             Err(e) => Err(TelegramError::Import(format!("reading Telegram went wrong inside Mimic ({e})"))),
         }
@@ -1007,12 +1034,12 @@ impl Live {
     }
 }
 
-/// `Live::fetch`: `read_since` is when the last check that read everything
-/// through began (seconds since 1970), if one has.
+/// `Live::fetch`: `read_through` is the newest message the last check that
+/// read everything through saw, by Telegram's clock, if one has.
 async fn fetch_with(
     client: grammers_client::Client,
     marks: BTreeMap<String, i32>,
-    read_since: Option<i64>,
+    read_through: Option<i64>,
     stop: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<Fetched, TelegramError> {
     use grammers_client::peer::Peer;
@@ -1039,11 +1066,17 @@ async fn fetch_with(
         if stop() {
             return Err(TelegramError::Canceled);
         }
-        // The list is newest first, pinned chats aside: below the last
-        // check that read everything through, every chat was read then.
-        let pinned = matches!(&dialog.raw, tl::enums::Dialog::Dialog(d) if d.pinned);
+        // The list is newest first, by Telegram's clock, but for pinned
+        // chats, a chat with a draft (placed by the draft's time) and the
+        // archive's entry: below the newest message the last full read
+        // saw, every chat was read then (0.10.0-alpha.78).
+        let in_order = matches!(&dialog.raw, tl::enums::Dialog::Dialog(d) if !d.pinned && d.draft.is_none());
         let newest_at = dialog.last_message.as_ref().map(|m| m.date().as_second());
-        if !pinned && matches!((read_since, newest_at), (Some(since), Some(at)) if at < since - CLOCKS_DIFFER_BY) {
+        if let Some(at) = newest_at {
+            fetched.newest_at = Some(fetched.newest_at.map_or(at, |was| was.max(at)));
+        }
+        if in_order && matches!((read_through, newest_at), (Some(seen), Some(at)) if at < seen - SAME_MOMENT) {
+            fetched.rest_unchanged = true;
             break;
         }
         let (id, title, direct, kind) = match dialog.peer() {
@@ -1173,13 +1206,9 @@ impl crate::jobs::JobExecutor for CheckTelegramExecutor {
             let began = crate::ids::now_rfc3339();
             let live = Live::start(&app, Arc::new(session));
             let stop_ctx = ctx.clone();
-            let read_since = config
-                .last_read_at
-                .as_deref()
-                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                .map(|t| t.timestamp());
-            let fetched =
-                live.fetch(config.marks.clone(), read_since, Arc::new(move || stop_ctx.check_cancel().is_err())).await;
+            let fetched = live
+                .fetch(config.marks.clone(), config.read_through, Arc::new(move || stop_ctx.check_cancel().is_err()))
+                .await;
             // What Telegram changed in the session (a datacenter's key, who
             // was met) is kept; one it says is signed out is not, nor one of
             // an account removed while it was read, nor over another kept
@@ -1187,7 +1216,9 @@ impl crate::jobs::JobExecutor for CheckTelegramExecutor {
             let still_here = ctx.db.get_source(&source_id).ok().flatten().is_some();
             let unchanged = secret_for(&secret_key(&source_id)).as_deref() == Some(read.as_str());
             if still_here && unchanged && !matches!(fetched, Err(TelegramError::SignIn(_))) {
-                if let Ok(kept) = live.session().to_kept() {
+                // Written out the same way each time: kept again only when
+                // something in it changed.
+                if let Ok(Some(kept)) = live.session().to_kept().map(|kept| (kept != read).then_some(kept)) {
                     if let Err(e) = keep(&secret_key(&source_id), &kept) {
                         tracing::warn!(target: "telegram", error = %e, "couldn't keep the session");
                     }
@@ -1538,6 +1569,67 @@ mod tests {
         assert!(matches!(post_failed(rpc(403, "CHAT_WRITE_FORBIDDEN")), PostError::NotSent(TelegramError::Refused(_))));
         assert!(matches!(post_failed(rpc(420, "FLOOD_WAIT_30")), PostError::NotSent(TelegramError::RateLimited)));
         assert!(matches!(post_failed(rpc(401, "AUTH_KEY_UNREGISTERED")), PostError::NotSent(TelegramError::SignIn(_))));
+        // Reading: Telegram's own failure passes, like the network's, so the
+        // check is cut short rather than the chat passed over for good.
+        assert!(matches!(read_error(rpc(500, "HISTORY_GET_FAILED")), TelegramError::Network(_)));
+        assert!(matches!(read_error(rpc(-503, "Timeout")), TelegramError::Network(_)));
+        assert!(matches!(read_error(rpc(400, "CHANNEL_PRIVATE")), TelegramError::Refused(_)));
+    }
+
+    #[test]
+    fn the_newest_message_a_full_read_saw_is_where_the_next_stops_and_a_partial_read_moves_nothing() {
+        let db = Db::open_in_memory().unwrap();
+        let source = account(&db);
+        let config = |db: &Db| -> TelegramSourceConfig {
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap()
+        };
+        let full = Fetched {
+            me: me(),
+            chats: vec![ada(vec![said(1, 0, false, "hi")])],
+            newest_at: Some(1_770_110_000),
+            ..Default::default()
+        };
+        check(&db, &source, Ok(full)).unwrap();
+        assert_eq!(config(&db).read_through, Some(1_770_110_000));
+
+        let mut cut = ada(vec![said(2, 5, false, "and?")]);
+        cut.complete = false;
+        let partial = Fetched { me: me(), chats: vec![cut], newest_at: Some(1_770_200_000), ..Default::default() };
+        check(&db, &source, Ok(partial)).unwrap();
+        assert_eq!(config(&db).read_through, Some(1_770_110_000), "a partial read leaves it where it was");
+
+        // A chat Telegram refuses, above where the last full read stopped,
+        // is that chat, not the account.
+        let refused = Fetched {
+            me: me(),
+            refused: vec!["CHANNEL_PRIVATE".into()],
+            rest_unchanged: true,
+            newest_at: Some(1_770_300_000),
+            ..Default::default()
+        };
+        assert!(check(&db, &source, Ok(refused)).is_ok());
+        assert_eq!(config(&db).read_through, Some(1_770_300_000));
+    }
+
+    #[test]
+    fn a_session_nothing_changed_in_is_written_out_the_same_way() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let fill = |order: &[i64]| {
+            let session = KeptSession::default();
+            rt.block_on(async {
+                for &id in order {
+                    session
+                        .cache_peer(PeerInfo::User { id, auth: None, bot: Some(false), is_self: Some(false) })
+                        .await
+                        .unwrap();
+                    session.set_update_state(UpdateState::Channel { id, pts: 1 }).await.unwrap();
+                }
+            });
+            session.to_kept().unwrap()
+        };
+        let one = fill(&[3, 1, 2, 9, 5]);
+        assert_eq!(one, fill(&[9, 5, 2, 1, 3]));
+        assert_eq!(KeptSession::from_kept(&one).unwrap().to_kept().unwrap(), one, "read back, it is the same text");
     }
 
     #[test]
