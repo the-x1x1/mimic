@@ -654,9 +654,23 @@ fn what_the_user_changes_three_times_the_next_draft_does_by_itself() {
     assert!(prompt.system.contains("- Do not open with a greeting."), "{}", prompt.system);
     assert!(prompt.system.contains("- keep it to one line"));
 
+    // Three times the more casual way, sent instead of the first draft beside
+    // it (0.10.0-alpha.97), and the next first draft is written that way.
+    for _ in 0..3 {
+        let first = mimic_core::generation::compose(&db, &provider, &request).unwrap();
+        let casual =
+            mimic_core::generation::compose_another(&db, &provider, &first.id, Adjustment::MoreCasual, None).unwrap();
+        db.resolve_draft(&casual.id, "sent_unedited", Some(&casual.generated_text)).unwrap();
+    }
+    mimic_core::generation::compose(&db, &provider, &request).unwrap();
+    let prompt = provider.last_request().unwrap();
+    assert!(prompt.system.contains("- Pitch it a little more casually"), "{}", prompt.system);
+
     let overview = mimic_core::learning::overview(&db).unwrap();
-    assert_eq!(overview.drafts_considered, 3);
+    assert_eq!(overview.drafts_considered, 3, "a way chosen isn't an edit");
+    assert_eq!(overview.choices_considered, 3);
     assert!(overview.patterns.iter().any(|p| p.holds && p.participant_id.as_deref() == Some(ada.as_str())));
+    assert!(overview.ways.iter().any(|w| w.holds && w.participant_id.as_deref() == Some(ada.as_str())));
     check_fixture("learning.json", &serde_json::to_value(&overview).unwrap());
 }
 

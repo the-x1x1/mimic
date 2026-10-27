@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.97] — 2026-10-26
+
+Mimic learns from which way you choose.
+
+### Added
+
+- **The way you keep choosing becomes how the first draft is written.** When you ask for another way of saying a draft and send the shorter one, the longer one, or the more casual or more professional one instead of Mimic's first, Mimic notices. Once you've chosen the same way three times — and more often than you passed it over or went the other way — the next first draft is written that way from the start, for that person if it was always them, for everyone otherwise. How you write shows each way you've chosen, in a sentence, and the draft says when it was written that way. Your own edits still win on length, and what you've told Mimic outranks both.
+
 ## [0.10.0-alpha.96] — 2026-10-26
 
 A reply quotes what it answers.

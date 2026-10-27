@@ -269,6 +269,18 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
     expect(o.patterns.every((p) => p.summary.length > 0)).toBe(true);
     expect(o.notes.length).toBeGreaterThan(0);
     expect(o.notes.every((n) => !n.text.startsWith("said:"))).toBe(true);
+    // Which way of saying a draft was chosen (0.10.0-alpha.97).
+    expect(o.choicesConsidered).toBe(3);
+    const ways = o.ways.filter((w) => w.holds);
+    expect(ways.some((w) => w.adjustment === "moreCasual" && w.participantId !== null)).toBe(true);
+    expect(ways.every((w) => w.chosen >= o.minAgreeing && w.share > 0.5)).toBe(true);
+    // An overview from before has neither, and reads as none.
+    const older = read(contractFixture("learning.json"));
+    delete older.ways;
+    delete older.choicesConsidered;
+    const before = LearningOverview.parse(older);
+    expect(before.ways).toEqual([]);
+    expect(before.choicesConsidered).toBe(0);
   });
 
   it("parses a draft and a deletion report", () => {

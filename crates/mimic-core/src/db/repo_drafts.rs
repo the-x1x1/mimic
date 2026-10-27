@@ -83,6 +83,26 @@ pub struct NewDraft {
     pub alternative_to: Option<String>,
 }
 
+/// One choice between ways of saying a draft (`Db::choices_for_learning`).
+/// Adjustments are as a draft records them (`"shorter"`, `"moreCasual"`, …).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChoiceMade {
+    /// Who the set was written to.
+    pub participant_id: Option<String>,
+    /// The first draft, as Mimic wrote it.
+    pub first_text: String,
+    /// What the first draft was written with (its `context_json`).
+    pub first_context: Value,
+    /// The way that was sent; `None` when it was the first draft.
+    pub chosen: Option<String>,
+    /// What went: the sent draft's words as the user sent them.
+    pub sent_text: String,
+    /// The other ways beside it that weren't sent, whether passed over when
+    /// it was or put aside before ("Not this one"). The first draft is never
+    /// among them.
+    pub passed_over: Vec<String>,
+}
+
 /// Measured draft outcomes. Every field is `None` until there is something to
 /// measure; the UI says "not measured yet" rather than showing 0%.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -371,6 +391,49 @@ impl Db {
              ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// Every choice the user made between ways of saying a draft shown side
+    /// by side (0.10.0-alpha.97), oldest first: a first draft with other ways
+    /// of saying it, one of which — the first or another — was sent. What
+    /// was sent and what was passed over beside it are the evidence; a set
+    /// put aside whole ("None of these") chose nothing, and one Mimic sent on
+    /// its own was chosen by nobody. Compose's Shorter and the rest aren't
+    /// here: what they replaced isn't kept beside them.
+    pub fn choices_for_learning(&self) -> DbResult<Vec<ChoiceMade>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT f.participant_id, f.generated_text, f.context_json,
+                    CASE WHEN s.alternative_to IS NOT NULL THEN json_extract(s.context_json, '$.adjustment') END,
+                    COALESCE(s.final_text, s.generated_text),
+                    (SELECT json_group_array(json_extract(a.context_json, '$.adjustment'))
+                       FROM drafts a
+                      WHERE a.alternative_to = f.id AND a.id <> s.id
+                        AND a.outcome IN ('regenerated', 'discarded'))
+               FROM drafts s
+               JOIN drafts f ON f.id = COALESCE(s.alternative_to, s.id) AND f.alternative_to IS NULL
+              WHERE s.outcome IN ('sent_unedited', 'sent_edited')
+                AND json_extract(s.context_json, '$.sentOnItsOwn') IS NULL
+                AND EXISTS (SELECT 1 FROM drafts a WHERE a.alternative_to = f.id)
+              ORDER BY f.created_at, f.id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let passed: Option<String> = r.get(5)?;
+            Ok(ChoiceMade {
+                participant_id: r.get(0)?,
+                first_text: r.get(1)?,
+                first_context: json_obj(r.get(2)?),
+                chosen: r.get(3)?,
+                sent_text: r.get(4)?,
+                passed_over: passed
+                    .and_then(|p| serde_json::from_str::<Vec<Option<String>>>(&p).ok())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+            })
+        })?;
         rows.map(|r| r.map_err(DbError::from)).collect()
     }
 

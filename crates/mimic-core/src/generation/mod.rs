@@ -32,7 +32,7 @@ const EXAMPLES: usize = 5;
 /// How much of the current conversation goes in.
 const TRANSCRIPT: usize = 8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Adjustment {
     Shorter,
@@ -155,6 +155,10 @@ pub struct GenerationContext {
     /// Patterns in what the user changed in earlier drafts, that passed the
     /// threshold and apply to this recipient.
     pub learned: Vec<crate::learning::LearnedPattern>,
+    /// Ways of saying a draft the user chose over the first one before, that
+    /// hold and apply to this recipient (0.10.0-alpha.97).
+    #[serde(default)]
+    pub ways: Vec<crate::learning::ChosenWay>,
     /// Plain-language statements of what this draft is based on. Shown in the
     /// Compose evidence panel verbatim, so they are written for a person.
     pub evidence: Vec<String>,
@@ -177,9 +181,10 @@ pub struct HeldOut<'a> {
     /// came after it — the user's actual reply among it — is not shown.
     pub before_message: Option<String>,
     /// How the user writes, measured without the held-out conversations.
-    /// When it is given, habits learned from edits to earlier drafts are left
-    /// out too: they come from drafts, and some may be drafts of the very
-    /// replies being predicted.
+    /// When it is given, habits learned from edits to earlier drafts, and the
+    /// ways chosen over them (0.10.0-alpha.97), are left out too: they come
+    /// from drafts, and some may be drafts of the very replies being
+    /// predicted.
     pub voice: Option<&'a voice::LeavingOut<'a>>,
 }
 
@@ -336,26 +341,37 @@ pub fn build_context_holding_out(
     if let Some(r) = reading(&voice).filter(|_| !form_from_elsewhere) {
         evidence.push(format!("Your numbers put in words by {} — a reading, not something you said", r.model));
     }
-    let mut learned = match held.voice {
-        Some(_) => Vec::new(),
-        None => crate::learning::applicable(db, req.participant_id.as_deref())?,
+    // Learned from drafts, and so left out of a draft written to be
+    // measured: some may be drafts of the very replies being predicted.
+    let crate::learning::Applying { patterns: mut learned, mut ways } = match held.voice {
+        Some(_) => crate::learning::Applying::default(),
+        None => crate::learning::applying(db, req.participant_id.as_deref())?,
     };
     // Adding a greeting or a sign-off, and a length, were learned on drafts
     // whatever their channel — mostly email while the chats are too few to
     // measure — and say nothing about a chat (0.10.0-alpha.83; for this
-    // person too, and length, since 0.10.0-alpha.87).
+    // person too, and length, since 0.10.0-alpha.87; a length chosen, since
+    // 0.10.0-alpha.97).
     if form_from_elsewhere {
         use crate::learning::{Direction, Habit};
         learned.retain(|p| {
             !(p.habit == Habit::Length
                 || (p.direction == Direction::More && matches!(p.habit, Habit::Greeting | Habit::SignOff)))
         });
+        ways.retain(|w| !matches!(w.adjustment, Adjustment::Shorter | Adjustment::Longer));
     }
     if !learned.is_empty() {
         evidence.push(format!(
             "{} you've made to my drafts before: {}",
             if learned.len() == 1 { "A change".to_string() } else { format!("{} changes", learned.len()) },
             learned.iter().map(|p| crate::learning::short_label(p)).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !ways.is_empty() {
+        evidence.push(format!(
+            "{} you've chosen over my first drafts before: {}",
+            if ways.len() == 1 { "The way".to_string() } else { format!("{} ways", ways.len()) },
+            ways.iter().map(|w| w.adjustment.label()).collect::<Vec<_>>().join(", ")
         ));
     }
     if !voice.overrides.is_empty() {
@@ -381,6 +397,7 @@ pub fn build_context_holding_out(
         transcript,
         situation,
         learned,
+        ways,
         evidence,
         form_from_elsewhere,
     })
@@ -436,6 +453,17 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         for p in &ctx.learned {
             system.push_str("- ");
             system.push_str(&crate::learning::instruction(p));
+            system.push('\n');
+        }
+    }
+
+    if !ctx.ways.is_empty() {
+        system.push_str(
+            "\nWays of saying it they chose over Mimic's first draft before, which adjust the measurements above:\n",
+        );
+        for w in &ctx.ways {
+            system.push_str("- ");
+            system.push_str(&crate::learning::way_instruction(w));
             system.push('\n');
         }
     }
@@ -882,6 +910,7 @@ fn write(
             "examples": ctx.examples.len(),
             "situation": ctx.situation,
             "learned": ctx.learned.iter().map(|p| json!({"habit": p.habit, "direction": p.direction, "agreeing": p.agreeing})).collect::<Vec<_>>(),
+            "ways": ctx.ways.iter().map(|w| w.adjustment).collect::<Vec<_>>(),
         }),
         prompt_hash,
         evidence: json!({
@@ -1359,6 +1388,78 @@ mod tests {
         let learned = prompt.system.find("changed in earlier drafts").unwrap();
         assert!(prompt.system[learned..].contains("- Do not open with a greeting."));
         assert!(learned > prompt.system.find("How this person writes").unwrap(), "after the measurements it adjusts");
+    }
+
+    /// A first draft, and the `way` of saying it sent instead of it.
+    fn chose(db: &Db, provider: &MockProvider, req: &ComposeRequest, way: Adjustment, final_text: &str) {
+        let first = compose(db, provider, req).unwrap();
+        let other = compose_another(db, provider, &first.id, way, None).unwrap();
+        db.resolve_draft(&other.id, "sent_edited", Some(final_text)).unwrap();
+    }
+
+    #[test]
+    fn a_way_chosen_three_times_is_how_the_next_first_draft_is_written() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let provider = MockProvider::answering("Hi Ada,\n\nyeah, tomorrow morning works for me");
+        chose(&db, &provider, &request(&ada), Adjustment::MoreCasual, "yeah tmrw morning works");
+        chose(&db, &provider, &request(&ada), Adjustment::MoreCasual, "yeah tmrw morning works");
+        let ctx = build_context(&db, &request(&ada)).unwrap();
+        assert!(ctx.ways.is_empty(), "two choices are an anecdote");
+        assert!(!assemble(&ctx, &request(&ada)).system.contains("chose over Mimic's first draft"));
+
+        chose(&db, &provider, &request(&ada), Adjustment::MoreCasual, "yeah tmrw morning works");
+        let ctx = build_context(&db, &request(&ada)).unwrap();
+        assert_eq!(ctx.ways.iter().map(|w| w.adjustment).collect::<Vec<_>>(), [Adjustment::MoreCasual]);
+        assert!(ctx.learned.is_empty(), "a way chosen and then edited is no edit to how Mimic writes");
+        assert!(
+            ctx.evidence.iter().any(|e| e == "The way you've chosen over my first drafts before: more casual"),
+            "{:?}",
+            ctx.evidence
+        );
+        let prompt = assemble(&ctx, &request(&ada)).system;
+        let ways = prompt.find("chose over Mimic's first draft").unwrap();
+        assert!(prompt[ways..].contains(
+            "- Pitch it a little more casually than the measurements alone would suggest, while still sounding like them."
+        ));
+        assert!(ways > prompt.find("How this person writes").unwrap(), "after the measurements it adjusts");
+
+        let next = compose(&db, &provider, &request(&ada)).unwrap();
+        assert_eq!(next.context["ways"], json!(["moreCasual"]), "the draft says how it was written");
+        // Another way of it is written the same way, and adjusted from there.
+        let shorter = compose_another(&db, &provider, &next.id, Adjustment::Shorter, None).unwrap();
+        assert_eq!(shorter.context["ways"], json!(["moreCasual"]));
+        assert!(provider.last_request().unwrap().system.contains("- Pitch it a little more casually"));
+    }
+
+    #[test]
+    fn a_length_chosen_on_email_is_not_carried_into_a_chat_and_a_register_is() {
+        let (db, ada, _bob) = seeded_by_email(3);
+        let provider = MockProvider::answering("Hi Ada,\n\nI'll have a look tomorrow and come back to you with notes.");
+        let to_ada = ComposeRequest {
+            participant_id: Some(ada.clone()),
+            channel: "email".into(),
+            incoming_message: Some("can you look at the report".into()),
+            ..Default::default()
+        };
+        for way in [Adjustment::Shorter, Adjustment::MoreCasual] {
+            for _ in 0..3 {
+                chose(&db, &provider, &to_ada, way, "I'll look tomorrow.");
+            }
+        }
+        let email = build_context(&db, &to_ada).unwrap();
+        assert_eq!(
+            email.ways.iter().map(|w| w.adjustment).collect::<Vec<_>>(),
+            [Adjustment::Shorter, Adjustment::MoreCasual]
+        );
+        assert!(assemble(&email, &to_ada).system.contains("shorter than the measurements alone would suggest"));
+
+        let chat = chat_to(&ada, Some("deck?"));
+        let ctx = build_context(&db, &chat).unwrap();
+        assert!(ctx.form_from_elsewhere);
+        assert_eq!(ctx.ways.iter().map(|w| w.adjustment).collect::<Vec<_>>(), [Adjustment::MoreCasual]);
+        let prompt = assemble(&ctx, &chat).system;
+        assert!(!prompt.contains("shorter than the measurements"), "{prompt}");
+        assert!(prompt.contains("- Pitch it a little more casually"), "{prompt}");
     }
 
     #[test]

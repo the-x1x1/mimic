@@ -148,6 +148,32 @@ export const LearnedPattern = z.object({
 });
 export type LearnedPattern = z.infer<typeof LearnedPattern>;
 
+/** Another way of saying a draft, written beside it: the way it was adjusted. */
+export const Adjustment = z.enum(["shorter", "longer", "moreCasual", "moreProfessional"]);
+export type Adjustment = z.infer<typeof Adjustment>;
+
+/**
+ * A way of saying a draft the user chose over the first one, when both were
+ * side by side (0.10.0-alpha.97). `chosen` is how often it was sent instead
+ * of the first draft; `against` how often the choice went another way — it
+ * was passed over, or the opposite way was sent. It `holds` (the next first
+ * draft is written that way) on the habits' terms: three chosen, more than
+ * half of what said anything about it. `summary` is shown verbatim.
+ */
+export const ChosenWay = z.object({
+  adjustment: Adjustment,
+  participantId: z.string().nullable(),
+  participantName: z.string().nullable(),
+  chosen: z.number(),
+  against: z.number(),
+  share: z.number(),
+  holds: z.boolean(),
+  /** Shorter or longer: how much shorter or longer what was sent ran than the first draft. */
+  meanChange: z.number().nullable(),
+  summary: z.string(),
+});
+export type ChosenWay = z.infer<typeof ChosenWay>;
+
 /** Something the user told Mimic, in their words, and who it is about. */
 export const StatedNote = z.object({
   id: z.string(),
@@ -161,6 +187,10 @@ export type StatedNote = z.infer<typeof StatedNote>;
 export const LearningOverview = z.object({
   draftsConsidered: z.number(),
   patterns: z.array(LearnedPattern),
+  /** Choices between ways of saying a draft the ways were worked out from. */
+  choicesConsidered: z.number().default(0),
+  /** Ways that hold, then ways still forming (0.10.0-alpha.97). */
+  ways: z.array(ChosenWay).default([]),
   minAgreeing: z.number(),
   notes: z.array(StatedNote),
 });

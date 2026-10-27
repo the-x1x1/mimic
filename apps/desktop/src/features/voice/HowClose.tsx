@@ -170,8 +170,8 @@ function Results({ view }: { view: EvaluationView }) {
         <li>
           For this I worked out how you write again without the conversations I held back, and took
           no examples from them. I also left out what I&rsquo;ve learned from your edits to my
-          drafts, since some of those edits could be to these very replies &mdash; that leans
-          against me.
+          drafts and the ways you chose over them, since some of those could be these very replies
+          &mdash; that leans against me.
         </li>
         {encoder ? <li>{encoder}</li> : null}
         {view.commonReply ? (
