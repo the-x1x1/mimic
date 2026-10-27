@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.85] — 2026-10-26
+
+Drafted by a real model.
+
+### Added
+
+- **A test that drafts with the models on your computer.** `cargo test -p mimic-core --test live_model -- --ignored --nocapture` imports the sample export's made-up people and has each model you name write a chat reply, a text and an email, through everything Mimic does before and after the model. On the owner's desktop it ran with Ollama: llama3.2:3b wrote "yes, tomorrow morning", "yeah from 6" and "i'll take a look" in under three seconds; qwen3:14b, which until 0.10.0-alpha.84 gave empty drafts, wrote "yes, tomorrow morning", "yes from 6" and "sure, i'll take a look this afternoon" in 13 to 17 seconds each.
+
 ## [0.10.0-alpha.84] — 2026-10-26
 
 Drafts from any model on your computer.
