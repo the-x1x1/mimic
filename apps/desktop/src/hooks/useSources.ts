@@ -110,9 +110,23 @@ export function useSignInTeamsAgain() {
 export function useConnectGoogleChat() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => ipc.connectGoogleChat(),
+    mutationFn: (spaces: boolean) => ipc.connectGoogleChat(spaces),
     onSuccess: () => {
       for (const key of [qk.sources, qk.jobs, qk.onboarding, qk.dashboard, qk.settings]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
+/** Read a Google Chat account's named spaces, or stop; turned on, a check follows. */
+export function useSetGoogleChatSpaces() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, on }: { sourceId: string; on: boolean }) =>
+      ipc.setGoogleChatSpaces(sourceId, on),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs]) {
         void qc.invalidateQueries({ queryKey: key });
       }
     },

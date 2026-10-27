@@ -401,6 +401,28 @@ impl Db {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Which of these conversations (by the source's own id) the source
+    /// already holds a message in — a Google Chat thread read before, say
+    /// (0.10.0-alpha.92). One `json_each` parameter, so any length fits.
+    pub fn conversations_in_source(
+        &self,
+        source_id: &str,
+        external_ids: &[String],
+    ) -> DbResult<std::collections::HashSet<String>> {
+        if external_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT c.external_id FROM conversations c
+             WHERE c.source_id = ?1 AND c.external_id IN (SELECT value FROM json_each(?2))
+               AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)",
+        )?;
+        let ids = serde_json::to_string(external_ids).unwrap_or_else(|_| "[]".into());
+        let rows = stmt.query_map(params![source_id, ids], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// The conversation already holding any of these messages, read through
     /// any source of the `connectors` — whose ids are the same in each of
     /// their sources (`import::SAME_IDS_FAMILIES`, 0.10.0-alpha.61, .74) —
@@ -989,6 +1011,30 @@ mod tests {
             reply_to_external_id: None,
             metadata: Value::Null,
         }
+    }
+
+    #[test]
+    fn a_conversation_is_known_to_its_source_only_while_it_holds_a_message() {
+        let (db, source, convo, _) = setup();
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let asked = ids(&["thread-1", "thread-2"]);
+        // Made, but nothing in it yet: not one the source has read.
+        assert!(db.conversations_in_source(&source, &asked).unwrap().is_empty());
+        db.insert_messages(&[msg(&source, &convo, "m1", "other", 0, "2026-01-01T10:00:00Z", "hi")]).unwrap();
+        let known = db.conversations_in_source(&source, &asked).unwrap();
+        assert_eq!(known.into_iter().collect::<Vec<_>>(), ids(&["thread-1"]));
+        // Another source's conversation of the same name is not this one's.
+        let other = db
+            .create_source(&NewSource {
+                connector: "test".into(),
+                name: "U".into(),
+                channel: "chat".into(),
+                location: None,
+                config: Value::Null,
+            })
+            .unwrap();
+        assert!(db.conversations_in_source(&other.id, &asked).unwrap().is_empty());
+        assert!(db.conversations_in_source(&source, &[]).unwrap().is_empty());
     }
 
     #[test]

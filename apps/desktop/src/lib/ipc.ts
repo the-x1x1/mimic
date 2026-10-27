@@ -286,10 +286,14 @@ export const ipc = {
   cancelTelegramSignIn: () => call("cancel_telegram_sign_in", z_void),
   /**
    * Sign in with Google in the browser for Google Chat, and connect the
-   * account signed in as (0.10.0-alpha.79). Resolves once the browser has
-   * come back; stopped with `cancelMailSignIn`.
+   * account signed in as (0.10.0-alpha.79), reading its named spaces too when
+   * `spaces` (0.10.0-alpha.92). Resolves once the browser has come back;
+   * stopped with `cancelMailSignIn`.
    */
-  connectGoogleChat: () => call("connect_google_chat", Source),
+  connectGoogleChat: (spaces: boolean) => call("connect_google_chat", Source, { spaces }),
+  /** Read a connected Google Chat account's named spaces, or stop. */
+  setGoogleChatSpaces: (sourceId: string, on: boolean) =>
+    call("set_google_chat_spaces", Source, { sourceId, on }),
   /** Sign a connected Google Chat account in again, as the same account. */
   signInGoogleChatAgain: (sourceId: string) =>
     call("sign_in_google_chat_again", Source, { sourceId }),

@@ -20,7 +20,7 @@
 //! those without words are left out. Being asked to slow down ends the
 //! check early, keeping what was read.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -561,6 +561,13 @@ pub struct GoogleChatSourceConfig {
     /// When the last check that read everything through began.
     #[serde(default)]
     pub last_read_at: Option<String>,
+    /// Whether named spaces are read — the user's own messages there, those
+    /// that mention them, and the threads they are in — as well as direct
+    /// messages and group chats. Off unless the user turned it on, connecting
+    /// or since (0.10.0-alpha.92), so an account connected before spaces were
+    /// read isn't read further than it was given to be.
+    #[serde(default)]
+    pub spaces: bool,
 }
 
 impl GoogleChatSourceConfig {
@@ -578,14 +585,21 @@ impl GoogleChatSourceConfig {
     }
 }
 
-pub fn new_source(me: &Me) -> Result<crate::db::NewSource, serde_json::Error> {
+/// A new account's source; `spaces`, whether its named spaces are read.
+pub fn new_source(me: &Me, spaces: bool) -> Result<crate::db::NewSource, serde_json::Error> {
     Ok(crate::db::NewSource {
         connector: CONNECTOR.into(),
         name: format!("{} (Google Chat)", me.email.as_deref().unwrap_or(&me.name)),
         channel: "chat".into(),
         location: None,
-        config: serde_json::to_value(GoogleChatSourceConfig::for_me(me))?,
+        config: serde_json::to_value(GoogleChatSourceConfig { spaces, ..GoogleChatSourceConfig::for_me(me) })?,
     })
+}
+
+/// Read an account's named spaces, or stop (0.10.0-alpha.92). What was read
+/// from them stays; a check running meanwhile keeps the choice.
+pub fn set_spaces(db: &Db, source_id: &str, on: bool) -> Result<(), DbError> {
+    db.set_source_config_key(source_id, "spaces", &Value::Bool(on))
 }
 
 /// The Google Chat source already connected as this account, if one is.
@@ -611,8 +625,12 @@ pub struct GoogleChatSummary {
     pub left_out: usize,
     /// Direct messages with apps, which aren't read.
     pub rooms: usize,
-    /// In named spaces: messages neither from the user nor mentioning them,
-    /// left out (0.10.0-alpha.91).
+    /// Named spaces, while reading them is off: not read (0.10.0-alpha.92).
+    #[serde(default)]
+    pub spaces_off: usize,
+    /// In named spaces: messages in threads the user isn't in — none of
+    /// theirs, none mentioning them, none read before — left out
+    /// (0.10.0-alpha.91, .92).
     #[serde(default)]
     pub not_for_you: usize,
     /// In named spaces: messages mentioning the user, read.
@@ -650,6 +668,12 @@ pub fn sync(
     let began = crate::ids::now_rfc3339();
     let result = sync_inner(db, source_id, &mut config, api, should_stop);
     config.last_checked_at = Some(crate::ids::now_rfc3339());
+    // Spaces turned on or off while this ran: the user's choice is kept.
+    if let Some(now) =
+        db.get_source(source_id)?.and_then(|s| serde_json::from_value::<GoogleChatSourceConfig>(s.config).ok())
+    {
+        config.spaces = now.spaces;
+    }
     if matches!(&result, Ok(s) if !s.partial) {
         config.last_read_at = Some(began);
     }
@@ -700,6 +724,35 @@ pub(crate) fn mentions(m: &Value, user: &str) -> bool {
     })
 }
 
+/// The thread a message is in, by Google Chat's name for it.
+fn thread_name(m: &Value) -> Option<&str> {
+    m.get("thread").and_then(|t| t.get("name")).and_then(Value::as_str)
+}
+
+/// The threads among a named space's messages that the user is in, as
+/// Google Chat itself follows a thread for them: one with a message of
+/// theirs or one mentioning them among `raw`, or one the source already
+/// holds — read before, so they were in it then (0.10.0-alpha.92).
+fn followed_threads(db: &Db, source_id: &str, raw: &[Value], user: &str) -> Result<HashSet<String>, DbError> {
+    let mut followed: HashSet<String> = raw
+        .iter()
+        .filter(|m| {
+            by_a_person(m)
+                && (m.get("sender").and_then(|s| s.get("name")).and_then(Value::as_str) == Some(user)
+                    || mentions(m, user))
+        })
+        .filter_map(thread_name)
+        .map(str::to_string)
+        .collect();
+    let rest: BTreeSet<&str> = raw.iter().filter_map(thread_name).filter(|t| !followed.contains(*t)).collect();
+    if !rest.is_empty() {
+        let ids: Vec<String> = rest.iter().map(|t| account_id(t)).collect();
+        let known = db.conversations_in_source(source_id, &ids)?;
+        followed.extend(rest.into_iter().filter(|t| known.contains(&account_id(t))).map(str::to_string));
+    }
+    Ok(followed)
+}
+
 /// A message's time, as stored: UTC to the second.
 fn sent_at(created: &str) -> Option<String> {
     when(created).map(|t| t.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
@@ -732,6 +785,10 @@ fn sync_inner(
         let named = space.kind == "SPACE";
         if (space.kind != "DIRECT_MESSAGE" && space.kind != "GROUP_CHAT" && !named) || space.with_app {
             summary.rooms += 1;
+            continue;
+        }
+        if named && !config.spaces {
+            summary.spaces_off += 1;
             continue;
         }
         let mark = config.marks.get(&space.name).cloned();
@@ -793,9 +850,24 @@ fn sync_inner(
         };
         let newest = newest.to_string();
         summary.fetched += raw.len();
-        // Who wrote, by name: as each message says, else as the space's
+        // In a named space, only the threads the user is in are read: the
+        // rest of a busy space is not addressed to them (0.10.0-alpha.91,
+        // .92).
+        let followed = if named {
+            match followed_threads(db, source_id, &raw, &config.user_id) {
+                Ok(f) => f,
+                Err(e) => {
+                    importer.abandon();
+                    return Err(e.into());
+                }
+            }
+        } else {
+            HashSet::new()
+        };
+        let read = |m: &Value| kept(m) && (!named || thread_name(m).is_some_and(|t| followed.contains(t)));
+        // Who wrote, by name: as each message read says, else as the space's
         // members say.
-        let unnamed = raw.iter().filter(|m| kept(m)).any(|m| {
+        let unnamed = raw.iter().filter(|m| read(m)).any(|m| {
             m.get("sender")
                 .and_then(|s| s.get("displayName"))
                 .and_then(Value::as_str)
@@ -819,9 +891,7 @@ fn sync_inner(
         };
         let mut others: Vec<String> = Vec::new();
         let mut messages: Vec<(String, RawMessage)> = Vec::new();
-        // In a named space, a conversation is a thread, and only the user's
-        // own messages and those that mention them are read: the rest of a
-        // busy space is not addressed to them (0.10.0-alpha.91).
+        // In a named space, a conversation is a thread.
         let mut threads: Vec<(String, Vec<(String, RawMessage)>)> = Vec::new();
         for m in &raw {
             let sender = m.get("sender");
@@ -836,18 +906,21 @@ fn sync_inner(
                 summary.left_out += 1;
                 continue;
             };
-            let thread = m.get("thread").and_then(|t| t.get("name")).and_then(Value::as_str).map(str::to_string);
+            let thread = thread_name(m).map(str::to_string);
             if named {
-                if author != config.user_id {
-                    if !mentions(m, &config.user_id) {
+                match thread.as_deref() {
+                    None => {
+                        summary.left_out += 1;
+                        continue;
+                    }
+                    Some(t) if !followed.contains(t) => {
                         summary.not_for_you += 1;
                         continue;
                     }
-                    summary.mentions += 1;
+                    Some(_) => {}
                 }
-                if thread.is_none() {
-                    summary.left_out += 1;
-                    continue;
+                if author != config.user_id && mentions(m, &config.user_id) {
+                    summary.mentions += 1;
                 }
             }
             let body = m.get("text").and_then(Value::as_str).unwrap_or("").trim().to_string();
@@ -1180,10 +1253,15 @@ mod tests {
     use crate::sources::teams::fake::{graph as server, Answer, TOKEN};
 
     fn account(db: &Db) -> String {
+        account_reading(db, true)
+    }
+
+    /// The account, its named spaces read or not.
+    fn account_reading(db: &Db, spaces: bool) -> String {
         db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         db.set_user_identity("C").unwrap();
         db.add_user_identifier(IdentifierKind::AccountId, &account_id("users/7")).unwrap();
-        db.create_source(&new_source(&me()).unwrap()).unwrap().id
+        db.create_source(&new_source(&me(), spaces).unwrap()).unwrap().id
     }
 
     fn me() -> Me {
@@ -1265,8 +1343,9 @@ mod tests {
                     ]})
                     .to_string(),
                 ),
-                // A named space: a mention of C, one of everyone, talk
-                // between others, and C's own message in another thread.
+                // A named space: a mention of C; in another thread, one of
+                // everyone and talk between others; and C's own message in a
+                // third.
                 "/spaces/ROOM/messages" if !later => {
                     let at = |user: &str| json!([{ "type": "USER_MENTION", "userMention": { "user": { "name": user }, "type": "MENTION" } }]);
                     let mut asked =
@@ -1275,7 +1354,9 @@ mod tests {
                     let mut everyone =
                         said("spaces/ROOM", 2, "users/44", "Alan Turing", 16, "@all standup moved to 10");
                     everyone["annotations"] = at("users/all");
-                    let chatter = said("spaces/ROOM", 3, "users/45", "Ada Lovelace", 17, "lunch?");
+                    everyone["thread"] = json!({ "name": "spaces/ROOM/threads/t3" });
+                    let mut chatter = said("spaces/ROOM", 3, "users/45", "Ada Lovelace", 17, "lunch?");
+                    chatter["thread"] = json!({ "name": "spaces/ROOM/threads/t3" });
                     let mut own = said("spaces/ROOM", 4, "users/7", "C Haynes", 20, "shipped it");
                     own["thread"] = json!({ "name": "spaces/ROOM/threads/t2" });
                     (200, json!({ "messages": [asked, everyone, chatter, own] }).to_string())
@@ -1343,6 +1424,92 @@ mod tests {
         assert_eq!((summary.inserted, summary.unchanged), (1, 2), "{summary:?}");
         assert_eq!(db.count_conversations().unwrap(), 4);
         assert!(seen.lock().unwrap().iter().all(|r| !r.starts_with("/spaces/APP")));
+    }
+
+    #[test]
+    fn a_named_space_is_read_only_once_turned_on_and_then_each_thread_the_user_is_in_whole() {
+        let db = Db::open_in_memory().unwrap();
+        let source = account_reading(&db, false);
+        let round = Arc::new(StdMutex::new(0u32));
+        let (on, held) = (round.clone(), db.clone());
+        let held_source = source.clone();
+        let (api, seen) = chat_api(Box::new(move |path, _| {
+            let round = *on.lock().unwrap();
+            let at_c = json!([{ "type": "USER_MENTION", "userMention": { "user": { "name": "users/7" } } }]);
+            let in_thread = |mut m: Value, t: &str| {
+                m["thread"] = json!({ "name": format!("spaces/ROOM/threads/{t}") });
+                m
+            };
+            match path {
+                "/userinfo" => (200, USERINFO_BODY.into()),
+                "/spaces" => {
+                    let last = if round < 2 { "2026-10-26T09:14:00Z" } else { "2026-10-26T09:31:00Z" };
+                    (200, json!({ "spaces": [{ "name": "spaces/ROOM", "spaceType": "SPACE", "displayName": "Budget", "lastActiveTime": last }] }).to_string())
+                }
+                "/spaces/ROOM/messages" if round == 1 => {
+                    // A question to the room, C asked by name in its thread,
+                    // and an answer after that names no one; in another
+                    // thread, talk not to C, from someone the message doesn't
+                    // name — so nobody need ask who they are.
+                    let question = in_thread(
+                        said("spaces/ROOM", 1, "users/44", "Alan Turing", 10, "who owns the Q3 budget?"),
+                        "t1",
+                    );
+                    let mut asked =
+                        in_thread(said("spaces/ROOM", 2, "users/45", "Grace Hopper", 11, "@C Haynes do you?"), "t1");
+                    asked["annotations"] = at_c;
+                    let after = in_thread(
+                        said("spaces/ROOM", 3, "users/44", "Alan Turing", 12, "it's the one from March"),
+                        "t1",
+                    );
+                    let mut other = in_thread(said("spaces/ROOM", 4, "users/46", "", 14, "lunch?"), "t2");
+                    other["sender"]["displayName"] = Value::Null;
+                    (200, json!({ "messages": [question, asked, after, other] }).to_string())
+                }
+                "/spaces/ROOM/messages" if round == 2 => {
+                    // Reading spaces turned off while this check runs.
+                    set_spaces(&held, &held_source, false).unwrap();
+                    let more = in_thread(said("spaces/ROOM", 5, "users/44", "Alan Turing", 30, "any news?"), "t1");
+                    let elsewhere =
+                        in_thread(said("spaces/ROOM", 6, "users/47", "Ada Lovelace", 31, "sunny out"), "t2");
+                    (200, json!({ "messages": [more, elsewhere] }).to_string())
+                }
+                other => panic!("not asked for: {other}"),
+            }
+        }));
+        // Off, as an account connected before spaces were read: not asked.
+        let summary = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((summary.spaces_off, summary.chats, summary.fetched), (1, 0, 0), "{summary:?}");
+
+        set_spaces(&db, &source, true).unwrap();
+        *round.lock().unwrap() = 1;
+        let summary = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!(
+            (summary.chats, summary.inserted, summary.mentions, summary.not_for_you),
+            (1, 3, 1, 1),
+            "{summary:?}"
+        );
+        assert!(seen.lock().unwrap().iter().all(|r| !r.contains("/members")), "no one read needs naming");
+
+        // The thread C was asked in is followed: what's said there after
+        // reads without naming them; other threads still don't.
+        *round.lock().unwrap() = 2;
+        let summary = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((summary.inserted, summary.not_for_you), (1, 1), "{summary:?}");
+        let thread: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                 WHERE c.external_id = 'google_chat:spaces/ROOM/threads/t1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(thread, 4, "the whole thread, in order of its own");
+        let config: GoogleChatSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        assert!(!config.spaces, "turned off while the check ran, and kept so");
+        assert_eq!(config.marks["spaces/ROOM"], "2026-10-26T09:31:00.123456Z");
     }
 
     #[test]

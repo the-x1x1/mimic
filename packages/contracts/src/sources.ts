@@ -264,17 +264,22 @@ export function teamsAccount(source: {
     : null;
 }
 
-/** A connected Google Chat account, from its stored settings (0.10.0-alpha.79). */
+/**
+ * A connected Google Chat account, from its stored settings (0.10.0-alpha.79);
+ * `spaces`, whether its named spaces are read (0.10.0-alpha.92), off unless
+ * the user turned it on.
+ */
 export function googleChatAccount(source: {
   connector: string;
   config: Record<string, unknown>;
-}): { user: string; email: string | null; lastCheckedAt: string | null } | null {
+}): { user: string; email: string | null; lastCheckedAt: string | null; spaces: boolean } | null {
   if (source.connector !== "google_chat") return null;
   const parsed = z
     .object({
       user: z.string(),
       email: z.string().nullable().optional(),
       lastCheckedAt: z.string().nullable().optional(),
+      spaces: z.boolean().optional(),
     })
     .safeParse(source.config);
   return parsed.success
@@ -282,6 +287,7 @@ export function googleChatAccount(source: {
         user: parsed.data.user,
         email: parsed.data.email ?? null,
         lastCheckedAt: parsed.data.lastCheckedAt ?? null,
+        spaces: parsed.data.spaces ?? false,
       }
     : null;
 }

@@ -1,6 +1,12 @@
+import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button, InlineError } from "@mimic/ui";
-import { useConnectGoogleChat, useMailSignIn, useSignInGoogleChatAgain } from "@/hooks/useSources";
+import {
+  useConnectGoogleChat,
+  useMailSignIn,
+  useSetGoogleChatSpaces,
+  useSignInGoogleChatAgain,
+} from "@/hooks/useSources";
 import { ipc } from "@/lib/ipc";
 import { toast } from "@/state/toast";
 
@@ -8,6 +14,10 @@ import { toast } from "@/state/toast";
 function wasStopped(e: unknown): boolean {
   return (e as { code?: unknown } | null)?.code === "canceled";
 }
+
+/** What reading named spaces means, said the same way wherever it's offered. */
+export const SPACES_READ =
+  "In named spaces I read only the threads you're in: where you've written, or someone @mentioned you — all of that thread, as Google Chat follows it for you. The rest of a busy space I leave alone.";
 
 const GOOGLE_UNAVAILABLE =
   "This copy of Mimic isn't set up to sign in with Google yet. Settings, under Signing in with Microsoft and Google, says how to set it up.";
@@ -17,12 +27,14 @@ const GOOGLE_UNAVAILABLE =
  * browser, through the registration mailboxes sign in with, asking to read
  * chats. Only a Google Workspace account's Chat can be read this way, and
  * only once the Google Chat API is on in that registration's Google Cloud
- * project: the dialog says so before anything is asked.
+ * project: the dialog says so before anything is asked. Named spaces are
+ * read only when ticked (0.10.0-alpha.92).
  */
 export function ConnectGoogleChatDialog({ onClose }: { onClose: () => void }) {
   const signIns = useMailSignIn();
   const connect = useConnectGoogleChat();
   const able = signIns.data?.google === true;
+  const [spaces, setSpaces] = useState(false);
 
   return (
     <Dialog.Root
@@ -38,10 +50,20 @@ export function ConnectGoogleChatDialog({ onClose }: { onClose: () => void }) {
         <Dialog.Content className="dialog">
           <Dialog.Title className="dialog__title">Connect Google Chat</Dialog.Title>
           <Dialog.Description className="neutral">
-            I&rsquo;ll read your Google Chat direct messages and group chats &mdash; not named
-            spaces, or chats with apps &mdash; and check for new messages as often as I check your
-            mail. Reading changes nothing in Google Chat.
+            I&rsquo;ll read your Google Chat direct messages and group chats &mdash; not chats with
+            apps, and named spaces only if you tick the box below &mdash; and check for new messages
+            as often as I check your mail. Reading changes nothing in Google Chat.
           </Dialog.Description>
+          <label className="row gap-2">
+            <input
+              type="checkbox"
+              checked={spaces}
+              disabled={connect.isPending}
+              onChange={(e) => setSpaces(e.target.checked)}
+            />
+            <span>Also read named spaces where you&rsquo;re asked for</span>
+          </label>
+          <p className="muted small">{SPACES_READ}</p>
           <p className="muted small">
             You sign in with Google in your browser, with a Google Workspace account (a work or
             school address on Google); a personal Gmail account has no Google Chat API. I ask to
@@ -71,7 +93,7 @@ export function ConnectGoogleChatDialog({ onClose }: { onClose: () => void }) {
                 variant="primary"
                 disabled={!able}
                 onClick={() =>
-                  connect.mutate(undefined, {
+                  connect.mutate(spaces, {
                     onSuccess: (source) => {
                       toast.success("Connected.", `I'm reading ${source.name} now.`);
                       onClose();
@@ -95,6 +117,33 @@ export function ConnectGoogleChatDialog({ onClose }: { onClose: () => void }) {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/**
+ * Whether a connected Google Chat account's named spaces are read
+ * (0.10.0-alpha.92): off for one connected before they could be.
+ */
+export function GoogleChatSpaces({ sourceId, on }: { sourceId: string; on: boolean }) {
+  const set = useSetGoogleChatSpaces();
+  return (
+    <div className="stack gap-1">
+      <label className="row gap-2 small">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={set.isPending}
+          onChange={(e) => set.mutate({ sourceId, on: e.target.checked })}
+        />
+        <span>Read named spaces where you&rsquo;re asked for</span>
+      </label>
+      <p className="muted small">
+        {on
+          ? SPACES_READ
+          : "Off: I read direct messages and group chats only. What I read from spaces before stays."}
+      </p>
+      {set.isError ? <InlineError>{(set.error as Error).message}</InlineError> : null}
+    </div>
   );
 }
 

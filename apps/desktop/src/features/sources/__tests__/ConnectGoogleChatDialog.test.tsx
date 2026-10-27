@@ -2,11 +2,16 @@ import type { ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ConnectGoogleChatDialog, GoogleChatSignInAgain } from "../ConnectGoogleChatDialog";
+import {
+  ConnectGoogleChatDialog,
+  GoogleChatSignInAgain,
+  GoogleChatSpaces,
+} from "../ConnectGoogleChatDialog";
 
 // The real hooks run; only the native calls are replaced.
 const native = vi.hoisted(() => ({
   connectGoogleChat: vi.fn(),
+  setGoogleChatSpaces: vi.fn(),
   signInGoogleChatAgain: vi.fn(),
   cancelMailSignIn: vi.fn(),
   mailSignInAvailable: vi.fn(),
@@ -34,8 +39,32 @@ describe("connecting Google Chat", () => {
     const go = screen.getByRole("button", { name: "Sign in with Google" });
     await waitFor(() => expect(go).toBeEnabled());
     fireEvent.click(go);
-    await waitFor(() => expect(native.connectGoogleChat).toHaveBeenCalled());
+    // Named spaces aren't read unless asked.
+    await waitFor(() => expect(native.connectGoogleChat).toHaveBeenCalledWith(false));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("reads named spaces only when the box is ticked, and says which threads", async () => {
+    native.mailSignInAvailable.mockResolvedValue({ microsoft: false, google: true });
+    native.connectGoogleChat.mockResolvedValue({ name: "c@formicaria.example (Google Chat)" });
+    wrap(<ConnectGoogleChatDialog onClose={vi.fn()} />);
+    expect(screen.getByText(/named spaces only if you tick the box/)).toBeInTheDocument();
+    expect(screen.getByText(/only the threads you're in/)).toBeInTheDocument();
+    const box = screen.getByRole("checkbox", { name: /Also read named spaces/ });
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    const go = screen.getByRole("button", { name: "Sign in with Google" });
+    await waitFor(() => expect(go).toBeEnabled());
+    fireEvent.click(go);
+    await waitFor(() => expect(native.connectGoogleChat).toHaveBeenCalledWith(true));
+  });
+
+  it("turns reading a connected account's spaces on and off", async () => {
+    native.setGoogleChatSpaces.mockResolvedValue({});
+    wrap(<GoogleChatSpaces sourceId="s9" on={false} />);
+    expect(screen.getByText(/What I read from spaces before stays/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Read named spaces/ }));
+    await waitFor(() => expect(native.setGoogleChatSpaces).toHaveBeenCalledWith("s9", true));
   });
 
   it("offers nothing when this copy can't sign in with Google", async () => {

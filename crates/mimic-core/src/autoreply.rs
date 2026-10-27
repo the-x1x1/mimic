@@ -3263,7 +3263,7 @@ mod google_chat_tests {
         db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         db.set_setting(crate::assist::SETTING, &true).unwrap();
         let me = Me { id: "users/7".into(), name: "C Haynes".into(), email: Some("c@formicaria.example".into()) };
-        let source = db.create_source(&new_source(&me).unwrap()).unwrap().id;
+        let source = db.create_source(&new_source(&me, false).unwrap()).unwrap().id;
         sync(&db, &source, &api(&base), &|| false).unwrap();
         db.conn().execute("UPDATE messages SET imported_at = ?1", [fmt_rfc3339(at(-5))]).unwrap();
         read_through(&db, &source, at(-5));

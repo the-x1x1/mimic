@@ -141,6 +141,7 @@ pub fn run() {
             commands::google_chat::connect_google_chat,
             commands::google_chat::test_google_chat,
             commands::google_chat::sign_in_google_chat_again,
+            commands::google_chat::set_google_chat_spaces,
             commands::sources::mail_sign_in_available,
             commands::sources::mail_exchangers,
             commands::background::step_aside,
