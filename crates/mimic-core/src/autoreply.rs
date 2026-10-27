@@ -1390,7 +1390,14 @@ fn send_into_google_chat(
     if !db.take_held_outgoing(&entry.id, &fmt_rfc3339(now))? {
         return Ok(());
     }
-    match sending::google_chat::post(db, &api, entry, &space, &entry.body) {
+    match sending::google_chat::post(
+        db,
+        &api,
+        entry,
+        &space,
+        sending::google_chat::thread_of(&incoming).as_deref(),
+        &entry.body,
+    ) {
         Ok(created) => {
             run.sent += 1;
             if let Err(e) = db

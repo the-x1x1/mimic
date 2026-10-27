@@ -37,6 +37,18 @@ fn space_of(message: &Message) -> Option<&str> {
     message.metadata.get("googleChatSpace").and_then(Value::as_str).filter(|s| s.starts_with("spaces/"))
 }
 
+/// The thread a reply goes into: a named space's (0.10.0-alpha.91), where a
+/// conversation is a thread. In a direct message or a group chat a reply
+/// goes into the chat itself, as before.
+pub(crate) fn thread_of(message: &Message) -> Option<String> {
+    let space = space_of(message)?;
+    if message.metadata.get("googleChatKind").and_then(Value::as_str) != Some("SPACE") {
+        return None;
+    }
+    let thread = message.metadata.get("googleChatThread").and_then(Value::as_str)?;
+    thread.starts_with(&format!("{space}/threads/")).then(|| thread.to_string())
+}
+
 /// Who a reply goes to, as the user reads it: the chat's name.
 fn chat_name(db: &Db, draft: &Draft, incoming: &Message) -> Result<String, DbError> {
     if let Some(subject) = db.get_conversation(&incoming.conversation_id)?.and_then(|c| c.subject) {
@@ -131,7 +143,7 @@ pub fn send_reply(db: &Db, api: &ChatApi, req: &SendRequest) -> Result<OutboxEnt
             send_after: None,
         })
         .map_err(worded)?;
-    let created = post(db, api, &entry, &space, &req.text)?;
+    let created = post(db, api, &entry, &space, thread_of(&incoming).as_deref(), &req.text)?;
     if let Err(e) = record_sent_draft(db, &draft, &req.text) {
         tracing::warn!(target: "sending", error = %e, "a sent reply's draft could not be marked as sent");
     }
@@ -178,9 +190,10 @@ pub(crate) fn post(
     api: &ChatApi,
     entry: &OutboxEntry,
     space: &str,
+    thread: Option<&str>,
     text: &str,
 ) -> Result<Option<String>, SendError> {
-    let posted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| api.post(space, text, &entry.id)));
+    let posted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| api.post(space, text, &entry.id, thread)));
     match posted {
         Ok(Ok((name, created))) => {
             db.outgoing_sent_as(&entry.id, &account_id(&name))?;
@@ -254,11 +267,16 @@ pub(crate) fn record_in_conversation(
 ) -> Result<(), String> {
     let sent = db.outgoing(&entry.id).map_err(|e| e.to_string())?.ok_or("its outbox row is gone")?;
     let space = space_of(incoming).ok_or(NO_SPACE)?.to_string();
+    let thread = thread_of(incoming);
     let mut metadata = json!({
         "googleChatSpace": space,
         "googleChatDirect": incoming.metadata.get("googleChatDirect").cloned().unwrap_or(Value::Bool(false)),
         "attachments": false,
     });
+    if let Some(thread) = &thread {
+        metadata["googleChatKind"] = json!("SPACE");
+        metadata["googleChatThread"] = json!(thread);
+    }
     if let Some(created) = created {
         metadata["googleChatCreated"] = json!(created);
     }
@@ -267,7 +285,8 @@ pub(crate) fn record_in_conversation(
     }
     let mut importer = Importer::begin(db, &entry.source_id).map_err(|e| e.to_string())?;
     let taken = importer.take(DiscoveredConversation {
-        external_id: account_id(&space),
+        // A named space's conversation is the thread it was said in.
+        external_id: account_id(thread.as_deref().unwrap_or(&space)),
         subject: None,
         channel: "chat".into(),
         messages: vec![RawMessage {
@@ -399,6 +418,92 @@ mod tests {
         let mine: i64 =
             w.db.conn().query_row("SELECT count(*) FROM messages WHERE direction = 'self'", [], |r| r.get(0)).unwrap();
         assert_eq!(mine, 1);
+    }
+
+    #[test]
+    fn a_reply_to_a_mention_in_a_space_goes_into_its_thread_and_is_kept_there() {
+        let db = Db::open_in_memory().unwrap();
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::AccountId, &account_id("users/7")).unwrap();
+        let source = db.create_source(&new_source(&me()).unwrap()).unwrap().id;
+        let posted: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let kept = posted.clone();
+        let (base, _) = server(Box::new(move |path, query| {
+            let answer = match path {
+                "/userinfo" => json!({ "sub": "7", "name": "C Haynes", "email": "c@formicaria.example" }),
+                "/spaces" => {
+                    json!({ "spaces": [{ "name": "spaces/ROOM", "spaceType": "SPACE", "displayName": "Everyone", "lastActiveTime": "2026-10-26T09:15:00Z" }] })
+                }
+                "/spaces/ROOM/messages" if query.starts_with('{') => {
+                    kept.lock().unwrap().push(serde_json::from_str(query).unwrap());
+                    json!({ "name": "spaces/ROOM/messages/r1", "createTime": "2026-10-26T09:20:00.000000Z", "thread": { "name": "spaces/ROOM/threads/t1" } })
+                }
+                "/spaces/ROOM/messages" => json!({ "messages": [{
+                    "name": "spaces/ROOM/messages/m1",
+                    "sender": { "name": "users/44", "displayName": "Alan Turing", "type": "HUMAN" },
+                    "createTime": "2026-10-26T09:15:00.000000Z",
+                    "text": "@C Haynes can you look at the budget?",
+                    "thread": { "name": "spaces/ROOM/threads/t1" },
+                    "annotations": [{ "type": "USER_MENTION", "userMention": { "user": { "name": "users/7" }, "type": "MENTION" } }]
+                }]}),
+                other => panic!("not asked for: {other}"),
+            };
+            (200, answer.to_string())
+        }));
+        let api = ChatApi::at(&base, &format!("{base}/userinfo"), TOKEN).unwrap();
+        sync(&db, &source, &api, &|| false).unwrap();
+        let (message, conversation): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT id, conversation_id FROM messages WHERE external_id = 'google_chat:spaces/ROOM/messages/m1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let draft = db
+            .create_draft(&NewDraft {
+                participant_id: None,
+                conversation_id: Some(conversation.clone()),
+                channel: "chat".into(),
+                situation_id: None,
+                incoming_message: Some("can you look at the budget?".into()),
+                incoming_message_id: Some(message),
+                intent: None,
+                generated_text: "on it this afternoon".into(),
+                provider: "mock".into(),
+                model: "m".into(),
+                context: json!({}),
+                prompt_hash: "h".into(),
+                evidence: json!({}),
+                alternative_to: None,
+            })
+            .unwrap();
+        let envelope = super::super::envelope_for(&db, &draft.id).unwrap();
+        assert_eq!(envelope.to, vec!["Everyone".to_string()]);
+        let sent = send_reply(
+            &db,
+            &api,
+            &SendRequest {
+                draft_id: draft.id.clone(),
+                source_id: source.clone(),
+                to: envelope.to.clone(),
+                cc: Vec::new(),
+                subject: String::new(),
+                text: "on it this afternoon".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(sent.status, SendStatus::Sent);
+        let body = posted.lock().unwrap()[0].clone();
+        assert_eq!(body["thread"]["name"], "spaces/ROOM/threads/t1", "into the thread it was asked in: {body}");
+        assert_eq!(body["text"], "on it this afternoon");
+        let mine: String = db
+            .conn()
+            .query_row("SELECT conversation_id FROM messages WHERE direction = 'self'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mine, conversation, "kept in the thread's conversation, which it now answers");
+        assert!(db.threads_awaiting_reply(10).unwrap().is_empty());
     }
 
     #[test]

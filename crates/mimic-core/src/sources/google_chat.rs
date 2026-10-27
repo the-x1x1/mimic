@@ -254,10 +254,10 @@ impl ChatApi {
         Ok((me, spaces))
     }
 
-    /// The user's direct messages and group chats, each with when its newest
-    /// message was posted.
+    /// The user's direct messages, group chats and named spaces, each with
+    /// when its newest message was posted.
     pub fn spaces(&self) -> Result<Vec<Space>, GoogleChatError> {
-        let filter = encode(r#"spaceType = "DIRECT_MESSAGE" OR spaceType = "GROUP_CHAT""#);
+        let filter = encode(r#"spaceType = "DIRECT_MESSAGE" OR spaceType = "GROUP_CHAT" OR spaceType = "SPACE""#);
         let mut out = Vec::new();
         let mut token: Option<String> = None;
         for _ in 0..MAX_PAGES {
@@ -356,9 +356,21 @@ impl ChatApi {
     /// text, under `request`: the same request asked again makes no second
     /// message. The new message's name and when Google Chat says it was
     /// made, or why not — and whether it may have gone anyway.
-    pub fn post(&self, space: &str, text: &str, request: &str) -> Result<(String, Option<String>), PostError> {
-        let url = format!("{}/{}/messages?requestId={}", self.base, path(space), encode(request));
-        let body = json!({ "text": defused(text) });
+    ///
+    /// With `thread` (0.10.0-alpha.91: a reply to a mention in a named
+    /// space), it goes into that thread, or starts one if the thread is gone.
+    pub fn post(
+        &self,
+        space: &str,
+        text: &str,
+        request: &str,
+        thread: Option<&str>,
+    ) -> Result<(String, Option<String>), PostError> {
+        let url = self.post_target(space, request, thread.is_some());
+        let mut body = json!({ "text": defused(text) });
+        if let Some(thread) = thread {
+            body["thread"] = json!({ "name": thread });
+        }
         let response = self.client.post(url).bearer_auth(&self.token).json(&body).send();
         let response = match response {
             Ok(r) => r,
@@ -389,6 +401,18 @@ impl ChatApi {
             return Err(PostError::Unsure(format!("Google Chat answered {status}")));
         }
         Err(PostError::NotSent(refusal(status, &value)))
+    }
+}
+
+impl ChatApi {
+    /// Where a post goes: the space's messages, under `request`, and — into
+    /// a thread — replying in it, or in a new one if it is gone.
+    fn post_target(&self, space: &str, request: &str, threaded: bool) -> String {
+        let mut url = format!("{}/{}/messages?requestId={}", self.base, path(space), encode(request));
+        if threaded {
+            url.push_str("&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD");
+        }
+        url
     }
 }
 
@@ -585,8 +609,15 @@ pub struct GoogleChatSummary {
     pub from_self: usize,
     /// Apps' messages, deleted ones, and ones without words.
     pub left_out: usize,
-    /// Named spaces (rooms) and direct messages with apps, which aren't read.
+    /// Direct messages with apps, which aren't read.
     pub rooms: usize,
+    /// In named spaces: messages neither from the user nor mentioning them,
+    /// left out (0.10.0-alpha.91).
+    #[serde(default)]
+    pub not_for_you: usize,
+    /// In named spaces: messages mentioning the user, read.
+    #[serde(default)]
+    pub mentions: usize,
     /// Asked to slow down, or a chat had more new than a check reads.
     pub partial: bool,
     /// Chats Google Chat wouldn't give: passed over, the rest read.
@@ -659,6 +690,16 @@ pub(crate) fn kept(m: &Value) -> bool {
     by_a_person(m) && m.get("text").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty())
 }
 
+/// Whether a message mentions `user` by name (`users/…`): an `@` of them,
+/// not of everyone (0.10.0-alpha.91).
+pub(crate) fn mentions(m: &Value, user: &str) -> bool {
+    m.get("annotations").and_then(Value::as_array).into_iter().flatten().any(|a| {
+        a.get("type").and_then(Value::as_str) == Some("USER_MENTION")
+            && a.get("userMention").and_then(|u| u.get("user")).and_then(|u| u.get("name")).and_then(Value::as_str)
+                == Some(user)
+    })
+}
+
 /// A message's time, as stored: UTC to the second.
 fn sent_at(created: &str) -> Option<String> {
     when(created).map(|t| t.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
@@ -688,7 +729,8 @@ fn sync_inner(
             importer.abandon();
             return Err(GoogleChatError::Canceled);
         }
-        if (space.kind != "DIRECT_MESSAGE" && space.kind != "GROUP_CHAT") || space.with_app {
+        let named = space.kind == "SPACE";
+        if (space.kind != "DIRECT_MESSAGE" && space.kind != "GROUP_CHAT" && !named) || space.with_app {
             summary.rooms += 1;
             continue;
         }
@@ -777,6 +819,10 @@ fn sync_inner(
         };
         let mut others: Vec<String> = Vec::new();
         let mut messages: Vec<(String, RawMessage)> = Vec::new();
+        // In a named space, a conversation is a thread, and only the user's
+        // own messages and those that mention them are read: the rest of a
+        // busy space is not addressed to them (0.10.0-alpha.91).
+        let mut threads: Vec<(String, Vec<(String, RawMessage)>)> = Vec::new();
         for m in &raw {
             let sender = m.get("sender");
             let (Some(id), Some(created)) =
@@ -790,6 +836,20 @@ fn sync_inner(
                 summary.left_out += 1;
                 continue;
             };
+            let thread = m.get("thread").and_then(|t| t.get("name")).and_then(Value::as_str).map(str::to_string);
+            if named {
+                if author != config.user_id {
+                    if !mentions(m, &config.user_id) {
+                        summary.not_for_you += 1;
+                        continue;
+                    }
+                    summary.mentions += 1;
+                }
+                if thread.is_none() {
+                    summary.left_out += 1;
+                    continue;
+                }
+            }
             let body = m.get("text").and_then(Value::as_str).unwrap_or("").trim().to_string();
             let name = sender
                 .and_then(|s| s.get("displayName"))
@@ -809,7 +869,7 @@ fn sync_inner(
             let attached = ["attachment", "attachedGifs"]
                 .iter()
                 .any(|k| m.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
-            messages.push((
+            let said = (
                 created.to_string(),
                 RawMessage {
                     external_id: account_id(id),
@@ -821,11 +881,37 @@ fn sync_inner(
                         // To the nanosecond, for asking what came after it.
                         "googleChatCreated": created,
                         "googleChatDirect": space.kind == "DIRECT_MESSAGE",
-                        "googleChatThread": m.get("thread").and_then(|t| t.get("name")).cloned().unwrap_or(Value::Null),
+                        "googleChatKind": space.kind,
+                        "googleChatThread": thread.clone().map(Value::String).unwrap_or(Value::Null),
                         "attachments": attached,
                     }),
                 },
-            ));
+            );
+            match (named, thread) {
+                (true, Some(thread)) => match threads.iter_mut().find(|(t, _)| *t == thread) {
+                    Some((_, said_there)) => said_there.push(said),
+                    None => threads.push((thread, vec![said])),
+                },
+                _ => messages.push(said),
+            }
+        }
+        if named {
+            let subject = space.display_name.clone().unwrap_or_else(|| "A space".to_string());
+            for (thread, mut said) in threads {
+                said.sort_by_key(|(t, _)| when(t));
+                if let Err(e) = importer.take(DiscoveredConversation {
+                    external_id: account_id(&thread),
+                    subject: Some(subject.clone()),
+                    channel: "chat".into(),
+                    messages: said.into_iter().map(|(_, m)| m).collect(),
+                }) {
+                    importer.abandon();
+                    return Err(e.into());
+                }
+                summary.chats += 1;
+            }
+            config.marks.insert(space.name.clone(), newest);
+            continue;
         }
         messages.sort_by_key(|(t, _)| when(t));
         // A direct message only the user has written in yet is named by who
@@ -1179,12 +1265,55 @@ mod tests {
                     ]})
                     .to_string(),
                 ),
+                // A named space: a mention of C, one of everyone, talk
+                // between others, and C's own message in another thread.
+                "/spaces/ROOM/messages" if !later => {
+                    let at = |user: &str| json!([{ "type": "USER_MENTION", "userMention": { "user": { "name": user }, "type": "MENTION" } }]);
+                    let mut asked =
+                        said("spaces/ROOM", 1, "users/44", "Alan Turing", 15, "@C Haynes can you look at the budget?");
+                    asked["annotations"] = at("users/7");
+                    let mut everyone =
+                        said("spaces/ROOM", 2, "users/44", "Alan Turing", 16, "@all standup moved to 10");
+                    everyone["annotations"] = at("users/all");
+                    let chatter = said("spaces/ROOM", 3, "users/45", "Ada Lovelace", 17, "lunch?");
+                    let mut own = said("spaces/ROOM", 4, "users/7", "C Haynes", 20, "shipped it");
+                    own["thread"] = json!({ "name": "spaces/ROOM/threads/t2" });
+                    (200, json!({ "messages": [asked, everyone, chatter, own] }).to_string())
+                }
                 other => panic!("not asked for: {other}"),
             }
         }));
         let summary = sync(&db, &source, &api, &|| false).unwrap();
-        assert_eq!((summary.chats, summary.inserted, summary.from_self), (2, 3, 1), "{summary:?}");
-        assert_eq!((summary.rooms, summary.left_out), (2, 2), "{summary:?}");
+        // The direct message, the group, and in the named space the thread C
+        // was asked in and the thread C wrote in (0.10.0-alpha.91).
+        assert_eq!((summary.chats, summary.inserted, summary.from_self), (4, 5, 2), "{summary:?}");
+        assert_eq!((summary.rooms, summary.left_out), (1, 2), "{summary:?}");
+        assert_eq!((summary.mentions, summary.not_for_you), (1, 2), "{summary:?}");
+        let (subject, metadata): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT c.subject, m.metadata_json FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                 WHERE m.external_id = 'google_chat:spaces/ROOM/messages/m1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(subject, "Everyone", "named by its space");
+        let metadata: Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(metadata["googleChatKind"], "SPACE");
+        assert_eq!(metadata["googleChatThread"], "spaces/ROOM/threads/t1");
+        let in_space: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM messages WHERE external_id LIKE 'google_chat:spaces/ROOM/%'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(in_space, 2, "talk not addressed to C, and @all, aren't read");
+        let waiting = db.threads_awaiting_reply(10).unwrap();
+        assert!(
+            waiting.iter().any(|t| t.conversation.subject.as_deref() == Some("Everyone")),
+            "the mention waits for a reply"
+        );
         let (subject, metadata): (String, String) = db
             .conn()
             .query_row(
@@ -1211,9 +1340,26 @@ mod tests {
         // direct message is read after its mark.
         *second.lock().unwrap() = true;
         let summary = sync(&db, &source, &api, &|| false).unwrap();
-        assert_eq!((summary.inserted, summary.unchanged), (1, 1), "{summary:?}");
-        assert_eq!(db.count_conversations().unwrap(), 2);
-        assert!(seen.lock().unwrap().iter().all(|r| !r.starts_with("/spaces/ROOM") && !r.starts_with("/spaces/APP")));
+        assert_eq!((summary.inserted, summary.unchanged), (1, 2), "{summary:?}");
+        assert_eq!(db.count_conversations().unwrap(), 4);
+        assert!(seen.lock().unwrap().iter().all(|r| !r.starts_with("/spaces/APP")));
+    }
+
+    #[test]
+    fn a_reply_into_a_thread_says_so_and_one_into_a_chat_doesnt() {
+        let (api, _) = chat_api(Box::new(|_, _| (404, "{}".into())));
+        let threaded = api.post_target("spaces/ROOM", "r1", true);
+        assert!(
+            threaded.ends_with(
+                "/spaces/ROOM/messages?requestId=r1&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"
+            ),
+            "{threaded}"
+        );
+        assert!(api.post_target("spaces/DM1", "r1", false).ends_with("/spaces/DM1/messages?requestId=r1"));
+        let at = |user: &str| json!({ "annotations": [{ "type": "USER_MENTION", "userMention": { "user": { "name": user } } }] });
+        assert!(mentions(&at("users/7"), "users/7"));
+        assert!(!mentions(&at("users/all"), "users/7"), "everyone is not them");
+        assert!(!mentions(&json!({ "text": "users/7" }), "users/7"));
     }
 
     #[test]
