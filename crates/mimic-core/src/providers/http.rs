@@ -8,6 +8,14 @@
 //!
 //! Neither logs a prompt or a completion. Errors carry the provider's status
 //! and message, never the request body.
+//!
+//! A model that thinks before it answers (qwen3 through Ollama, say) is asked
+//! not to (`reasoning_effort: "none"`, 0.10.0-alpha.84): through Ollama its
+//! thinking otherwise spends the whole of a short reply's length, and the
+//! reply comes back empty (measured on the owner's desktop, job 308: qwen3:14b,
+//! 120 tokens, every one of them thinking). An endpoint that turns the field
+//! down is asked again without it, and thinking written into the reply itself
+//! (`<think>…</think>`) is taken out.
 
 use serde_json::{json, Value};
 
@@ -50,6 +58,61 @@ impl LocalHttpProvider {
         };
         host == "127.0.0.1" || host == "localhost" || host == "::1"
     }
+
+    /// One request to `/chat/completions`: its status, and what came back.
+    fn post(&self, body: &Value) -> ProviderResult<(reqwest::StatusCode, Value)> {
+        let resp = client()?
+            .post(format!("{}/chat/completions", self.base_url.trim_end_matches('/')))
+            .json(body)
+            .send()
+            .map_err(|e| ProviderError::Unreachable(short(&e.to_string())))?;
+        let status = resp.status();
+        let value: Value = resp.json().map_err(|e| ProviderError::Malformed(short(&e.to_string())))?;
+        Ok((status, value))
+    }
+}
+
+/// Asked of every local endpoint: answer without thinking first. Ollama
+/// takes it for every model, thinking or not (job 308).
+const NO_THINKING: &str = "none";
+
+/// Said when a model thought and wrote no reply.
+pub const THOUGHT_INSTEAD: &str =
+    "the model spent its whole answer thinking and wrote no reply. A model that doesn't think first, such as llama3.2:3b, suits drafting better";
+
+/// An endpoint that refuses `reasoning_effort` — OpenAI's for a model that
+/// doesn't reason, or a server that knows no such field — says so in a 400.
+fn turned_down_thinking(status: reqwest::StatusCode, value: &Value) -> bool {
+    (status.as_u16() == 400 || status.as_u16() == 422) && error_message(value).to_lowercase().contains("reasoning")
+}
+
+/// A reply with any thinking written into it taken out: `<think>…</think>`
+/// and `<thinking>…</thinking>` wherever they are, and everything after one
+/// that is never closed.
+pub fn without_thinking(text: &str) -> String {
+    let mut rest = text;
+    let mut out = String::new();
+    loop {
+        let lower = rest.to_lowercase();
+        let found = ["<think>", "<thinking>"].iter().filter_map(|t| lower.find(t).map(|at| (at, *t))).min();
+        let Some((at, tag)) = found else {
+            out.push_str(rest);
+            break;
+        };
+        // Lowercasing can change a string's length; cut on the original only
+        // where the two agree.
+        if lower.len() != rest.len() {
+            out.push_str(rest);
+            break;
+        }
+        out.push_str(&rest[..at]);
+        let close = format!("</{}", &tag[1..]);
+        match lower[at..].find(&close) {
+            Some(end) => rest = &rest[at + end + close.len()..],
+            None => break,
+        }
+    }
+    out.trim().to_string()
 }
 
 impl ModelProvider for LocalHttpProvider {
@@ -72,28 +135,40 @@ impl ModelProvider for LocalHttpProvider {
     fn generate(&self, request: &GenerationRequest) -> ProviderResult<GenerationResponse> {
         let mut messages = vec![json!({"role": "system", "content": request.system})];
         messages.extend(request.messages.iter().map(|m| json!({"role": m.role, "content": m.content})));
-        let body = json!({
+        let mut body = json!({
             "model": self.model,
             "messages": messages,
             "max_tokens": request.max_output_tokens,
             "temperature": request.temperature,
             "stream": false,
+            "reasoning_effort": NO_THINKING,
         });
-        let resp = client()?
-            .post(format!("{}/chat/completions", self.base_url.trim_end_matches('/')))
-            .json(&body)
-            .send()
-            .map_err(|e| ProviderError::Unreachable(short(&e.to_string())))?;
-        let status = resp.status();
-        let value: Value = resp.json().map_err(|e| ProviderError::Malformed(short(&e.to_string())))?;
+        let (mut status, mut value) = self.post(&body)?;
+        if turned_down_thinking(status, &value) {
+            if let Some(fields) = body.as_object_mut() {
+                fields.remove("reasoning_effort");
+            }
+            (status, value) = self.post(&body)?;
+        }
         if !status.is_success() {
             return Err(ProviderError::Refused(format!("{} {}", status.as_u16(), error_message(&value))));
         }
-        let text = value["choices"][0]["message"]["content"]
+        let message = &value["choices"][0]["message"];
+        let said = message["content"]
             .as_str()
-            .ok_or_else(|| ProviderError::Malformed("no message content in the response".into()))?
-            .trim()
-            .to_string();
+            .ok_or_else(|| ProviderError::Malformed("no message content in the response".into()))?;
+        let text = without_thinking(said);
+        if text.is_empty() {
+            let thought = ["reasoning", "reasoning_content"]
+                .iter()
+                .any(|k| message[*k].as_str().is_some_and(|r| !r.trim().is_empty()))
+                || said.contains("<think");
+            return Err(ProviderError::Malformed(if thought {
+                THOUGHT_INSTEAD.to_string()
+            } else {
+                "an empty reply".to_string()
+            }));
+        }
         Ok(GenerationResponse {
             text,
             provider: "local".into(),
@@ -215,8 +290,114 @@ fn short(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::MemorySecrets;
+    use crate::providers::{MemorySecrets, PromptMessage};
     use std::collections::BTreeMap;
+    use std::io::{Read, Write};
+
+    /// An endpoint on this computer that answers each request in turn with
+    /// the next of `answers` (status, JSON) and hands over the body it was
+    /// sent.
+    fn endpoint(answers: Vec<(u16, Value)>) -> (LocalHttpProvider, std::sync::mpsc::Receiver<Value>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (sent, bodies) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for (status, answer) in answers {
+                let Ok((mut stream, _)) = listener.accept() else { return };
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap_or(0) == 1 {
+                    head.push(byte[0]);
+                }
+                let length = String::from_utf8_lossy(&head)
+                    .lines()
+                    .find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_string()))
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let mut body = vec![0u8; length];
+                let _ = stream.read_exact(&mut body);
+                let _ = sent.send(serde_json::from_slice(&body).unwrap_or(Value::Null));
+                let answer = answer.to_string();
+                let reply = format!(
+                    "HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+                let _ = stream.write_all(reply.as_bytes());
+            }
+        });
+        (LocalHttpProvider { base_url, model: "qwen3:14b".into() }, bodies)
+    }
+
+    fn said(content: &str, extra: Value) -> Value {
+        let mut message = json!({"role": "assistant", "content": content});
+        if let (Some(m), Some(e)) = (message.as_object_mut(), extra.as_object()) {
+            m.extend(e.clone());
+        }
+        json!({"choices": [{"message": message, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 3}})
+    }
+
+    fn ask() -> GenerationRequest {
+        GenerationRequest {
+            system: "draft it".into(),
+            messages: vec![PromptMessage::user("you around later?")],
+            max_output_tokens: 64,
+            temperature: 0.7,
+        }
+    }
+
+    #[test]
+    fn a_local_model_is_asked_not_to_think_first() {
+        let (p, bodies) = endpoint(vec![(200, said("yes from 6", json!({})))]);
+        assert_eq!(p.generate(&ask()).unwrap().text, "yes from 6");
+        let body = bodies.recv().unwrap();
+        assert_eq!(body["reasoning_effort"], "none");
+        assert_eq!(body["max_tokens"], 64);
+    }
+
+    #[test]
+    fn an_endpoint_that_turns_the_field_down_is_asked_again_without_it() {
+        let refused = json!({"error": {"message": "Unrecognized request argument supplied: reasoning_effort"}});
+        let (p, bodies) = endpoint(vec![(400, refused), (200, said("yes from 6", json!({})))]);
+        assert_eq!(p.generate(&ask()).unwrap().text, "yes from 6");
+        assert_eq!(bodies.recv().unwrap()["reasoning_effort"], "none");
+        let again = bodies.recv().unwrap();
+        assert!(again.get("reasoning_effort").is_none(), "{again}");
+        assert_eq!(again["messages"][1]["content"], "you around later?");
+
+        // Any other refusal is the endpoint's answer, and is not asked again.
+        let (p, bodies) = endpoint(vec![(400, json!({"error": {"message": "model not found"}}))]);
+        let err = p.generate(&ask()).unwrap_err();
+        assert!(matches!(err, ProviderError::Refused(_)), "{err}");
+        assert!(err.to_string().contains("model not found"), "{err}");
+        bodies.recv().unwrap();
+        assert!(bodies.recv_timeout(std::time::Duration::from_millis(200)).is_err(), "asked once");
+    }
+
+    #[test]
+    fn thinking_written_into_a_reply_is_taken_out() {
+        let (p, _) = endpoint(vec![(200, said("<think>\nthey asked about later\n</think>\n\nyes from 6", json!({})))]);
+        assert_eq!(p.generate(&ask()).unwrap().text, "yes from 6");
+
+        assert_eq!(without_thinking("yes <THINK>hm</THINK>from 6"), "yes from 6");
+        assert_eq!(without_thinking("<thinking>a</thinking>ok<think>b</think>!"), "ok!");
+        assert_eq!(without_thinking("<think>never closed, all of it thinking"), "");
+        assert_eq!(without_thinking("I think <b>so</b>"), "I think <b>so</b>");
+    }
+
+    #[test]
+    fn a_model_that_only_thought_says_so_rather_than_giving_an_empty_draft() {
+        // What qwen3:14b through Ollama gave on the owner's desktop when
+        // allowed to think: no words, its length spent on reasoning.
+        let thought = json!({"choices": [{"message": {"role": "assistant", "content": "", "reasoning": "Okay, the user wants..."}, "finish_reason": "length"}]});
+        let (p, _) = endpoint(vec![(200, thought)]);
+        let err = p.generate(&ask()).unwrap_err();
+        assert!(matches!(err, ProviderError::Malformed(_)), "{err}");
+        assert!(err.to_string().contains(THOUGHT_INSTEAD), "{err}");
+
+        let (p, _) = endpoint(vec![(200, said("   ", json!({})))]);
+        let err = p.generate(&ask()).unwrap_err();
+        assert!(err.to_string().contains("an empty reply"), "{err}");
+    }
 
     #[test]
     fn a_local_provider_only_claims_to_be_local_when_it_is() {
