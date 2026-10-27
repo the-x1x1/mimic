@@ -205,7 +205,9 @@ pub(crate) fn post(
 /// What was said in a space after `incoming`, asked just before a reply
 /// goes by itself: `Ok(Err(why))` when Google Chat refused to say, as it
 /// would again; `Err(why)` for a failure that may pass. Anything of the
-/// user's there since answers it; of the others', only people's words.
+/// user's there since answers it; of the others', anything a person sent —
+/// words, or a photo or file without any (0.10.0-alpha.81) — but not an
+/// app's, nor one deleted.
 pub(crate) fn said_since(
     api: &ChatApi,
     config: &GoogleChatSourceConfig,
@@ -227,7 +229,7 @@ pub(crate) fn said_since(
                 |m: &Value| m.get("sender").and_then(|s| s.get("name")).and_then(Value::as_str).map(str::to_string);
             Ok(Ok(if since.iter().any(|m| from(m).as_deref() == Some(config.user_id.as_str())) {
                 Since::You
-            } else if since.iter().any(|m| google_chat::kept(m)) {
+            } else if since.iter().any(|m| google_chat::by_a_person(m)) {
                 Since::Them
             } else {
                 Since::Nothing
@@ -451,6 +453,9 @@ mod tests {
         push(json!({ "name": "spaces/DM1/messages/bot", "sender": { "name": "users/app", "type": "BOT" },
                      "createTime": "2026-10-26T09:02:00.000000Z", "text": "Reminder" }));
         assert!(matches!(since(), Since::Nothing), "an app isn't anyone");
+        push(json!({ "name": "spaces/DM1/messages/photo", "sender": { "name": "users/42", "type": "HUMAN" },
+                     "createTime": "2026-10-26T09:02:30.000000Z", "attachment": [{ "name": "river.jpg" }] }));
+        assert!(matches!(since(), Since::Them), "a photo without words is someone saying something");
         push(said("spaces/DM1", "m2", "users/42", "Ada Lovelace", "2026-10-26T09:03:00.000000Z", "or friday"));
         assert!(matches!(since(), Since::Them));
         push(json!({ "name": "spaces/DM1/messages/m3", "sender": { "name": "users/7", "type": "HUMAN" },

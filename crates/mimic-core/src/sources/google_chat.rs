@@ -41,8 +41,30 @@ pub const CHAT: &str = "https://chat.googleapis.com/v1";
 /// Who signed in: Google's OpenID Connect user info.
 pub const USERINFO: &str = "https://openidconnect.googleapis.com/v1/userinfo";
 
-/// What the sign-in asks for.
-pub const SCOPE: &str = "openid email profile https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.memberships.readonly";
+/// What the sign-in asks for: who it is, the spaces, reading messages,
+/// writing one (never editing or deleting, 0.10.0-alpha.81), and who is in
+/// a space.
+pub const SCOPE: &str = "openid email profile https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.messages.readonly https://www.googleapis.com/auth/chat.messages.create https://www.googleapis.com/auth/chat.memberships.readonly";
+
+/// The Chat API's scopes a sign-in must have been granted: Google lets the
+/// user untick some (0.10.0-alpha.81).
+pub const NEEDED: [&str; 4] = [
+    "https://www.googleapis.com/auth/chat.spaces.readonly",
+    "https://www.googleapis.com/auth/chat.messages.readonly",
+    "https://www.googleapis.com/auth/chat.messages.create",
+    "https://www.googleapis.com/auth/chat.memberships.readonly",
+];
+
+/// What a sign-in was granted that it needs and lacks, by the token
+/// response's `scope`; nothing missing when Google didn't say.
+pub fn missing(granted: Option<&str>) -> Vec<&'static str> {
+    let Some(granted) = granted else { return Vec::new() };
+    let have: Vec<&str> = granted.split_whitespace().collect();
+    NEEDED.iter().copied().filter(|s| !have.contains(s)).collect()
+}
+
+pub const TICK_EVERY_BOX: &str =
+    "Google Chat needs every permission it asked for: sign in again, and leave every box on Google's page ticked.";
 
 const FIRST_READ: usize = 300;
 /// All that is new, in practice; more marks the check partial, and the next
@@ -81,6 +103,10 @@ pub enum GoogleChatError {
     Forbidden(String),
     #[error("Google Chat said no: {0}")]
     Refused(String),
+    /// The Chat API answers, but the Google Cloud project's Chat app isn't
+    /// configured (0.10.0-alpha.81).
+    #[error("Google Chat said the app isn't set up ({0}). In the Google Cloud project Mimic signs in through, open the Google Chat API's Configuration page and give it a name, an avatar address and a description, with interactive features off.")]
+    NotConfigured(String),
     #[error("I couldn't reach Google Chat: {0}")]
     Network(String),
     #[error("Google Chat asked me to slow down; I'll read the rest on the next check.")]
@@ -188,14 +214,15 @@ impl ChatApi {
             if response.status().as_u16() != 429 {
                 break response;
             }
-            // Asked to wait a moment: as long as asked, then again.
-            match super::slack::asked_to_wait(&response) {
-                Some(wait) if waits < 4 => {
-                    waits += 1;
-                    std::thread::sleep(wait);
-                }
-                _ => return Err(GoogleChatError::RateLimited),
+            // Asked to wait a moment: as long as asked — Google seldom says,
+            // so a second, then two, four and eight (0.10.0-alpha.81) — then
+            // again.
+            let wait = super::slack::asked_to_wait(&response).unwrap_or(Duration::from_secs(1 << waits));
+            if waits >= 4 {
+                return Err(GoogleChatError::RateLimited);
             }
+            waits += 1;
+            std::thread::sleep(wait);
         };
         let status = response.status().as_u16();
         let value: Value = response.json().unwrap_or(Value::Null);
@@ -290,7 +317,7 @@ impl ChatApi {
                 self.base,
                 path(space),
                 most.clamp(1, 1000),
-                encode("createTime desc")
+                encode("createTime DESC")
             );
             let v = self.get(&url)?;
             let mut out: Vec<Value> = v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -331,7 +358,8 @@ impl ChatApi {
     /// made, or why not — and whether it may have gone anyway.
     pub fn post(&self, space: &str, text: &str, request: &str) -> Result<(String, Option<String>), PostError> {
         let url = format!("{}/{}/messages?requestId={}", self.base, path(space), encode(request));
-        let response = self.client.post(url).bearer_auth(&self.token).json(&json!({ "text": text })).send();
+        let body = json!({ "text": defused(text) });
+        let response = self.client.post(url).bearer_auth(&self.token).json(&body).send();
         let response = match response {
             Ok(r) => r,
             Err(e) if e.is_connect() || e.is_builder() => {
@@ -364,6 +392,29 @@ impl ChatApi {
     }
 }
 
+/// `text` as the user wrote it, with nothing in it read as Google Chat's
+/// own markup for a mention (`<users/…>`, `<users/all>`) or a link
+/// (`<url|text>`): a zero-width space after each `<` that would begin one
+/// (0.10.0-alpha.81).
+pub fn defused(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..=i]);
+        rest = &rest[i + 1..];
+        let inside = rest.split('>').next().unwrap_or("");
+        if rest.starts_with("users/")
+            || inside.contains('|')
+            || inside.starts_with("http")
+            || inside.starts_with("mailto:")
+        {
+            out.push('\u{200B}');
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Why a post didn't go — or might have.
 #[derive(Debug, thiserror::Error)]
 pub enum PostError {
@@ -393,9 +444,15 @@ fn refusal(status: u16, value: &Value) -> GoogleChatError {
     let code = error.and_then(|e| e.get("status")).and_then(Value::as_str).unwrap_or("").to_string();
     let message = error.and_then(|e| e.get("message")).and_then(Value::as_str).map(one_line).unwrap_or_default();
     let said = if message.is_empty() { format!("{status} {code}") } else { format!("{code}: {message}") };
+    let insufficient = message.to_ascii_lowercase().contains("insufficient authentication scopes")
+        || value.to_string().contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT");
     match status {
         401 => GoogleChatError::SignIn(said),
+        // A permission the user unticked when signing in: signing in again,
+        // ticking it, mends it.
+        403 if insufficient => GoogleChatError::SignIn(format!("{said}. {TICK_EVERY_BOX}")),
         403 => GoogleChatError::Forbidden(said),
+        404 if message.to_ascii_lowercase().contains("chat app not found") => GoogleChatError::NotConfigured(said),
         500.. => GoogleChatError::Network(said),
         _ => GoogleChatError::Refused(said),
     }
@@ -586,15 +643,20 @@ pub fn record_failure(db: &Db, source_id: &str, message: &str) -> Result<(), DbE
     Ok(())
 }
 
-/// Whether a message is one a check keeps: a person's, not deleted, with
-/// words.
-pub(crate) fn kept(m: &Value) -> bool {
+/// Whether a message is a person's, and not deleted: with words or without
+/// (a photo, a file).
+pub(crate) fn by_a_person(m: &Value) -> bool {
     let sender = m.get("sender");
     sender.and_then(|s| s.get("name")).and_then(Value::as_str).is_some()
         && sender.and_then(|s| s.get("type")).and_then(Value::as_str).is_none_or(|t| t == "HUMAN")
         && m.get("deletionMetadata").is_none_or(Value::is_null)
         && m.get("deleteTime").is_none_or(Value::is_null)
-        && m.get("text").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty())
+}
+
+/// Whether a message is one a check keeps: a person's, not deleted, with
+/// words.
+pub(crate) fn kept(m: &Value) -> bool {
+    by_a_person(m) && m.get("text").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty())
 }
 
 /// A message's time, as stored: UTC to the second.
@@ -670,13 +732,21 @@ fn sync_inner(
             }
         };
         // Read up to its newest — or, cut short, up to the last one read:
-        // oldest first, so the next check reads on from there.
+        // oldest first, so the next check reads on from there. A whole read
+        // that found nothing (history off, every message deleted) is read
+        // up to what the list said, so it isn't asked again until something
+        // new comes (0.10.0-alpha.81).
         let Some(newest) = raw
             .iter()
             .filter_map(|m| m.get("createTime").and_then(Value::as_str))
             .filter(|t| when(t).is_some())
             .max_by_key(|t| when(t))
         else {
+            if let Some(last) = space.last.as_deref().filter(|l| when(l).is_some()) {
+                if mark.as_deref().is_none_or(|m| later(last, m)) {
+                    config.marks.insert(space.name.clone(), last.to_string());
+                }
+            }
             continue;
         };
         let newest = newest.to_string();
@@ -758,6 +828,16 @@ fn sync_inner(
             ));
         }
         messages.sort_by_key(|(t, _)| when(t));
+        // A direct message only the user has written in yet is named by who
+        // else is in it, not "Chat" (0.10.0-alpha.81).
+        if others.is_empty() && space.kind == "DIRECT_MESSAGE" && !messages.is_empty() {
+            let named = if members.is_empty() {
+                api.members(&space.name).unwrap_or_default()
+            } else {
+                members.into_iter().collect()
+            };
+            others.extend(named.into_iter().filter(|(id, _)| *id != config.user_id).map(|(_, name)| name));
+        }
         if !messages.is_empty() {
             let subject = space.display_name.clone().unwrap_or_else(|| {
                 if others.is_empty() {
@@ -1065,7 +1145,7 @@ mod tests {
                     )
                 }
                 "/spaces/DM1/messages" if !later => {
-                    assert!(query.contains("orderBy=createTime%20desc"), "{query}");
+                    assert!(query.contains("orderBy=createTime%20DESC"), "{query}");
                     (
                         200,
                         json!({ "messages": [
@@ -1192,6 +1272,71 @@ mod tests {
             "{:?}",
             seen.lock().unwrap()
         );
+    }
+
+    #[test]
+    fn a_direct_message_only_the_user_wrote_in_is_named_by_who_else_is_in_it_and_an_empty_one_isnt_asked_again() {
+        let db = Db::open_in_memory().unwrap();
+        let source = account(&db);
+        let (api, seen) = chat_api(Box::new(|path, _| {
+            match path {
+            "/userinfo" => (200, USERINFO_BODY.into()),
+            "/spaces" => (
+                200,
+                json!({ "spaces": [
+                    { "name": "spaces/DM9", "spaceType": "DIRECT_MESSAGE", "lastActiveTime": "2026-10-26T09:01:00.123456Z" },
+                    { "name": "spaces/OLD", "spaceType": "DIRECT_MESSAGE", "lastActiveTime": "2026-10-20T08:00:00Z" }
+                ]})
+                .to_string(),
+            ),
+            "/spaces/DM9/messages" => {
+                (200, json!({ "messages": [said("spaces/DM9", 1, "users/7", "C Haynes", 1, "are you around?")] }).to_string())
+            }
+            // History off: nothing kept to read.
+            "/spaces/OLD/messages" => (200, "{}".into()),
+            "/spaces/DM9/members" => (
+                200,
+                json!({ "memberships": [
+                    { "member": { "name": "users/7", "displayName": "C Haynes" } },
+                    { "member": { "name": "users/42", "displayName": "Ada Lovelace" } }
+                ]})
+                .to_string(),
+            ),
+            other => panic!("not asked for: {other}"),
+        }
+        }));
+        sync(&db, &source, &api, &|| false).unwrap();
+        let subject: String = db
+            .conn()
+            .query_row("SELECT subject FROM conversations WHERE external_id = 'google_chat:spaces/DM9'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(subject, "Ada Lovelace");
+        let config: GoogleChatSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        assert_eq!(config.marks["spaces/OLD"], "2026-10-20T08:00:00Z");
+        let asked = |p: &str| seen.lock().unwrap().iter().filter(|r| r.starts_with(p)).count();
+        assert_eq!(asked("/spaces/OLD/messages"), 1);
+        sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!(asked("/spaces/OLD/messages"), 1, "nothing new by the list: not asked again");
+    }
+
+    #[test]
+    fn nothing_sent_is_read_as_a_mention_or_a_link_and_ungranted_permissions_are_named() {
+        assert_eq!(defused("thanks <users/all> and <users/42>!"), "thanks <\u{200B}users/all> and <\u{200B}users/42>!");
+        assert_eq!(defused("see <https://x.example|this>"), "see <\u{200B}https://x.example|this>");
+        assert_eq!(defused("2 < 3 and a <b> tag"), "2 < 3 and a <b> tag");
+        let all = NEEDED.join(" ");
+        assert!(missing(Some(format!("openid {all}").as_str())).is_empty());
+        assert_eq!(missing(Some("openid https://www.googleapis.com/auth/chat.spaces.readonly")), NEEDED[1..].to_vec());
+        assert!(missing(None).is_empty(), "Google not saying isn't a refusal");
+        let insufficient = json!({ "error": { "code": 403, "status": "PERMISSION_DENIED",
+            "message": "Request had insufficient authentication scopes.",
+            "details": [{ "reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT" }] } });
+        assert!(matches!(refusal(403, &insufficient), GoogleChatError::SignIn(why) if why.contains("leave every box")));
+        let no_app = json!({ "error": { "code": 404, "status": "NOT_FOUND", "message": "Google Chat app not found. To create a Chat app, you must turn on the Chat API and configure the app in the Google Cloud console." } });
+        assert!(matches!(refusal(404, &no_app), GoogleChatError::NotConfigured(_)));
     }
 
     #[test]

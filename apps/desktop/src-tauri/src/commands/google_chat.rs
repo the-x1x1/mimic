@@ -28,6 +28,11 @@ async fn signed_in(app: &tauri::AppHandle, state: &SharedState) -> CommandResult
     let provider = google_chat::provider(&google);
     let tokens = browser_sign_in(app, &signing_in, provider.clone(), client, "").await?;
     let refresh = tokens.refresh_token.clone().ok_or_else(|| no_refresh_token(&provider))?;
+    // Every permission asked for, or none kept: Google lets the user untick
+    // some, and without them each check would fail (0.10.0-alpha.81).
+    if !google_chat::missing(tokens.scope.as_deref()).is_empty() {
+        return Err(CommandError::new("scopes", google_chat::TICK_EVERY_BOX));
+    }
     let access = tokens.access_token.clone();
     let me = tauri::async_runtime::spawn_blocking(move || ChatApi::new(&access)?.me())
         .await
