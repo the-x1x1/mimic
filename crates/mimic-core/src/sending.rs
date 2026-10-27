@@ -70,6 +70,9 @@ pub const UNREADABLE: &str = "I can't read this mailbox's settings; remove it an
 pub const DRAFT_GONE: &str = "That draft isn't here any more, so there's nothing to send.";
 pub const EMPTY: &str = "There's nothing to send: the reply is empty.";
 pub const HELD: &str = crate::db::HELD_BY_ITSELF;
+/// Why a reply isn't sent when what it would quote changed after the Send
+/// panel showed it (0.10.0-alpha.100): the sender renamed, or the clock.
+pub const QUOTE_CHANGED: &str = "What I'd quote under your reply has changed since the Send panel showed it — a name or the time. Look at it again, then send it.";
 pub const NOT_OFFERED: &str =
     "I only send a reply to the addresses the Send panel offered for it, and that isn't one of them.";
 pub const NOT_ON_IT: &str = "I only copy in people who were on the message you're answering, and that address wasn't.";
@@ -196,6 +199,10 @@ pub struct SendRequest {
     /// mailbox does (0.10.0-alpha.96).
     #[serde(default)]
     pub quote: Option<bool>,
+    /// The quote as the Send panel showed it (0.10.0-alpha.100): a reply
+    /// that quotes goes only with that quote, word for word.
+    #[serde(default)]
+    pub shown_quote: Option<String>,
 }
 
 /// Every connected mailbox, with whether a reply can go out through it.
@@ -519,6 +526,13 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         Some(m) if req.quote.unwrap_or_else(|| config.quotes()) => quote_of(db, m, &chrono::Local)?,
         _ => None,
     };
+    // And only as it was shown (0.10.0-alpha.100), before anything is
+    // recorded.
+    if let (Some(shown), Some(quoting)) = (req.shown_quote.as_deref(), quoted.as_deref()) {
+        if shown != quoting {
+            return Err(SendError::Cannot(QUOTE_CHANGED.into()));
+        }
+    }
     let body = quoted_reply(&signed(&req.text, config.signature()), quoted.as_deref());
     let (in_reply_to, references) = threading(incoming.as_ref());
     let subject = match req.subject.trim() {
@@ -938,6 +952,7 @@ mod tests {
             cc: vec![],
             subject: envelope.subject.clone(),
             quote: None,
+            shown_quote: None,
         }
     }
 
@@ -1076,7 +1091,19 @@ mod tests {
             "{shown}"
         );
 
-        let sent = send_reply(&w.db, &credentials(), &approved(&w, &envelope, "Yes, I'll be there.")).unwrap();
+        // A quote other than the one shown goes nowhere, and nothing is
+        // recorded (0.10.0-alpha.100): the sender renamed meanwhile, say.
+        let stale = SendRequest {
+            shown_quote: Some(shown.replace("Ada Lovelace", "Ada")),
+            ..approved(&w, &envelope, "Yes, I'll be there.")
+        };
+        let refused = send_reply(&w.db, &credentials(), &stale);
+        assert!(matches!(refused, Err(SendError::Cannot(ref m)) if m == QUOTE_CHANGED), "{refused:?}");
+        assert!(w.db.recent_outgoing(5).unwrap().is_empty(), "nothing recorded");
+
+        let as_shown =
+            SendRequest { shown_quote: Some(shown.clone()), ..approved(&w, &envelope, "Yes, I'll be there.") };
+        let sent = send_reply(&w.db, &credentials(), &as_shown).unwrap();
         assert_eq!(sent.body, format!("Yes, I'll be there.\n\n{shown}"));
         let data = String::from_utf8(seen.recv().unwrap().data).unwrap();
         assert!(data.contains("> can you make the offsite on friday?"), "{data}");

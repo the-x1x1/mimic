@@ -157,6 +157,21 @@ describe("sending a reply from Mimic", () => {
     expect(native.sendReply).toHaveBeenCalledWith(expect.objectContaining({ quote: false }));
   });
 
+  it("sends the quote it showed, for the reply to go only with that one", async () => {
+    const quoted =
+      "On Mon, 2 Mar 2026 at 09:00, Ada <ada@example.com> wrote:\n> can you confirm Friday?";
+    native.replyEnvelope.mockResolvedValue(envelope({ quoted }));
+    native.sendReply.mockImplementation(async (r: { to: string[] }) => sent(r.to));
+    const onDone = renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    await sendIt(panel);
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(native.sendReply).toHaveBeenCalledWith(
+      expect.objectContaining({ quote: true, shownQuote: quoted }),
+    );
+  });
+
   it("starts from the mailbox's own choice not to quote", async () => {
     native.replyEnvelope.mockResolvedValue(
       envelope({

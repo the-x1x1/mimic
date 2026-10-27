@@ -408,6 +408,7 @@ mod tests {
             cc: Vec::new(),
             subject: String::new(),
             quote: None,
+            shown_quote: None,
         }
     }
 

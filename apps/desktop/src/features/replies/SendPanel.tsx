@@ -24,7 +24,8 @@ import { toast } from "@/state/toast";
  *
  * Their message goes quoted under the reply, as mail programs quote it, when
  * the mailbox does and the user leaves **Quote their message** ticked
- * (0.10.0-alpha.96); what would go is shown.
+ * (0.10.0-alpha.96); what would go is shown, and goes only as shown
+ * (`shownQuote`, 0.10.0-alpha.100).
  *
  * **Send it** waits the seconds the user chose (`send.undoSeconds`, five
  * unless changed) before anything goes, with **Don't send it** to take it
@@ -132,7 +133,9 @@ export function SendPanel({
       to,
       cc,
       subject,
-      ...(envelope.quoted && service === null ? { quote: quoting } : {}),
+      ...(envelope.quoted && service === null
+        ? { quote: quoting, shownQuote: quoting ? envelope.quoted : null }
+        : {}),
     });
     const changed = text !== draft.generatedText;
     if (service) {

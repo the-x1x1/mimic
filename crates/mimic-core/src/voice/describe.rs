@@ -210,7 +210,10 @@ const TURNING: [&str; 33] = [
 
 /// Where a clause ends, looking back: a claim after one of these isn't turned
 /// round by a word before it ("not chatty, but formal").
-const CLAUSE: [&str; 8] = ["but", "yet", ",", "while", "whereas", "though", "although", "however"];
+/// Where a clause ends, for `turned`. "and" does (0.10.0-alpha.100: "no
+/// emoji and formal phrasing" is formal phrasing), "or" and "nor" don't: a
+/// "no" carries over them ("no greetings or formal sign-offs").
+const CLAUSE: [&str; 9] = ["but", "yet", ",", "and", "while", "whereas", "though", "although", "however"];
 
 /// What "formal" says of when it is about greetings and the like, not how
 /// they write: "formal greetings", "formal sign-offs".
@@ -238,7 +241,10 @@ fn turned(words: &[&str], at: usize) -> bool {
         if CLAUSE.contains(&w) {
             return false;
         }
-        if TURNING.contains(&w) || (w == "far" && words.get(k + 1) == Some(&"from")) {
+        // "A little formal" is formal; "little formality" isn't
+        // (0.10.0-alpha.100).
+        let a_little = w == "little" && k > 0 && words[k - 1] == "a";
+        if (TURNING.contains(&w) && !a_little) || (w == "far" && words.get(k + 1) == Some(&"from")) {
             return true;
         }
     }
@@ -538,6 +544,11 @@ mod tests {
             "A formal register; no emoji.",
             "Their tone is formal and measured.",
             "A formal, professional voice.",
+            // A turning word before an "and" doesn't reach past it, and "a
+            // little" is some (0.10.0-alpha.100).
+            "No emoji and formal phrasing throughout.",
+            "Minimal punctuation and formal wording.",
+            "A little formal.",
         ] {
             assert!(contradiction(ruled_out, &casual()).is_some(), "{ruled_out}");
         }

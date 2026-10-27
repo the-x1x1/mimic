@@ -172,6 +172,40 @@ describe("writing something new", () => {
       );
     });
 
+    it("uses nothing in the set while another way is being written", async () => {
+      native.generateDraft.mockResolvedValueOnce(draft("d1", "yes, thursday works"));
+      let finish: (d: Draft) => void = () => undefined;
+      native.writeAnotherDraft.mockImplementationOnce(
+        () =>
+          new Promise<Draft>((done) => {
+            finish = done;
+          }),
+      );
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <ComposePanel />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      const write = await screen.findByRole("button", { name: "Write a draft" });
+      await waitFor(() => expect(write).toBeEnabled());
+      fireEvent.click(write);
+      expect(await screen.findByDisplayValue("yes, thursday works")).toBeInTheDocument();
+      const ways = screen.getByRole("group", { name: "Write it another way" });
+      fireEvent.click(within(ways).getByRole("button", { name: "Shorter" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "I sent this" })).toBeDisabled(),
+      );
+      expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+
+      finish(shorter());
+      expect(await screen.findByDisplayValue("thursday!")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "I sent this" })).toBeEnabled();
+      expect(native.resolveDraft).not.toHaveBeenCalled();
+    });
+
     it("writes the whole set again on Regenerate, putting it aside as passed over", async () => {
       await writeTwoWays();
       native.generateDraft.mockResolvedValueOnce(draft("d4", "thursday works for me"));
