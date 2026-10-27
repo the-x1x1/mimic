@@ -1050,7 +1050,11 @@ describe("connecting a mailbox", () => {
       user: "C Haynes",
       email: "c@formicaria.example",
       lastCheckedAt: null,
+      spaces: false,
     });
+    expect(
+      googleChatAccount({ connector: "google_chat", config: { ...config, spaces: true } })?.spaces,
+    ).toBe(true);
     expect(googleChatAccount({ connector: "teams", config })).toBeNull();
   });
 

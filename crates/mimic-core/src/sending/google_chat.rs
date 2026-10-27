@@ -340,7 +340,7 @@ mod tests {
         db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         db.set_user_identity("C").unwrap();
         db.add_user_identifier(IdentifierKind::AccountId, &account_id("users/7")).unwrap();
-        let source = db.create_source(&new_source(&me()).unwrap()).unwrap().id;
+        let source = db.create_source(&new_source(&me(), false).unwrap()).unwrap().id;
         let spaces: live::Spaces = Arc::new(Mutex::new(vec![Space {
             name: "spaces/DM1".into(),
             other: Some(("users/42".into(), "Ada Lovelace".into())),
@@ -426,7 +426,7 @@ mod tests {
         db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
         db.set_user_identity("C").unwrap();
         db.add_user_identifier(IdentifierKind::AccountId, &account_id("users/7")).unwrap();
-        let source = db.create_source(&new_source(&me()).unwrap()).unwrap().id;
+        let source = db.create_source(&new_source(&me(), true).unwrap()).unwrap().id;
         let posted: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
         let kept = posted.clone();
         let (base, _) = server(Box::new(move |path, query| {

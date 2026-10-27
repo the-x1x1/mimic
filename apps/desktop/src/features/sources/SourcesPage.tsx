@@ -16,7 +16,11 @@ import { AddSourceDialog } from "./AddSourceDialog";
 import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
 import { ConnectSlackDialog, SlackToken } from "./ConnectSlackDialog";
 import { ConnectTeamsDialog, TeamsSignInAgain } from "./ConnectTeamsDialog";
-import { ConnectGoogleChatDialog, GoogleChatSignInAgain } from "./ConnectGoogleChatDialog";
+import {
+  ConnectGoogleChatDialog,
+  GoogleChatSignInAgain,
+  GoogleChatSpaces,
+} from "./ConnectGoogleChatDialog";
 import { ConnectTelegramDialog } from "./ConnectTelegramDialog";
 import { MailboxPassword, MailboxSignInAgain } from "./MailboxPassword";
 import { MailboxFolders } from "./MailboxFolders";
@@ -142,6 +146,12 @@ export function SourcesPage() {
                         <MailboxFolders sourceId={s.id} name={s.name} />
                         <MailboxSending sourceId={s.id} name={s.name} />
                       </>
+                    ) : null}
+                    {s.connector === "google_chat" ? (
+                      <GoogleChatSpaces
+                        sourceId={s.id}
+                        on={googleChatAccount(s)?.spaces ?? false}
+                      />
                     ) : null}
                   </td>
                   <td>{CHANNEL_LABELS[s.channel as Channel] ?? s.channel}</td>

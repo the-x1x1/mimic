@@ -56,11 +56,13 @@ fn check_soon(state: &crate::AppState, source_id: &str) -> CommandResult<()> {
 
 /// Sign in for Google Chat, and connect the account signed in as: it
 /// becomes the user's (its Google id, and its address), its sign-in is kept,
-/// and the first check starts. Stopped with `cancel_mail_sign_in`.
+/// and the first check starts — reading its named spaces too when `spaces`
+/// (0.10.0-alpha.92). Stopped with `cancel_mail_sign_in`.
 #[tauri::command]
 pub async fn connect_google_chat(
     app: tauri::AppHandle,
     state: State<'_, SharedState>,
+    spaces: bool,
 ) -> CommandResult<mimic_core::db::Source> {
     crate::commands::sources::refuse_without_identity(&state)?;
     let (refresh, me) = signed_in(&app, state.inner()).await?;
@@ -79,7 +81,7 @@ pub async fn connect_google_chat(
         state.db.add_user_identifier(IdentifierKind::Email, email)?;
     }
     crate::commands::people::reconcile_identity(&state.db, &state.jobs, "connect_google_chat");
-    let new = google_chat::new_source(&me).map_err(|e| CommandError::new("internal", e.to_string()))?;
+    let new = google_chat::new_source(&me, spaces).map_err(|e| CommandError::new("internal", e.to_string()))?;
     let source = state.db.create_source(&new)?;
     if let Err(e) = state.secrets.set(&google_chat::secret_key(&source.id), &refresh) {
         let _ = state.db.delete_source_and_contents(&source.id);
@@ -123,6 +125,23 @@ pub async fn test_google_chat(state: State<'_, SharedState>, source_id: String) 
     } else {
         format!("Read your chats as {}. Nothing was sent.", me.name)
     })
+}
+
+/// Read a connected account's named spaces, or stop (0.10.0-alpha.92):
+/// turned on, a check follows; what was read from them stays either way.
+#[tauri::command]
+pub fn set_google_chat_spaces(
+    state: State<'_, SharedState>,
+    source_id: String,
+    on: bool,
+) -> CommandResult<mimic_core::db::Source> {
+    let gone = || CommandError::new("not_found", "That Google Chat account isn't connected any more.");
+    let source = state.db.get_source(&source_id)?.filter(|s| s.connector == google_chat::CONNECTOR).ok_or_else(gone)?;
+    google_chat::set_spaces(&state.db, &source_id, on)?;
+    if on {
+        check_soon(&state, &source_id)?;
+    }
+    Ok(state.db.get_source(&source_id)?.unwrap_or(source))
 }
 
 /// Sign a connected Google Chat account in again — Google asked for it, or

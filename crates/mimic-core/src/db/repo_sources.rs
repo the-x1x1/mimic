@@ -82,6 +82,23 @@ impl Db {
         Ok(())
     }
 
+    /// Set one top-level key of a source's configuration, in one statement,
+    /// so a check writing its marks back meanwhile can't lose it, nor this
+    /// its marks (0.10.0-alpha.92). `key` is a plain name.
+    pub fn set_source_config_key(&self, id: &str, key: &str, value: &Value) -> DbResult<()> {
+        if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DbError::Invalid(format!("not a configuration key: {key:?}")));
+        }
+        let n = self.conn().execute(
+            "UPDATE sources SET config_json = json_set(COALESCE(config_json, '{}'), ?1, json(?2)) WHERE id = ?3",
+            params![format!("$.{key}"), value.to_string(), id],
+        )?;
+        if n == 0 {
+            return Err(DbError::NotFound(id.into()));
+        }
+        Ok(())
+    }
+
     /// Recount from `messages` rather than incrementing, so a re-import or a
     /// deletion can never leave the displayed count lying.
     pub fn refresh_source_counts(&self, id: &str) -> DbResult<i64> {
@@ -147,5 +164,20 @@ mod tests {
         assert_eq!(db.refresh_source_counts(&s.id).unwrap(), 0);
         db.delete_source(&s.id).unwrap();
         assert!(db.delete_source(&s.id).is_err());
+    }
+
+    #[test]
+    fn one_key_of_a_sources_settings_is_set_leaving_the_rest() {
+        let db = Db::open_in_memory().unwrap();
+        let s = db.create_source(&src("chat")).unwrap();
+        db.set_source_config(&s.id, &serde_json::json!({ "marks": { "spaces/A": "t1" }, "spaces": false })).unwrap();
+        db.set_source_config_key(&s.id, "spaces", &Value::Bool(true)).unwrap();
+        let config = db.get_source(&s.id).unwrap().unwrap().config;
+        assert_eq!(config, serde_json::json!({ "marks": { "spaces/A": "t1" }, "spaces": true }));
+        db.set_source_config_key(&s.id, "note", &serde_json::json!("it's \"quoted\"")).unwrap();
+        assert_eq!(db.get_source(&s.id).unwrap().unwrap().config["note"], "it's \"quoted\"");
+        assert!(db.set_source_config_key(&s.id, "a.b", &Value::Null).is_err(), "a path is not a key");
+        assert!(db.set_source_config_key(&s.id, "", &Value::Null).is_err());
+        assert!(matches!(db.set_source_config_key("nobody", "spaces", &Value::Null), Err(DbError::NotFound(_))));
     }
 }

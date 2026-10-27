@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.92] — 2026-10-26
+
+Google Chat spaces, when you say so.
+
+### Changed
+
+- **Named spaces are read only if you turn it on.** Connecting Google Chat now asks — a box, off unless you tick it — and each connected account has **Read named spaces where you're asked for** under it in Your mail. An account connected before stays as you gave it: direct messages and group chats. Turning it off reads no more from spaces and keeps what was read.
+- **A thread you're in is read whole.** In a space, Mimic follows a thread as Google Chat does for you — one you wrote in, or where someone @mentioned you — and reads the rest of what's said there too, then and after, so a question that follows up without naming you still waits for your reply. Threads you're not in are still left alone.
+
 ## [0.10.0-alpha.91] — 2026-10-26
 
 Mentioned in a Google Chat space.
