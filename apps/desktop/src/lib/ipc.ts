@@ -155,13 +155,15 @@ export const ipc = {
     }),
   /**
    * Every message that says what was typed, newest first, the user's or
-   * other people's or both; read on from the last one shown.
+   * other people's or both — in one person's conversations when `withPerson`
+   * names them (0.10.0-alpha.101); read on from the last one shown.
    */
   searchMessages: (
     query: string,
     who: SearchWho,
     before: { at: string; id: string } | null = null,
     limit = 20,
+    withPerson: string | null = null,
   ) =>
     call("search_messages", SearchPage, {
       query,
@@ -169,6 +171,7 @@ export const ipc = {
       beforeAt: before?.at ?? null,
       beforeId: before?.id ?? null,
       limit,
+      withPerson,
     }),
   /**
    * Say a thread does or does not need a reply, about the message on screen;

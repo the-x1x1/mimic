@@ -9,6 +9,7 @@ import {
   type SearchWho,
 } from "@mimic/contracts";
 import { PageHeader } from "@/components/PageHeader";
+import { usePeople } from "@/hooks/usePeople";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/app/queryClient";
 import { formatRelative } from "@/lib/format";
@@ -24,28 +25,46 @@ const WHO: { value: SearchWho; label: string }[] = [
   { value: "others", label: "Not you" },
 ];
 
+/** A search asked for: the words, whose, and in whose conversations ("" for anyone's). */
+interface Asked {
+  query: string;
+  who: SearchWho;
+  withPerson: string;
+}
+
 /**
  * Finding what was said: every message Mimic has read, the user's and
  * everyone else's, searched by the words in it, newest first — each with the
  * words around the match, and its conversation either side of it on request.
- * The search happens here, in the database on this computer.
+ * It can be narrowed to the conversations one person is in
+ * (0.10.0-alpha.101). The search happens here, in the database on this
+ * computer.
  */
 export function FindPage() {
   const [typed, setTyped] = useState("");
   const [who, setWho] = useState<SearchWho>("anyone");
-  const [asked, setAsked] = useState<{ query: string; who: SearchWho } | null>(null);
+  const [withPerson, setWithPerson] = useState("");
+  const [asked, setAsked] = useState<Asked | null>(null);
   const [nothingToFind, setNothingToFind] = useState(false);
   const inputId = useId();
   const whoId = useId();
+  const withId = useId();
+  const people = usePeople();
   const list = useRef<HTMLOListElement>(null);
   // Where the next page starts, once asked for: the keyboard goes there when
   // it arrives, since the button it was on goes on the last page.
   const focusFrom = useRef<number | null>(null);
 
   const pages = useInfiniteQuery({
-    queryKey: qk.search(asked?.query ?? "", asked?.who ?? "anyone"),
+    queryKey: qk.search(asked?.query ?? "", asked?.who ?? "anyone", asked?.withPerson ?? ""),
     queryFn: ({ pageParam }) =>
-      ipc.searchMessages(asked?.query ?? "", asked?.who ?? "anyone", pageParam, PAGE),
+      ipc.searchMessages(
+        asked?.query ?? "",
+        asked?.who ?? "anyone",
+        pageParam,
+        PAGE,
+        asked?.withPerson || null,
+      ),
     initialPageParam: null as { at: string; id: string } | null,
     // Read on from the last message shown.
     getNextPageParam: (last) => {
@@ -64,13 +83,20 @@ export function FindPage() {
       return;
     }
     setNothingToFind(false);
-    setAsked({ query, who });
+    setAsked({ query, who, withPerson });
   };
   const chooseWho = (next: SearchWho) => {
     setWho(next);
     // A search already made is made again for whoever is chosen.
     if (asked) setAsked({ ...asked, who: next });
   };
+  const chooseWith = (next: string) => {
+    setWithPerson(next);
+    if (asked) setAsked({ ...asked, withPerson: next });
+  };
+  const listed = people.data?.people ?? [];
+  const withName = listed.find((p) => p.participant.id === asked?.withPerson)?.participant
+    .displayName;
 
   const read = pages.data?.pages ?? [];
   const found = read.flatMap((p) => p.found);
@@ -89,7 +115,9 @@ export function FindPage() {
     : asked && pages.isPending
       ? "Looking…"
       : asked && first
-        ? describeFound(first, asked.who)
+        ? withName
+          ? `In conversations with ${withName}: ${describeFound(first, asked.who)}`
+          : describeFound(first, asked.who)
         : "";
 
   return (
@@ -130,6 +158,19 @@ export function FindPage() {
               {WHO.map((w) => (
                 <option key={w.value} value={w.value}>
                   {w.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="stack gap-1">
+            <label className="small" htmlFor={withId}>
+              In conversations with
+            </label>
+            <select id={withId} value={withPerson} onChange={(e) => chooseWith(e.target.value)}>
+              <option value="">Anyone</option>
+              {listed.map((p) => (
+                <option key={p.participant.id} value={p.participant.id}>
+                  {p.participant.displayName}
                 </option>
               ))}
             </select>

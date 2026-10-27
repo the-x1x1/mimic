@@ -19,7 +19,8 @@ export const qk = {
   personConversations: (participantId: string) => ["dashboard", "person", participantId] as const,
   conversationEnd: (conversationId: string) => ["dashboard", "end", conversationId] as const,
   // And what a search found: new mail can say it too.
-  search: (query: string, who: string) => ["dashboard", "search", query, who] as const,
+  search: (query: string, who: string, withPerson = "") =>
+    ["dashboard", "search", query, who, withPerson] as const,
   localModel: ["localModel"] as const,
   system: ["system"] as const,
   onboarding: ["onboarding"] as const,

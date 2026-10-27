@@ -184,6 +184,20 @@ impl Db {
         before: Option<(&str, &str)>,
         limit: usize,
     ) -> DbResult<SearchPage> {
+        self.search_messages_with(input, who, None, before, limit)
+    }
+
+    /// `search_messages`, in the conversations one person is in when `with`
+    /// names them (0.10.0-alpha.101): what they said and what was said to
+    /// them there, the user's words among it.
+    pub fn search_messages_with(
+        &self,
+        input: &str,
+        who: SearchWho,
+        with: Option<&str>,
+        before: Option<(&str, &str)>,
+        limit: usize,
+    ) -> DbResult<SearchPage> {
         let Some(query) = search_query(input) else { return Ok(SearchPage::default()) };
         let whose = match who {
             SearchWho::Anyone => "1",
@@ -202,6 +216,8 @@ impl Db {
                JOIN messages m ON m.id = message_search.message_id
                WHERE message_search MATCH ?1 AND {whose}
                  AND (?2 IS NULL OR (COALESCE(m.sent_at, ''), m.id) < (?2, ?3))
+                 AND (?5 IS NULL OR m.conversation_id IN
+                      (SELECT conversation_id FROM conversation_participants WHERE participant_id = ?5))
                ORDER BY COALESCE(m.sent_at, '') DESC, m.id DESC
                LIMIT ?4
              )
@@ -217,7 +233,7 @@ impl Db {
         );
         let (at, id) = before.unzip();
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![query, at, id, limit as i64 + 1], |r| {
+        let rows = stmt.query_map(params![query, at, id, limit as i64 + 1, with], |r| {
             let (message, position) = map_thread(r)?;
             let conversation_id: String = r.get(8)?;
             let subject: Option<String> = r.get(9)?;
@@ -237,9 +253,12 @@ impl Db {
             &format!(
                 "SELECT COUNT(*) FROM (
                    SELECT 1 FROM message_search JOIN messages m ON m.id = message_search.message_id
-                   WHERE message_search MATCH ?1 AND {whose} LIMIT ?2)"
+                   WHERE message_search MATCH ?1 AND {whose}
+                     AND (?3 IS NULL OR m.conversation_id IN
+                          (SELECT conversation_id FROM conversation_participants WHERE participant_id = ?3))
+                   LIMIT ?2)"
             ),
-            params![query, COUNT_CAP + 1],
+            params![query, COUNT_CAP + 1, with],
             |r| r.get(0),
         )?;
         Ok(SearchPage { found, more, total: counted.min(COUNT_CAP), capped: counted > COUNT_CAP })
@@ -380,6 +399,30 @@ mod tests {
         assert_eq!(oldest.subject.as_deref(), Some("Lunch"));
         assert_eq!(oldest.conversation_id, lunch);
         assert_eq!((oldest.earlier, oldest.later), (0, 2));
+    }
+
+    #[test]
+    fn in_one_persons_conversations_only_when_asked_with_your_own_words_there() {
+        let Mail { db, lunch, trip, ada, .. } = mail();
+        let bob = db
+            .resolve_participant("Bob", &[IdentifierInput::new(IdentifierKind::Email, "bob@example.com")], false)
+            .unwrap();
+        db.link_conversation_participant(&lunch, &ada).unwrap();
+        db.link_conversation_participant(&trip, &bob).unwrap();
+        let with = |who: &str, q: &str| -> (Vec<String>, i64) {
+            let page = db.search_messages_with(q, SearchWho::Anyone, Some(who), None, 10).unwrap();
+            (page.found.into_iter().map(|f| f.message.body).collect(), page.total)
+        };
+        assert_eq!(
+            with(&ada, "friday"),
+            (vec!["friday works, the Café it is".to_string(), "Drinks on Friday? The café by the station.".into()], 2),
+            "hers and the user's to her"
+        );
+        assert_eq!(with(&bob, "friday"), (vec!["The Zanzibar résumé is attached. Ready for Friday".to_string()], 1));
+        assert_eq!(with("nobody", "friday"), (Vec::new(), 0));
+        assert_eq!(db.search_messages_with("friday", SearchWho::Anyone, None, None, 10).unwrap().total, 3);
+        let mine = db.search_messages_with("friday", SearchWho::You, Some(&ada), None, 10).unwrap();
+        assert_eq!(mine.found.len(), 1, "and the user's alone, with her");
     }
 
     #[test]

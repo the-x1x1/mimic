@@ -62,7 +62,9 @@ export function SignInSetupSection() {
                 </li>
                 <li>
                   Under Google Auth Platform: in Branding, name it Mimic with your email; in
-                  Audience, choose External and publish it; in Data Access, add the scope
+                  Audience, choose Internal when every account you&rsquo;ll connect is in your own
+                  Google Workspace &mdash; no warning, and sign-ins don&rsquo;t lapse &mdash; or
+                  else External and publish it; in Data Access, add the scope
                   https://mail.google.com/
                 </li>
                 <li>In Clients, create a client of the type Desktop app.</li>

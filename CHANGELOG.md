@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.101] — 2026-10-26
+
+Find, in one person's conversations.
+
+### Added
+
+- **Find what was said with one person.** Find has **In conversations with**: choose someone, and it looks only in the conversations they're in — what they wrote and what you wrote there.
+
+### Changed
+
+- **Signing in with Google says when to choose Internal.** For a Google Workspace whose own accounts are the only ones you'll connect, Internal means no warning and sign-ins that don't lapse.
+
 ## [0.10.0-alpha.100] — 2026-10-26
 
 Tightened after a review of alpha.95–99.

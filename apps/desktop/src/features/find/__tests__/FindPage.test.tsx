@@ -5,7 +5,11 @@ import type { FoundMessage, SearchPage } from "@mimic/contracts";
 import { FindPage } from "../FindPage";
 
 // The real queries run; only the native calls are replaced.
-const native = vi.hoisted(() => ({ searchMessages: vi.fn(), conversationPage: vi.fn() }));
+const native = vi.hoisted(() => ({
+  searchMessages: vi.fn(),
+  conversationPage: vi.fn(),
+  people: vi.fn(),
+}));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
 const found = (
@@ -71,6 +75,11 @@ describe("finding what was said", () => {
   beforeEach(() => {
     native.searchMessages.mockReset();
     native.conversationPage.mockReset();
+    native.people.mockReset();
+    native.people.mockResolvedValue({
+      people: [{ participant: { id: "ada", displayName: "Ada Lovelace" } }],
+      peopleTotal: 1,
+    });
   });
 
   it("finds what was typed, says how much, marks the match, and reads on from the last one", async () => {
@@ -87,7 +96,7 @@ describe("finding what was said", () => {
         "3 messages say that, the newest first.",
       ),
     );
-    expect(native.searchMessages).toHaveBeenCalledWith("friday", "anyone", null, 20);
+    expect(native.searchMessages).toHaveBeenCalledWith("friday", "anyone", null, 20, null);
     const items = screen.getAllByRole("listitem");
     expect(items).toHaveLength(2);
     expect(within(items[0]!).getByText("Friday").tagName).toBe("MARK");
@@ -104,6 +113,7 @@ describe("finding what was said", () => {
       "anyone",
       { at: "2026-03-02T10:00:00Z", id: "m2" },
       20,
+      null,
     );
     expect(screen.queryByRole("button", { name: "Show older ones" })).toBeNull();
   });
@@ -126,10 +136,32 @@ describe("finding what was said", () => {
       target: { value: "you" },
     });
     await waitFor(() =>
-      expect(native.searchMessages).toHaveBeenLastCalledWith("friday", "you", null, 20),
+      expect(native.searchMessages).toHaveBeenLastCalledWith("friday", "you", null, 20, null),
     );
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("One of your messages says that."),
+    );
+  });
+
+  it("looks again in the conversations one person is in, and says so", async () => {
+    native.searchMessages.mockResolvedValue({ ...second, total: 1 });
+    renderIt();
+    search("friday");
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("One message says that."),
+    );
+    const withWhom = screen.getByRole("combobox", { name: "In conversations with" });
+    await waitFor(() =>
+      expect(within(withWhom).getByRole("option", { name: "Ada Lovelace" })).toBeInTheDocument(),
+    );
+    fireEvent.change(withWhom, { target: { value: "ada" } });
+    await waitFor(() =>
+      expect(native.searchMessages).toHaveBeenLastCalledWith("friday", "anyone", null, 20, "ada"),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "In conversations with Ada Lovelace: One message says that.",
+      ),
     );
   });
 
