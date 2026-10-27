@@ -16,9 +16,10 @@
 //!      writes is measured again for it without the held-out conversations
 //!      (`voice::LeavingOut`), since the stored profiles were measured over
 //!      everything, a person's own layer perhaps mostly from the very thread
-//!      being tested. Habits learned from edits to earlier drafts are left
-//!      out: some may come from drafts of the replies being predicted. That
-//!      leans against Mimic, and the screen says so.
+//!      being tested. Habits learned from edits to earlier drafts, and the
+//!      ways chosen over first drafts, are left out: some may come from
+//!      drafts of the replies being predicted. That leans against Mimic, and
+//!      the screen says so.
 //!    * **A generic reply**: the same model, conversation and message, and
 //!      no measurements, examples or habits of the user's.
 //!    * **Your most common reply**: the reply the user sends most often,

@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { Participant } from "./identity";
-import { LearnedPattern, ResolvedLayer, VoiceMetrics } from "./voice";
-
-export const Adjustment = z.enum(["shorter", "longer", "moreCasual", "moreProfessional"]);
-export type Adjustment = z.infer<typeof Adjustment>;
+import { Adjustment, ChosenWay, LearnedPattern, ResolvedLayer, VoiceMetrics } from "./voice";
 
 export const ADJUSTMENT_LABELS: Record<Adjustment, string> = {
   shorter: "Shorter",
@@ -110,6 +107,8 @@ export const GenerationContext = z.object({
   transcript: z.array(Message),
   situation: SituationChoice.nullable(),
   learned: z.array(LearnedPattern),
+  /** Ways the user chose over the first draft before, applied to this one (0.10.0-alpha.97). */
+  ways: z.array(ChosenWay).default([]),
   evidence: z.array(z.string()),
   /** A chat or a text measured on other writing: its form was left out (0.10.0-alpha.87). */
   formFromElsewhere: z.boolean().default(false),

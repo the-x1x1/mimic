@@ -16,7 +16,7 @@
     {
       "habit": "greeting",
       "direction": "less",
-      "participantId": "dc4c96b3-9840-4f28-bdff-5cba414401ee",
+      "participantId": "feb42dd9-ab00-42a2-a944-3df03b468199",
       "participantName": "Ada Lovelace",
       "agreeing": 3,
       "observations": 3,
@@ -26,14 +26,39 @@
       "summary": "You took the greeting out of my drafts to Ada Lovelace 3 times, so I've stopped adding one."
     }
   ],
+  "choicesConsidered": 3,
+  "ways": [
+    {
+      "adjustment": "moreCasual",
+      "participantId": null,
+      "participantName": null,
+      "chosen": 3,
+      "against": 0,
+      "share": 1.0,
+      "holds": true,
+      "meanChange": null,
+      "summary": "You chose the more casual way over my first drafts 3 times, so I start more casually."
+    },
+    {
+      "adjustment": "moreCasual",
+      "participantId": "feb42dd9-ab00-42a2-a944-3df03b468199",
+      "participantName": "Ada Lovelace",
+      "chosen": 3,
+      "against": 0,
+      "share": 1.0,
+      "holds": true,
+      "meanChange": null,
+      "summary": "You chose the more casual way over my first drafts to Ada Lovelace 3 times, so I start more casually."
+    }
+  ],
   "minAgreeing": 3,
   "notes": [
     {
-      "id": "483413c7-16f4-4b3e-8c1f-f1db0cceddc8",
+      "id": "69181650-8a6d-4692-a8fe-0d8b89fac7f8",
       "text": "keep it to one line",
-      "participantId": "dc4c96b3-9840-4f28-bdff-5cba414401ee",
+      "participantId": "feb42dd9-ab00-42a2-a944-3df03b468199",
       "participantName": "Ada Lovelace",
-      "updatedAt": "2026-10-27T00:36:49.017Z"
+      "updatedAt": "2026-10-27T00:55:29.420Z"
     }
   ]
 }

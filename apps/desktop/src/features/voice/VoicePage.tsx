@@ -13,6 +13,7 @@ import {
 } from "@/hooks/useVoice";
 import { useDraftOutcomes } from "@/hooks/useCompose";
 import { countOf, formatRelative } from "@/lib/format";
+import { ChosenWays } from "./ChosenWays";
 import { HowClose } from "./HowClose";
 import { InWords } from "./InWords";
 import { WhatEachIsDoing } from "./WhatEachIsDoing";
@@ -198,8 +199,9 @@ function Examples({ layer, scopeKey }: { layer: string; scopeKey: string }) {
  *
  * A pattern changes the next draft only once three drafts agree and outweigh
  * the drafts that went the other way; until then it is listed as forming,
- * with how far it has to go. Notes are listed with a way to take each back,
- * because something you said once should not be permanent by accident.
+ * with how far it has to go. The ways chosen over a first draft follow
+ * (`ChosenWays`, 0.10.0-alpha.97). Notes are listed with a way to take each
+ * back, because something you said once should not be permanent by accident.
  */
 function Learned() {
   const learning = useLearning();
@@ -213,33 +215,38 @@ function Learned() {
 
   return (
     <Card title="What I've learned from you">
-      {l.draftsConsidered === 0 ? (
+      {l.draftsConsidered === 0 && l.choicesConsidered === 0 ? (
         <p className="neutral">
-          When you change one of my drafts before using it, I notice. Once you&rsquo;ve made the
-          same change {l.minAgreeing} times &mdash; and not undone it more often than that &mdash; I
-          start making it myself.
+          When you change one of my drafts before using it, or choose another way of saying it over
+          my first, I notice. Once you&rsquo;ve done the same {l.minAgreeing} times &mdash; and not
+          gone the other way more often than that &mdash; I start doing it myself.
         </p>
       ) : (
         <>
-          <p className="muted small">
-            From {countOf(l.draftsConsidered, "draft")} you sent, edited or not.
-          </p>
-          {holding.length > 0 ? (
-            <ul className="plain-list">
-              {holding.map((p) => (
-                <li key={`${p.habit}|${p.direction}|${p.participantId ?? ""}`}>{p.summary}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="neutral">Nothing you&rsquo;ve changed has added up to a habit yet.</p>
-          )}
-          {forming.length > 0 ? (
-            <ul className="plain-list muted small">
-              {forming.map((p) => (
-                <li key={`${p.habit}|${p.direction}|${p.participantId ?? ""}`}>{p.summary}</li>
-              ))}
-            </ul>
+          {l.draftsConsidered > 0 ? (
+            <>
+              <p className="muted small">
+                From {countOf(l.draftsConsidered, "draft")} you sent, edited or not.
+              </p>
+              {holding.length > 0 ? (
+                <ul className="plain-list">
+                  {holding.map((p) => (
+                    <li key={`${p.habit}|${p.direction}|${p.participantId ?? ""}`}>{p.summary}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="neutral">Nothing you&rsquo;ve changed has added up to a habit yet.</p>
+              )}
+              {forming.length > 0 ? (
+                <ul className="plain-list muted small">
+                  {forming.map((p) => (
+                    <li key={`${p.habit}|${p.direction}|${p.participantId ?? ""}`}>{p.summary}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
           ) : null}
+          <ChosenWays overview={l} />
         </>
       )}
 
