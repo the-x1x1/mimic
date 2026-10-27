@@ -13,7 +13,10 @@
 //! connected as. Slack's markup in it is escaped (`slack::escaped`), so what
 //! is shown is what was written. What went is decided as sent, and put in
 //! the conversation as the user's message under the id the next check reads
-//! it by, so that check skips it and the thread is answered at once.
+//! it by, so that check skips it and the thread is answered at once. A reply
+//! to a message read in a channel goes into its thread there
+//! (0.10.0-alpha.99, `thread_ts`), as the approved one only: replying by
+//! itself answers direct messages alone.
 
 use serde_json::{json, Value};
 
@@ -43,6 +46,19 @@ fn workspace_of(db: &Db, message: &Message) -> Result<Option<crate::db::Source>,
 
 fn channel_of(message: &Message) -> Option<&str> {
     message.metadata.get("slackChannel").and_then(Value::as_str).filter(|c| !c.is_empty())
+}
+
+/// The channel thread a message was read in (0.10.0-alpha.99): a reply to
+/// it goes there. None for a direct or group message.
+pub(crate) fn thread_of(message: &Message) -> Option<&str> {
+    message.metadata.get("slackThread").and_then(Value::as_str).filter(|t| !t.is_empty())
+}
+
+/// Who a reply goes to, as the user reads it, said of a channel's thread
+/// when it is one.
+fn going_to(db: &Db, draft: &Draft, incoming: &Message) -> Result<String, DbError> {
+    let name = conversation_name(db, draft, incoming)?;
+    Ok(if thread_of(incoming).is_some() { format!("the thread in {name}") } else { name })
 }
 
 /// Who a reply goes to, as the user reads it: the conversation's name (a
@@ -91,7 +107,7 @@ pub(super) fn envelope_for(db: &Db, draft: &Draft, incoming: &Message) -> Result
             quotes: false,
         }],
         mailbox: Some(source.id),
-        to: vec![conversation_name(db, draft, incoming)?],
+        to: vec![going_to(db, draft, incoming)?],
         other_addresses: Vec::new(),
         others_on_it: Vec::new(),
         subject: String::new(),
@@ -136,7 +152,7 @@ pub fn send_reply(db: &Db, api: &SlackApi, req: &SendRequest) -> Result<OutboxEn
             answers_message_id: Some(incoming.id.clone()),
             participant_id: draft.participant_id.clone().or_else(|| incoming.participant_id.clone()),
             from_address: from_address(&config),
-            to: vec![conversation_name(db, &draft, &incoming)?],
+            to: vec![going_to(db, &draft, &incoming)?],
             cc: Vec::new(),
             subject: String::new(),
             body: req.text.clone(),
@@ -145,11 +161,12 @@ pub fn send_reply(db: &Db, api: &SlackApi, req: &SendRequest) -> Result<OutboxEn
             send_after: None,
         })
         .map_err(worded)?;
-    post(db, api, &entry, &config, &channel, &req.text)?;
+    let thread = thread_of(&incoming);
+    post(db, api, &entry, &config, &channel, thread, &req.text)?;
     if let Err(e) = record_sent_draft(db, &draft, &req.text) {
         tracing::warn!(target: "sending", error = %e, "a sent reply's draft could not be marked as sent");
     }
-    if let Err(e) = record_in_conversation(db, &entry, &config, &channel, &req.text, false) {
+    if let Err(e) = record_in_conversation(db, &entry, &config, &channel, thread, &req.text, false) {
         tracing::warn!(target: "sending", error = %e, "a sent reply could not be put in its conversation");
     }
     Ok(db.outgoing(&entry.id)?.unwrap_or(entry))
@@ -184,17 +201,19 @@ pub(crate) fn pending_id(config: &SlackSourceConfig, channel: &str) -> String {
     format!("{}:{}", account_id(&config.team_id, channel), crate::ids::new_id())
 }
 
-/// Post a reply whose `outbox` row is `sending`, and record how it went:
-/// sent under the id Slack gave it, failed with Slack's reason, or unsure.
+/// Post a reply whose `outbox` row is `sending` — into `thread` when the
+/// message it answers was in one — and record how it went: sent under the id
+/// Slack gave it, failed with Slack's reason, or unsure.
 pub(crate) fn post(
     db: &Db,
     api: &SlackApi,
     entry: &OutboxEntry,
     config: &SlackSourceConfig,
     channel: &str,
+    thread: Option<&str>,
     text: &str,
 ) -> Result<(), SendError> {
-    let posted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| api.post(channel, text)));
+    let posted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| api.post_in(channel, thread, text)));
     match posted {
         Ok(Ok(ts)) => {
             db.outgoing_sent_as(&entry.id, &format!("{}:{ts}", account_id(&config.team_id, channel)))?;
@@ -289,13 +308,21 @@ pub(crate) fn record_in_conversation(
     entry: &OutboxEntry,
     config: &SlackSourceConfig,
     channel: &str,
+    thread: Option<&str>,
     text: &str,
     on_its_own: bool,
 ) -> Result<(), String> {
-    let conversation = account_id(&config.team_id, channel);
+    // A channel's thread is a conversation of its own (0.10.0-alpha.99).
+    let conversation = match thread {
+        Some(thread) => account_id(&config.team_id, &slack::thread_key(channel, thread)),
+        None => account_id(&config.team_id, channel),
+    };
     let sent = db.outgoing(&entry.id).map_err(|e| e.to_string())?.ok_or("its outbox row is gone")?;
     let ts = sent.message_id.rsplit(':').next().unwrap_or("").to_string();
     let mut metadata = json!({ "slackChannel": channel });
+    if let Some(thread) = thread {
+        metadata["slackThread"] = Value::String(thread.to_string());
+    }
     if on_its_own {
         metadata["sentOnItsOwn"] = Value::Bool(true);
     }
@@ -417,6 +444,89 @@ mod tests {
         assert_eq!((next.inserted, next.duplicates), (0, 1));
         let again = send_reply(&db, &api, &request(&draft, &source, "twice"));
         assert!(matches!(again, Err(SendError::Cannot(ref m)) if m == ALREADY_DECIDED), "{again:?}");
+    }
+
+    #[test]
+    fn a_reply_to_a_channel_thread_goes_into_that_thread_and_its_conversation() {
+        let hour_ago = chrono::Utc::now().timestamp() - 3600;
+        let asked = format!("{}.000100", hour_ago + 100);
+        let posted_as = format!("{}.000100", hour_ago + 200);
+        let (thread, ts) = (asked.clone(), posted_as.clone());
+        let answer: fake::Answer = Box::new(move |method, query| {
+            let body = match method {
+                "auth.test" => json!({ "ok": true, "team_id": "T1", "team": "Acme", "user_id": "U1", "user": "c" }),
+                "users.conversations" if query.contains("public_channel") => {
+                    json!({ "ok": true, "channels": [{ "id": "C1", "name": "general" }] })
+                }
+                "users.conversations" => json!({ "ok": true, "channels": [] }),
+                "users.info" => {
+                    let name = if query.contains("U2") { "Ada Lovelace" } else { "C" };
+                    json!({ "ok": true, "user": { "profile": { "display_name": name } } })
+                }
+                "conversations.history" => json!({ "ok": true, "has_more": false, "messages": [
+                    { "type": "message", "user": "U2", "text": "<@U1> can you look at the deck?", "ts": thread, "thread_ts": thread },
+                ]}),
+                "chat.postMessage" => json!({ "ok": true, "channel": "C1", "ts": ts }),
+                _ => json!({ "ok": false, "error": "unknown_method" }),
+            };
+            (200, body.to_string())
+        });
+        let (base, seen) = fake::slack(answer);
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        crate::sources::slack::set_channels(&db, &source, true).unwrap();
+        let api = SlackApi::at(&base, TOKEN).unwrap();
+        sync(&db, &source, &api, &|| false).unwrap();
+        let (message, conversation, participant): (String, String, Option<String>) = db
+            .conn()
+            .query_row(
+                "SELECT id, conversation_id, participant_id FROM messages WHERE external_id = ?1",
+                [format!("slack:T1:C1:{asked}")],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        let draft = db
+            .create_draft(&NewDraft {
+                participant_id: participant,
+                conversation_id: Some(conversation.clone()),
+                channel: "chat".into(),
+                situation_id: None,
+                incoming_message: Some("@C can you look at the deck?".into()),
+                incoming_message_id: Some(message),
+                intent: None,
+                generated_text: "Yes, after lunch.".into(),
+                provider: "mock".into(),
+                model: "m".into(),
+                context: json!({}),
+                prompt_hash: "h".into(),
+                evidence: json!({}),
+                alternative_to: None,
+            })
+            .unwrap();
+        let envelope = super::super::envelope_for(&db, &draft.id).unwrap();
+        assert_eq!(envelope.why_not, None);
+        assert_eq!(envelope.to, ["the thread in #general"]);
+
+        let entry = send_reply(&db, &api, &request(&draft, &source, "Yes, after lunch.")).unwrap();
+        assert_eq!(entry.status, SendStatus::Sent);
+        assert_eq!(entry.to, ["the thread in #general"]);
+        assert_eq!(entry.message_id, format!("slack:T1:C1:{posted_as}"));
+        let posted: Vec<String> =
+            seen.lock().unwrap().iter().filter(|r| r.starts_with("chat.postMessage?")).cloned().collect();
+        let body: Value = serde_json::from_str(posted[0].trim_start_matches("chat.postMessage?")).unwrap();
+        assert_eq!(body, json!({ "channel": "C1", "text": "Yes, after lunch.", "thread_ts": asked }));
+        // The user's, in the thread's own conversation.
+        let (in_conversation, in_thread): (String, Option<String>) = db
+            .conn()
+            .query_row(
+                "SELECT conversation_id, json_extract(metadata_json, '$.slackThread') FROM messages
+                  WHERE body = 'Yes, after lunch.' AND direction = 'self'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(in_conversation, conversation);
+        assert_eq!(in_thread.as_deref(), Some(asked.as_str()));
     }
 
     #[test]

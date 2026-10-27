@@ -70,6 +70,24 @@ pub async fn connect_slack(state: State<'_, SharedState>, token: String) -> Comm
     Ok(state.db.get_source(&source.id)?.unwrap_or(source))
 }
 
+/// Read the channels a connected workspace's user is in, for what is said
+/// to them, or stop (0.10.0-alpha.99): turned on, a check follows; what was
+/// read from them stays either way.
+#[tauri::command]
+pub fn set_slack_channels(
+    state: State<'_, SharedState>,
+    source_id: String,
+    on: bool,
+) -> CommandResult<mimic_core::db::Source> {
+    let gone = || CommandError::new("not_found", "That workspace isn't connected any more.");
+    let source = state.db.get_source(&source_id)?.filter(|s| s.connector == slack::CONNECTOR).ok_or_else(gone)?;
+    slack::set_channels(&state.db, &source_id, on)?;
+    if on {
+        check_soon(&state, &source_id)?;
+    }
+    Ok(state.db.get_source(&source_id)?.unwrap_or(source))
+}
+
 /// Try a connected workspace as a check would, sending nothing
 /// (0.10.0-alpha.69): its token, one direct message, its newest message and
 /// who the user is. A sentence saying what was found, or why not.

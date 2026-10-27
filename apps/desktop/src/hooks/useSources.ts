@@ -133,6 +133,20 @@ export function useSetGoogleChatSpaces() {
   });
 }
 
+/** Read a Slack workspace's channels, or stop (0.10.0-alpha.99); a check follows when on. */
+export function useSetSlackChannels() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, on }: { sourceId: string; on: boolean }) =>
+      ipc.setSlackChannels(sourceId, on),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
 /** Sign a connected Google Chat account in again; a check follows by itself. */
 export function useSignInGoogleChatAgain() {
   const qc = useQueryClient();

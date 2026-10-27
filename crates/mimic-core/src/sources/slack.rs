@@ -16,8 +16,23 @@
 //! own — the user's and everyone else's — like a mailbox's. Bots, joins and
 //! other notices (`subtype`) and messages without words are left out.
 //! Slack asking it to slow down ends the check early, keeping what was read.
+//!
+//! Channels are read too once the user turns that on (0.10.0-alpha.99,
+//! `SlackSourceConfig.channels`), for what is said to them: of each public
+//! or private channel they're in, the threads they're in — one with a
+//! message of theirs, or one naming them (`<@U…>`, not `@here` or
+//! `@channel`), or one followed already (`threads`) — each read whole,
+//! replies and all (`conversations.replies`), as a conversation of its own
+//! named for the channel; the rest is counted (`not_for_you`). A thread
+//! started before what was read of its channel is asked about on its own
+//! (`MOST_THREADS` a check, most recently active first) until `FOLLOW_DAYS`
+//! pass without a word in it. A mention in the replies of a thread they
+//! aren't in isn't seen: Slack gives replies only thread by thread. It needs
+//! the user scopes `channels:history`, `channels:read`, `groups:history` and
+//! `groups:read`; a token without them reads direct messages as before and
+//! says what to add (`channels_missing`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 use chrono::{SecondsFormat, TimeZone, Utc};
@@ -43,6 +58,15 @@ const MOST_NEW: usize = 10_000;
 const PAGE: &str = "200";
 const MAX_PAGES: usize = 50;
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// How many of a channel's newest messages the first check reads
+/// (0.10.0-alpha.99).
+const FIRST_READ_CHANNEL: usize = 200;
+/// How many of a thread's messages are read at once at most.
+const THREAD_MOST: usize = 200;
+/// Followed threads asked about on their own in one check.
+const MOST_THREADS: usize = 30;
+/// A followed thread with no word in it for this many days is let go.
+const FOLLOW_DAYS: i64 = 14;
 /// When Slack asks a check to slow down (429 with `Retry-After`), it waits
 /// as long as asked, up to this, and asks again — at most `WAITS` times a
 /// request (0.10.0-alpha.70) — rather than stopping: a workspace with more
@@ -126,6 +150,13 @@ pub struct Identity {
 pub struct Conversation {
     pub id: String,
     pub other: Option<String>,
+}
+
+/// A channel the user is in (0.10.0-alpha.99).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Channel {
+    pub id: String,
+    pub name: String,
 }
 
 /// Someone in the workspace, as `users.info` says.
@@ -225,10 +256,78 @@ impl SlackApi {
         Ok(out)
     }
 
+    /// The public and private channels the user is in (0.10.0-alpha.99).
+    pub fn channels(&self) -> Result<Vec<Channel>, SlackError> {
+        let mut out = Vec::new();
+        let mut cursor = String::new();
+        for _ in 0..MAX_PAGES {
+            let mut params =
+                vec![("types", "public_channel,private_channel"), ("exclude_archived", "true"), ("limit", PAGE)];
+            if !cursor.is_empty() {
+                params.push(("cursor", cursor.as_str()));
+            }
+            let v = self.call("users.conversations", &params, "list your channels")?;
+            for c in v.get("channels").and_then(Value::as_array).into_iter().flatten() {
+                if let Some(id) = c.get("id").and_then(Value::as_str) {
+                    let name = c.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).unwrap_or(id);
+                    out.push(Channel { id: id.to_string(), name: name.to_string() });
+                }
+            }
+            cursor = next_cursor(&v);
+            if cursor.is_empty() {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    /// A thread's messages after `oldest` (every one when none), oldest
+    /// first as Slack gives them, its first message among them, at most
+    /// `most` (0.10.0-alpha.99).
+    pub fn replies(
+        &self,
+        channel: &str,
+        thread: &str,
+        oldest: Option<&str>,
+        most: usize,
+    ) -> Result<Vec<Value>, SlackError> {
+        let mut out = Vec::new();
+        let mut cursor = String::new();
+        for _ in 0..MAX_PAGES {
+            let mut params = vec![("channel", channel), ("ts", thread), ("limit", PAGE)];
+            if let Some(oldest) = oldest {
+                params.push(("oldest", oldest));
+            }
+            if !cursor.is_empty() {
+                params.push(("cursor", cursor.as_str()));
+            }
+            let v = self.call("conversations.replies", &params, "read your channels")?;
+            out.extend(v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default());
+            cursor = next_cursor(&v);
+            if v.get("has_more").and_then(Value::as_bool) != Some(true) || cursor.is_empty() || out.len() >= most {
+                break;
+            }
+        }
+        out.truncate(most);
+        Ok(out)
+    }
+
     /// A conversation's messages after `oldest` (every one when none), as
     /// Slack gives them — newest first — at most `most`, and whether that
     /// was all of them.
     pub fn history(&self, channel: &str, oldest: Option<&str>, most: usize) -> Result<(Vec<Value>, bool), SlackError> {
+        self.history_of(channel, oldest, most, "read your direct messages")
+    }
+
+    /// `history`, saying what it was for when a scope is missing: a
+    /// channel's (0.10.0-alpha.99) or a direct message's.
+    fn history_of(
+        &self,
+        channel: &str,
+        oldest: Option<&str>,
+        most: usize,
+        what: &'static str,
+    ) -> Result<(Vec<Value>, bool), SlackError> {
         let mut out = Vec::new();
         let mut cursor = String::new();
         let mut complete = false;
@@ -240,7 +339,7 @@ impl SlackApi {
             if !cursor.is_empty() {
                 params.push(("cursor", cursor.as_str()));
             }
-            let v = self.call("conversations.history", &params, "read your direct messages")?;
+            let v = self.call("conversations.history", &params, what)?;
             out.extend(v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default());
             cursor = next_cursor(&v);
             let more = v.get("has_more").and_then(Value::as_bool) == Some(true);
@@ -280,12 +379,18 @@ impl SlackApi {
     /// 0.10.0-alpha.65): the new message's `ts`, or why not — and whether it
     /// may have gone anyway.
     pub fn post(&self, channel: &str, text: &str) -> Result<String, PostError> {
-        let response = self
-            .client
-            .post(format!("{}/chat.postMessage", self.base))
-            .bearer_auth(&self.token)
-            .json(&json!({ "channel": channel, "text": escaped(text) }))
-            .send();
+        self.post_in(channel, None, text)
+    }
+
+    /// `post`, into a channel's thread when one is named (`thread_ts`,
+    /// 0.10.0-alpha.99).
+    pub fn post_in(&self, channel: &str, thread: Option<&str>, text: &str) -> Result<String, PostError> {
+        let mut body = json!({ "channel": channel, "text": escaped(text) });
+        if let Some(thread) = thread {
+            body["thread_ts"] = Value::String(thread.to_string());
+        }
+        let response =
+            self.client.post(format!("{}/chat.postMessage", self.base)).bearer_auth(&self.token).json(&body).send();
         let response = match response {
             Ok(r) => r,
             // Never reached Slack: nothing went.
@@ -462,6 +567,19 @@ pub struct SlackSourceConfig {
     /// When the last check that read everything through began.
     #[serde(default)]
     pub last_read_at: Option<String>,
+    /// Whether the channels the user is in are read, for what is said to
+    /// them (0.10.0-alpha.99): off unless turned on (`set_channels`), and
+    /// kept as it stands over a check's write-back.
+    #[serde(default)]
+    pub channels: bool,
+    /// The channel threads the user is in, as `<channel>/<thread ts>`, each
+    /// with the last of its messages read.
+    #[serde(default)]
+    pub threads: BTreeMap<String, String>,
+    /// The scope Slack said reading channels needs, when the token hasn't
+    /// it; none once channels are read.
+    #[serde(default)]
+    pub channels_missing: Option<String>,
 }
 
 impl SlackSourceConfig {
@@ -491,6 +609,23 @@ pub fn new_source(me: &Identity) -> Result<crate::db::NewSource, serde_json::Err
     })
 }
 
+/// Read the channels a workspace's user is in, or stop (0.10.0-alpha.99).
+/// What was read from them stays; a check running meanwhile keeps the
+/// choice.
+pub fn set_channels(db: &Db, source_id: &str, on: bool) -> Result<(), DbError> {
+    db.set_source_config_key(source_id, "channels", &Value::Bool(on))
+}
+
+/// Whether the user reads channels now: they may have turned it off while
+/// a check ran.
+fn reading_channels(db: &Db, source_id: &str) -> bool {
+    db.get_source(source_id)
+        .ok()
+        .flatten()
+        .and_then(|s| s.config.get("channels").and_then(Value::as_bool))
+        .unwrap_or(false)
+}
+
 /// The workspace already connected as this token's account, if one is.
 pub fn connected_as(db: &Db, me: &Identity) -> Result<Option<String>, DbError> {
     Ok(db
@@ -518,6 +653,17 @@ pub struct SlackSummary {
     /// Conversations Slack wouldn't give (one closed or gone since it was
     /// listed): passed over, the rest read.
     pub unreadable: usize,
+    /// Channels read for what was said to the user (0.10.0-alpha.99).
+    pub channels: usize,
+    /// Of the messages read in channels, other people's naming the user.
+    pub mentions: usize,
+    /// In channels, messages in threads the user isn't in: left out.
+    pub not_for_you: usize,
+    /// Followed threads asked about on their own.
+    pub threads: usize,
+    /// The scope reading channels needs, when the token hasn't it: no
+    /// channel was read.
+    pub channels_missing: Option<String>,
 }
 
 /// Check a workspace: read what is new in each direct and group message,
@@ -546,7 +692,8 @@ pub fn sync(
     if matches!(&result, Ok(s) if !s.partial) {
         config.last_read_at = Some(began);
     }
-    db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
+    // Reading channels as the user has it now, whatever this check found.
+    db.set_source_config_keeping_flag(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null), "channels")?;
     match &result {
         Ok(_) => db.set_source_status(source_id, "imported", None)?,
         Err(SlackError::Canceled) => db.set_source_status(source_id, "ready", None)?,
@@ -561,7 +708,11 @@ pub fn record_failure(db: &Db, source_id: &str, message: &str) -> Result<(), DbE
     if let Some(source) = db.get_source(source_id)? {
         if let Ok(mut config) = serde_json::from_value::<SlackSourceConfig>(source.config) {
             config.last_checked_at = Some(crate::ids::now_rfc3339());
-            db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
+            db.set_source_config_keeping_flag(
+                source_id,
+                &serde_json::to_value(&config).unwrap_or(Value::Null),
+                "channels",
+            )?;
         }
         db.set_source_status(source_id, "failed", Some(&json!({ "message": message })))?;
     }
@@ -637,75 +788,24 @@ fn sync_inner(
             wanted.extend(m.get("user").and_then(Value::as_str).map(str::to_string));
             wanted.extend(mentioned(m.get("text").and_then(Value::as_str).unwrap_or("")));
         }
-        for id in wanted {
-            if people.contains_key(&id) {
-                continue;
+        match know(api, &mut people, wanted) {
+            Ok(true) => {}
+            Ok(false) => {
+                summary.partial = true;
+                break 'conversations;
             }
-            match api.user(&id) {
-                Ok(person) => {
-                    people.insert(id, person);
-                }
-                Err(SlackError::RateLimited) => {
-                    summary.partial = true;
-                    break 'conversations;
-                }
-                Err(e @ (SlackError::Token(_) | SlackError::Scope { .. } | SlackError::Network(_))) => {
-                    importer.abandon();
-                    return Err(e);
-                }
-                // Someone Slack won't say (gone from the workspace): known
-                // by their id.
-                Err(_) => {
-                    people.insert(id.clone(), Person { name: id, email: None });
-                }
+            Err(e) => {
+                importer.abandon();
+                return Err(e);
             }
         }
         let name_of = |id: &str| people.get(id).map_or_else(|| id.to_string(), |p| p.name.clone());
         let mut messages: Vec<(String, RawMessage)> = Vec::new();
         for m in &raw {
-            let (Some(ts), Some(user)) = (m.get("ts").and_then(Value::as_str), m.get("user").and_then(Value::as_str))
-            else {
-                summary.left_out += 1;
-                continue;
-            };
-            // Joins, edits shown as their own messages, and bots.
-            let subtype = m.get("subtype").and_then(Value::as_str);
-            if subtype.is_some_and(|s| s != "thread_broadcast" && s != "file_share") || m.get("bot_id").is_some() {
-                summary.left_out += 1;
-                continue;
+            match as_raw(m, &config.team_id, &conversation.id, &people, conversation.other.is_some(), None) {
+                Some(found) => messages.push(found),
+                None => summary.left_out += 1,
             }
-            let body = readable(m.get("text").and_then(Value::as_str).unwrap_or(""), &name_of).trim().to_string();
-            if body.is_empty() {
-                summary.left_out += 1;
-                continue;
-            }
-            let mut identifiers =
-                vec![IdentifierInput::new(IdentifierKind::AccountId, account_id(&config.team_id, user))];
-            if let Some(email) = people.get(user).and_then(|p| p.email.as_deref()) {
-                identifiers.push(IdentifierInput::new(IdentifierKind::Email, email));
-            }
-            messages.push((
-                ts.to_string(),
-                RawMessage {
-                    external_id: format!("{}:{}", account_id(&config.team_id, &conversation.id), ts),
-                    author: AuthorRef { display_name: name_of(user), identifiers },
-                    sent_at: ts_time(ts),
-                    body,
-                    // Whether it is a direct message, which alone is
-                    // answered by itself, and whether it came with a file
-                    // a reply by itself would answer without reading
-                    // (0.10.0-alpha.66).
-                    metadata: json!({
-                        "slackChannel": conversation.id,
-                        "slackDirect": conversation.other.is_some(),
-                        // Files, and what Slack attaches: a shared or
-                        // forwarded message, whose words aren't in the text.
-                        "attachments": m.get("files").and_then(Value::as_array).is_some_and(|f| !f.is_empty())
-                            || m.get("attachments").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
-                            || subtype == Some("file_share"),
-                    }),
-                },
-            ));
         }
         messages.sort_by_key(|(ts, _)| ts_key(ts));
         if !messages.is_empty() {
@@ -745,11 +845,341 @@ fn sync_inner(
         importer.abandon();
         return Err(SlackError::Refused(format!("it gave none of your conversations ({last_refusal})")));
     }
+    // Channels, once the direct messages are in, and only while asked for
+    // (0.10.0-alpha.99); not after Slack asked to slow down.
+    if !summary.partial && reading_channels(db, source_id) {
+        let read = ChannelReading { api, importer: &mut importer, people: &mut people, summary: &mut summary }
+            .read(config, should_stop);
+        if let Err(e) = read {
+            importer.abandon();
+            return Err(e);
+        }
+    }
     let imported = importer.finish()?;
     summary.inserted = imported.inserted;
     summary.duplicates = imported.duplicates;
     summary.from_self = imported.from_self;
     Ok(summary)
+}
+
+/// Who each of `ids` is, asked of Slack once each: `Ok(false)` when Slack
+/// asked to slow down first, and an error for what every request would
+/// meet. Someone Slack won't say (gone from the workspace) is known by
+/// their id.
+fn know(api: &SlackApi, people: &mut HashMap<String, Person>, ids: Vec<String>) -> Result<bool, SlackError> {
+    for id in ids {
+        if people.contains_key(&id) {
+            continue;
+        }
+        match api.user(&id) {
+            Ok(person) => {
+                people.insert(id, person);
+            }
+            Err(SlackError::RateLimited) => return Ok(false),
+            Err(e @ (SlackError::Token(_) | SlackError::Scope { .. } | SlackError::Network(_))) => return Err(e),
+            Err(_) => {
+                people.insert(id.clone(), Person { name: id, email: None });
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// A person's message with words, as it is imported, with its `ts` — or
+/// `None` for what is left out: joins, edits shown as their own messages
+/// and other notices, bots, and messages without words. In a channel, the
+/// thread it is in (`slackThread`, 0.10.0-alpha.99).
+fn as_raw(
+    m: &Value,
+    team_id: &str,
+    channel: &str,
+    people: &HashMap<String, Person>,
+    direct: bool,
+    thread: Option<&str>,
+) -> Option<(String, RawMessage)> {
+    let (Some(ts), Some(user)) = (m.get("ts").and_then(Value::as_str), m.get("user").and_then(Value::as_str)) else {
+        return None;
+    };
+    let subtype = m.get("subtype").and_then(Value::as_str);
+    if subtype.is_some_and(|s| s != "thread_broadcast" && s != "file_share") || m.get("bot_id").is_some() {
+        return None;
+    }
+    let name_of = |id: &str| people.get(id).map_or_else(|| id.to_string(), |p| p.name.clone());
+    let body = readable(m.get("text").and_then(Value::as_str).unwrap_or(""), &name_of).trim().to_string();
+    if body.is_empty() {
+        return None;
+    }
+    let mut identifiers = vec![IdentifierInput::new(IdentifierKind::AccountId, account_id(team_id, user))];
+    if let Some(email) = people.get(user).and_then(|p| p.email.as_deref()) {
+        identifiers.push(IdentifierInput::new(IdentifierKind::Email, email));
+    }
+    // Whether it is a direct message, which alone is answered by itself, and
+    // whether it came with a file a reply by itself would answer without
+    // reading (0.10.0-alpha.66).
+    let mut metadata = json!({
+        "slackChannel": channel,
+        "slackDirect": direct,
+        // Files, and what Slack attaches: a shared or forwarded message,
+        // whose words aren't in the text.
+        "attachments": m.get("files").and_then(Value::as_array).is_some_and(|f| !f.is_empty())
+            || m.get("attachments").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
+            || subtype == Some("file_share"),
+    });
+    if let Some(thread) = thread {
+        metadata["slackThread"] = Value::String(thread.to_string());
+    }
+    Some((
+        ts.to_string(),
+        RawMessage {
+            external_id: format!("{}:{}", account_id(team_id, channel), ts),
+            author: AuthorRef { display_name: name_of(user), identifiers },
+            sent_at: ts_time(ts),
+            body,
+            metadata,
+        },
+    ))
+}
+
+/// What a channel thread is known by in a workspace's settings.
+pub(crate) fn thread_key(channel: &str, thread: &str) -> String {
+    format!("{channel}/{thread}")
+}
+
+/// The thread a channel message is in: its first message's `ts`, or its
+/// own when it starts one.
+fn thread_of(m: &Value) -> Option<&str> {
+    m.get("thread_ts").and_then(Value::as_str).or_else(|| m.get("ts").and_then(Value::as_str))
+}
+
+/// Whether a message names `user` (`<@U…>`): not `@here` or `@channel`,
+/// which are said to everyone.
+fn names(m: &Value, user: &str) -> bool {
+    mentioned(m.get("text").and_then(Value::as_str).unwrap_or("")).iter().any(|u| u == user)
+}
+
+/// The newest of some messages' `ts`.
+fn newest_ts(raw: &[Value]) -> Option<String> {
+    raw.iter().filter_map(|m| m.get("ts").and_then(Value::as_str)).max_by_key(|ts| ts_key(ts)).map(str::to_string)
+}
+
+/// One check's reading of the channels the user is in (0.10.0-alpha.99):
+/// what it reads with, and what it found.
+struct ChannelReading<'r, 'i> {
+    api: &'r SlackApi,
+    importer: &'r mut Importer<'i>,
+    people: &'r mut HashMap<String, Person>,
+    summary: &'r mut SlackSummary,
+}
+
+impl ChannelReading<'_, '_> {
+    /// Each channel's threads the user is in, then the followed threads
+    /// none of that read. Slack asking to slow down ends it, keeping what
+    /// was read; an error is one every request would meet.
+    fn read(mut self, config: &mut SlackSourceConfig, should_stop: &dyn Fn() -> bool) -> Result<(), SlackError> {
+        let channels = match self.api.channels() {
+            Ok(c) => {
+                config.channels_missing = None;
+                c
+            }
+            // An app made before channels were read: what it can read is,
+            // and Your mail says what to add.
+            Err(SlackError::Scope { scope, .. }) => {
+                config.channels_missing = Some(scope.clone());
+                self.summary.channels_missing = Some(scope);
+                return Ok(());
+            }
+            Err(SlackError::RateLimited) => {
+                self.summary.partial = true;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+        let mut asked: HashSet<String> = HashSet::new();
+        for channel in &channels {
+            if should_stop() {
+                return Err(SlackError::Canceled);
+            }
+            let mark = config.marks.get(&channel.id).cloned();
+            let most = if mark.is_some() { MOST_NEW } else { FIRST_READ_CHANNEL };
+            let raw = match self.api.history_of(&channel.id, mark.as_deref(), most, "read your channels") {
+                Ok((raw, complete)) => {
+                    if mark.is_some() && !complete {
+                        self.summary.partial = true;
+                    }
+                    raw
+                }
+                Err(SlackError::RateLimited) => {
+                    self.summary.partial = true;
+                    return Ok(());
+                }
+                Err(e @ (SlackError::Token(_) | SlackError::Scope { .. } | SlackError::Network(_))) => return Err(e),
+                Err(e) => {
+                    tracing::warn!(target: "slack", error = %e, "a channel couldn't be read");
+                    self.summary.unreadable += 1;
+                    continue;
+                }
+            };
+            self.summary.channels += 1;
+            let Some(newest) = newest_ts(&raw) else { continue };
+            self.summary.fetched += raw.len();
+            // The threads here the user is in: one with a message of theirs
+            // or one naming them, or one followed already.
+            let mut threads: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+            for m in raw {
+                let Some(thread) = thread_of(&m).map(str::to_string) else {
+                    self.summary.left_out += 1;
+                    continue;
+                };
+                let theirs = m.get("user").and_then(Value::as_str) == Some(config.user_id.as_str());
+                if theirs
+                    || names(&m, &config.user_id)
+                    || config.threads.contains_key(&thread_key(&channel.id, &thread))
+                {
+                    threads.entry(thread).or_default().push(m);
+                } else {
+                    self.summary.not_for_you += 1;
+                }
+            }
+            for (thread, mut messages) in threads {
+                let key = thread_key(&channel.id, &thread);
+                let since = config.threads.get(&key).cloned();
+                asked.insert(key);
+                // Its replies aren't in the channel's history: asked for when
+                // its first message says there are new ones, or when that
+                // isn't among what was read.
+                let first = messages.iter().find(|m| m.get("ts").and_then(Value::as_str) == Some(thread.as_str()));
+                let more = first.is_none_or(|m| {
+                    m.get("reply_count").and_then(Value::as_u64).unwrap_or(0) > 0
+                        && match (m.get("latest_reply").and_then(Value::as_str), since.as_deref()) {
+                            (Some(latest), Some(since)) => ts_key(latest) > ts_key(since),
+                            _ => true,
+                        }
+                });
+                if more {
+                    match self.api.replies(&channel.id, &thread, since.as_deref(), THREAD_MOST) {
+                        Ok(replies) => {
+                            self.summary.fetched += replies.len();
+                            messages.extend(replies);
+                        }
+                        Err(SlackError::RateLimited) => {
+                            self.summary.partial = true;
+                            return Ok(());
+                        }
+                        Err(e @ (SlackError::Token(_) | SlackError::Scope { .. } | SlackError::Network(_))) => {
+                            return Err(e)
+                        }
+                        Err(e) => tracing::warn!(target: "slack", error = %e, "a thread's replies couldn't be read"),
+                    }
+                }
+                if !self.take(config, channel, &thread, messages, since.as_deref())? {
+                    self.summary.partial = true;
+                    return Ok(());
+                }
+            }
+            config.marks.insert(channel.id.clone(), newest);
+        }
+        // Followed threads whose start is older than what was read of their
+        // channel: nothing read says what was said in them since, so each is
+        // asked on its own, most recently active first — until it has been
+        // quiet for `FOLLOW_DAYS`, or its channel isn't the user's any more.
+        let now = Utc::now().timestamp();
+        let listed: HashSet<&str> = channels.iter().map(|c| c.id.as_str()).collect();
+        config.threads.retain(|key, last| {
+            let channel = key.split_once('/').map_or(key.as_str(), |(c, _)| c);
+            listed.contains(channel) && now - i64::try_from(ts_key(last).0).unwrap_or(0) <= FOLLOW_DAYS * 86_400
+        });
+        let mut quiet: Vec<(String, String)> = config
+            .threads
+            .iter()
+            .filter(|(key, _)| !asked.contains(*key))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        quiet.sort_by_key(|(_, last)| std::cmp::Reverse(ts_key(last)));
+        for (key, since) in quiet.into_iter().take(MOST_THREADS) {
+            if should_stop() {
+                return Err(SlackError::Canceled);
+            }
+            let Some((channel, thread)) = key.split_once('/') else { continue };
+            let Some(channel) = channels.iter().find(|c| c.id == channel) else { continue };
+            self.summary.threads += 1;
+            let replies = match self.api.replies(&channel.id, thread, Some(since.as_str()), THREAD_MOST) {
+                Ok(replies) => replies,
+                Err(SlackError::RateLimited) => {
+                    self.summary.partial = true;
+                    return Ok(());
+                }
+                Err(e @ (SlackError::Token(_) | SlackError::Scope { .. } | SlackError::Network(_))) => return Err(e),
+                Err(e) => {
+                    tracing::warn!(target: "slack", error = %e, "a thread's replies couldn't be read");
+                    continue;
+                }
+            };
+            self.summary.fetched += replies.len();
+            if !self.take(config, channel, thread, replies, Some(since.as_str()))? {
+                self.summary.partial = true;
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// A thread's messages after `since` (every one when none), each once,
+    /// imported as a conversation of its own named for its channel, and
+    /// followed from its newest: `Ok(false)` when Slack asked to slow down
+    /// while saying who people are, and nothing was taken.
+    fn take(
+        &mut self,
+        config: &mut SlackSourceConfig,
+        channel: &Channel,
+        thread: &str,
+        messages: Vec<Value>,
+        since: Option<&str>,
+    ) -> Result<bool, SlackError> {
+        let mut by_ts: BTreeMap<(u64, u64), Value> = BTreeMap::new();
+        for m in messages {
+            let Some(ts) = m.get("ts").and_then(Value::as_str).map(ts_key) else { continue };
+            if since.is_some_and(|since| ts <= ts_key(since)) {
+                continue;
+            }
+            by_ts.entry(ts).or_insert(m);
+        }
+        let Some(newest) = by_ts.values().last().and_then(|m| m.get("ts")).and_then(Value::as_str).map(str::to_string)
+        else {
+            return Ok(true);
+        };
+        let mut wanted: Vec<String> = Vec::new();
+        for m in by_ts.values() {
+            wanted.extend(m.get("user").and_then(Value::as_str).map(str::to_string));
+            wanted.extend(mentioned(m.get("text").and_then(Value::as_str).unwrap_or("")));
+        }
+        if !know(self.api, self.people, wanted)? {
+            return Ok(false);
+        }
+        let mut messages = Vec::new();
+        for m in by_ts.values() {
+            match as_raw(m, &config.team_id, &channel.id, self.people, false, Some(thread)) {
+                Some((_, raw)) => {
+                    let theirs = m.get("user").and_then(Value::as_str) == Some(config.user_id.as_str());
+                    if !theirs && names(m, &config.user_id) {
+                        self.summary.mentions += 1;
+                    }
+                    messages.push(raw);
+                }
+                None => self.summary.left_out += 1,
+            }
+        }
+        if !messages.is_empty() {
+            self.importer.take(DiscoveredConversation {
+                external_id: account_id(&config.team_id, &thread_key(&channel.id, thread)),
+                subject: Some(format!("#{}", channel.name)),
+                channel: "chat".into(),
+                messages,
+            })?;
+            self.summary.conversations += 1;
+        }
+        config.threads.insert(thread_key(&channel.id, thread), newest);
+        Ok(true)
+    }
 }
 
 // -------------------------------------------------------------- schedule
@@ -1219,6 +1649,144 @@ mod tests {
         let summary = sync(&db, &source, &SlackApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
         assert!(!summary.partial, "{summary:?}");
         assert_eq!(summary.inserted, 3);
+    }
+
+    /// A `ts` some seconds after `base`, as Slack writes it.
+    fn ts(base: i64, after: i64) -> String {
+        format!("{}.000100", base + after)
+    }
+
+    /// Acme with no direct messages and one channel, #general (0.10.0-alpha.99):
+    /// at first Ada asks C about the deck at the top (one reply so far), and
+    /// two messages aren't for C; then, `round` 1, nothing new at the top, and
+    /// a new word in the thread, which only asking the thread finds.
+    fn general(round: std::sync::Arc<std::sync::atomic::AtomicUsize>, base: i64) -> fake::Answer {
+        let (asked, reply, lunch, here, thanks) =
+            (ts(base, 100), ts(base, 200), ts(base, 50), ts(base, 10), ts(base, 300));
+        Box::new(move |method, query| {
+            let round = round.load(std::sync::atomic::Ordering::SeqCst);
+            let body = match method {
+                "auth.test" => json!({ "ok": true, "team_id": "T1", "team": "Acme", "user_id": "U1", "user": "c" }),
+                "users.conversations" if query.contains("public_channel") => {
+                    json!({ "ok": true, "channels": [{ "id": "C1", "name": "general" }] })
+                }
+                "users.conversations" => json!({ "ok": true, "channels": [] }),
+                "users.info" => {
+                    let name = if query.contains("U2") {
+                        "Ada Lovelace"
+                    } else if query.contains("U1") {
+                        "C"
+                    } else {
+                        "Bob"
+                    };
+                    json!({ "ok": true, "user": { "profile": { "display_name": name } } })
+                }
+                "conversations.history" if round == 0 => json!({ "ok": true, "has_more": false, "messages": [
+                    { "type": "message", "user": "U2", "text": "<@U1> can you look at the deck?", "ts": asked,
+                      "thread_ts": asked, "reply_count": 1, "latest_reply": reply },
+                    { "type": "message", "user": "U3", "text": "lunch anyone?", "ts": lunch },
+                    { "type": "message", "user": "U3", "text": "<!here> standup in five", "ts": here },
+                ]}),
+                "conversations.history" => {
+                    assert!(query.contains(&format!("oldest={asked}")), "{query}");
+                    json!({ "ok": true, "has_more": false, "messages": [] })
+                }
+                "conversations.replies" => {
+                    assert!(query.contains(&format!("ts={asked}")), "{query}");
+                    let mut messages = vec![
+                        json!({ "type": "message", "user": "U2", "text": "<@U1> can you look at the deck?", "ts": asked, "thread_ts": asked }),
+                        json!({ "type": "message", "user": "U3", "text": "I can help too", "ts": reply, "thread_ts": asked }),
+                    ];
+                    if round == 1 {
+                        assert!(query.contains(&format!("oldest={reply}")), "{query}");
+                        messages.push(json!({ "type": "message", "user": "U2", "text": "thanks both", "ts": thanks, "thread_ts": asked }));
+                    }
+                    json!({ "ok": true, "has_more": false, "messages": messages })
+                }
+                _ => json!({ "ok": false, "error": "unknown_method" }),
+            };
+            (200, body.to_string())
+        })
+    }
+
+    #[test]
+    fn channels_are_read_only_when_asked_and_then_only_the_threads_youre_in() {
+        let round = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // An hour ago: recent enough to be followed.
+        let hour_ago = Utc::now().timestamp() - 3600;
+        let (base, seen) = fake::slack(general(round.clone(), hour_ago));
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        let api = SlackApi::at(&base, TOKEN).unwrap();
+
+        let off = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((off.channels, off.inserted), (0, 0));
+        assert!(!seen.lock().unwrap().iter().any(|r| r.contains("public_channel")), "channels weren't asked for");
+
+        set_channels(&db, &source, true).unwrap();
+        let on = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!(
+            (on.channels, on.conversations, on.inserted, on.mentions, on.not_for_you),
+            (1, 1, 2, 1, 2),
+            "{on:?}"
+        );
+        assert_eq!(on.channels_missing, None);
+        let (subject, thread): (Option<String>, String) = db
+            .conn()
+            .query_row(
+                "SELECT c.subject, json_extract(m.metadata_json, '$.slackThread') FROM messages m
+                   JOIN conversations c ON c.id = m.conversation_id WHERE m.body = 'I can help too'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(subject.as_deref(), Some("#general"));
+        assert_eq!(thread, ts(hour_ago, 100));
+        let config: SlackSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        assert!(config.channels, "kept as the user set it");
+        assert_eq!(config.threads.get(&thread_key("C1", &ts(hour_ago, 100))), Some(&ts(hour_ago, 200)));
+        assert_eq!(config.marks.get("C1"), Some(&ts(hour_ago, 100)));
+
+        // Nothing new at the top: the thread is asked on its own, from where it was left.
+        round.store(1, std::sync::atomic::Ordering::SeqCst);
+        let next = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((next.threads, next.inserted, next.duplicates), (1, 1, 0), "{next:?}");
+        let waiting: Vec<String> = db.threads_awaiting_reply(10).unwrap().into_iter().map(|t| t.last_message).collect();
+        assert!(waiting.contains(&"thanks both".to_string()), "{waiting:?}");
+
+        // Turned off, channels aren't asked again; what was read stays.
+        set_channels(&db, &source, false).unwrap();
+        seen.lock().unwrap().clear();
+        sync(&db, &source, &api, &|| false).unwrap();
+        assert!(!seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.contains("public_channel") || r.starts_with("conversations.replies")));
+        assert_eq!(db.threads_awaiting_reply(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_token_without_the_channel_scopes_reads_direct_messages_and_says_what_to_add() {
+        let round = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let acme = fake::acme(round);
+        let (base, _) = fake::slack(Box::new(move |method, query| {
+            if method == "users.conversations" && query.contains("public_channel") {
+                return (200, r#"{"ok":false,"error":"missing_scope","needed":"channels:read"}"#.into());
+            }
+            acme(method, query)
+        }));
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        set_channels(&db, &source, true).unwrap();
+        let summary = sync(&db, &source, &SlackApi::at(&base, TOKEN).unwrap(), &|| false).unwrap();
+        assert_eq!(summary.inserted, 3, "the direct messages as before");
+        assert_eq!(summary.channels_missing.as_deref(), Some("channels:read"));
+        let stored = db.get_source(&source).unwrap().unwrap();
+        assert_eq!(stored.status, "imported");
+        let config: SlackSourceConfig = serde_json::from_value(stored.config).unwrap();
+        assert_eq!(config.channels_missing.as_deref(), Some("channels:read"));
     }
 
     #[test]

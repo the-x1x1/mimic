@@ -1,8 +1,8 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button, Field, InlineError } from "@mimic/ui";
-import { SLACK_MANIFEST, isSlackUserToken } from "@mimic/contracts";
-import { useConnectSlack, useSetSlackToken } from "@/hooks/useSources";
+import { SLACK_CHANNEL_SCOPES, SLACK_MANIFEST, isSlackUserToken } from "@mimic/contracts";
+import { useConnectSlack, useSetSlackChannels, useSetSlackToken } from "@/hooks/useSources";
 import { toast } from "@/state/toast";
 
 /**
@@ -25,9 +25,10 @@ export function ConnectSlackDialog({ onClose }: { onClose: () => void }) {
         <Dialog.Content className="dialog dialog--wide">
           <Dialog.Title className="dialog__title">Connect Slack</Dialog.Title>
           <Dialog.Description className="neutral">
-            I&rsquo;ll read your direct messages and group messages in one workspace &mdash; not
-            channels &mdash; and check for new ones as often as I check your mail. Reading changes
-            nothing in Slack.
+            I&rsquo;ll read your direct messages and group messages in one workspace, and check for
+            new ones as often as I check your mail. Once it&rsquo;s connected you can have me read
+            the channels you&rsquo;re in too, for what&rsquo;s said to you. Reading changes nothing
+            in Slack.
           </Dialog.Description>
 
           <ol className="small stack gap-1">
@@ -36,8 +37,9 @@ export function ConnectSlackDialog({ onClose }: { onClose: () => void }) {
               <strong>From a manifest</strong>, and pick your workspace.
             </li>
             <li>
-              Paste this manifest and create the app. It asks only to read your direct messages, who
-              people are, and to write as you, for replies you approve.{" "}
+              Paste this manifest and create the app. It asks only to read your direct messages and
+              the channels you&rsquo;re in, who people are, and to write as you, for replies you
+              approve.{" "}
               <Button
                 size="sm"
                 variant="ghost"
@@ -110,6 +112,54 @@ export function ConnectSlackDialog({ onClose }: { onClose: () => void }) {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/** What reading a workspace's channels reads, said beside the switch. */
+export const CHANNELS_READ =
+  "In channels I read only the threads you're in: where you've written, or someone @mentioned you — all of that thread. A mention inside a thread you haven't been in yet isn't one I can see.";
+
+/**
+ * Whether a connected workspace's channels are read, for what is said to the
+ * user there (0.10.0-alpha.99). Its token needs the channel scopes: one made
+ * before they were in the manifest says which to add.
+ */
+export function SlackChannels({
+  sourceId,
+  on,
+  missing,
+}: {
+  sourceId: string;
+  on: boolean;
+  /** The scope Slack said reading channels needs, when the token hasn't it. */
+  missing: string | null;
+}) {
+  const set = useSetSlackChannels();
+  return (
+    <div className="stack gap-1">
+      <label className="row gap-2 small">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={set.isPending}
+          onChange={(e) => set.mutate({ sourceId, on: e.target.checked })}
+        />
+        <span>Read the channels I&rsquo;m in, for what&rsquo;s said to me</span>
+      </label>
+      <p className="muted small">
+        {on
+          ? CHANNELS_READ
+          : "Off: I read direct messages and group messages only. What I read from channels before stays."}
+      </p>
+      {on && missing ? (
+        <p className="danger small" role="alert">
+          Your Slack app&rsquo;s token can&rsquo;t read channels yet ({missing}). Under OAuth &amp;
+          Permissions, add the User Token Scopes {SLACK_CHANNEL_SCOPES.join(", ")}, reinstall the
+          app, and give me the new token with New token.
+        </p>
+      ) : null}
+      {set.isError ? <InlineError>{(set.error as Error).message}</InlineError> : null}
+    </div>
   );
 }
 

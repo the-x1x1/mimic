@@ -1108,7 +1108,8 @@ fn send_into_slack(
     if !db.take_held_outgoing(&entry.id, &fmt_rfc3339(now))? {
         return Ok(());
     }
-    match sending::slack::post(db, &api, entry, &config, &channel, &entry.body) {
+    let thread = sending::slack::thread_of(&incoming);
+    match sending::slack::post(db, &api, entry, &config, &channel, thread, &entry.body) {
         Ok(()) => {
             run.sent += 1;
             if let Err(e) = db
@@ -1117,7 +1118,9 @@ fn send_into_slack(
             {
                 tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be recorded on its draft");
             }
-            if let Err(e) = sending::slack::record_in_conversation(db, entry, &config, &channel, &entry.body, true) {
+            if let Err(e) =
+                sending::slack::record_in_conversation(db, entry, &config, &channel, thread, &entry.body, true)
+            {
                 tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be put in its conversation");
             }
         }
