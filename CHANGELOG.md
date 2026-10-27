@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.88] — 2026-10-26
+
+Reaching the mail servers, signed in to none.
+
+### Added
+
+- **Mimic can reach a mailbox's servers without signing in.** It connects to the reading and the sending server exactly as a check or a send would — encrypted the same way — asks what each can do, and leaves, with no password or token offered. A test does this against the real servers of Gmail, Outlook.com and Microsoft 365, Yahoo, iCloud, AOL, Fastmail, Zoho and GMX, so the first time your own mailbox is connected isn't the first time Mimic has spoken to its provider.
+
 ## [0.10.0-alpha.87] — 2026-10-26
 
 Chats and drafts, tightened (the fifteenth review).
