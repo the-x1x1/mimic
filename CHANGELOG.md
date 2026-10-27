@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.82] — 2026-10-26
+
+Setting up Google Chat.
+
+### Changed
+
+- **Settings says how to set up Google Chat.** Under Signing in with Microsoft and Google, the Google steps now include what Google Chat needs in the same project: the Google Chat API turned on, its app configured, and its permissions added — and that a project inside your Workspace can be Internal, so Google neither warns nor asks you to sign in again every week.
+
 ## [0.10.0-alpha.81] — 2026-10-26
 
 Google Chat, tightened.

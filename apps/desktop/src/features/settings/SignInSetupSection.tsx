@@ -67,6 +67,14 @@ export function SignInSetupSection() {
                 </li>
                 <li>In Clients, create a client of the type Desktop app.</li>
                 <li>Copy its client ID and client secret, and paste both below.</li>
+                <li>
+                  For Google Chat (a Google Workspace account), in the same project: enable the
+                  Google Chat API; on its Configuration page give the app a name, an avatar address
+                  and a description, with interactive features off; and in Data Access add openid,
+                  email, profile and the Chat scopes chat.spaces.readonly, chat.messages.readonly,
+                  chat.messages.create and chat.memberships.readonly. A project in your Workspace
+                  can choose Internal as its audience instead: no warning, no lapsing.
+                </li>
               </ol>
             }
             note="Published without Google's verification, Google warns you it hasn't verified the app when you sign in: that's your own registration. Left in testing instead, Google asks you to sign in again every seven days. For Gmail, an app password is simpler."
