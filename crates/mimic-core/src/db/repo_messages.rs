@@ -390,31 +390,51 @@ impl Db {
     }
 
     /// The conversation already holding any of these messages, read through
-    /// any source of `connector` — one whose ids are the same in each of its
-    /// sources (`import::SAME_IDS_CONNECTORS`, 0.10.0-alpha.61).
-    pub fn conversation_holding_in(&self, connector: &str, external_ids: &[String]) -> DbResult<Option<String>> {
+    /// any source of the `connectors` — whose ids are the same in each of
+    /// their sources (`import::SAME_IDS_FAMILIES`, 0.10.0-alpha.61, .74).
+    pub fn conversation_holding_in(&self, connectors: &[&str], external_ids: &[String]) -> DbResult<Option<String>> {
         if external_ids.is_empty() {
             return Ok(None);
         }
         let ids = serde_json::to_string(external_ids).unwrap_or_else(|_| "[]".into());
+        let connectors = serde_json::to_string(connectors).unwrap_or_else(|_| "[]".into());
         Ok(self
             .conn()
             .query_row(
                 "SELECT c.id FROM messages m
                  JOIN conversations c ON c.id = m.conversation_id
                  JOIN sources s ON s.id = m.source_id
-                 WHERE s.connector = ?1 AND m.external_id IN (SELECT value FROM json_each(?2))
+                 WHERE s.connector IN (SELECT value FROM json_each(?1))
+                   AND m.external_id IN (SELECT value FROM json_each(?2))
                  ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1",
-                params![connector, ids],
+                params![connectors, ids],
                 |r| r.get(0),
             )
             .optional()?)
     }
 
-    /// Which of these messages another source of `connector` already stores.
+    /// The conversation a source of the `connectors` keeps under
+    /// `external_id`, the earliest if several do: the same chat, read through
+    /// another of them, before any of these messages was (0.10.0-alpha.74).
+    pub fn family_conversation(&self, connectors: &[&str], external_id: &str) -> DbResult<Option<String>> {
+        let connectors = serde_json::to_string(connectors).unwrap_or_else(|_| "[]".into());
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT c.id FROM conversations c JOIN sources s ON s.id = c.source_id
+                 WHERE s.connector IN (SELECT value FROM json_each(?1)) AND c.external_id = ?2
+                 ORDER BY COALESCE(c.started_at, ''), c.id LIMIT 1",
+                params![connectors, external_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Which of these messages another source of the `connectors` already
+    /// stores.
     pub fn ids_in_other_sources_of(
         &self,
-        connector: &str,
+        connectors: &[&str],
         source_id: &str,
         external_ids: &[String],
     ) -> DbResult<std::collections::HashSet<String>> {
@@ -424,10 +444,12 @@ impl Db {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT DISTINCT m.external_id FROM messages m JOIN sources s ON s.id = m.source_id
-             WHERE s.connector = ?1 AND m.source_id <> ?2 AND m.external_id IN (SELECT value FROM json_each(?3))",
+             WHERE s.connector IN (SELECT value FROM json_each(?1)) AND m.source_id <> ?2
+               AND m.external_id IN (SELECT value FROM json_each(?3))",
         )?;
         let ids = serde_json::to_string(external_ids).unwrap_or_else(|_| "[]".into());
-        let rows = stmt.query_map(params![connector, source_id, ids], |r| r.get::<_, String>(0))?;
+        let connectors = serde_json::to_string(connectors).unwrap_or_else(|_| "[]".into());
+        let rows = stmt.query_map(params![connectors, source_id, ids], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

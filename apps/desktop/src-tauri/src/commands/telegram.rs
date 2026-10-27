@@ -1,0 +1,270 @@
+//! A Telegram account, connected as the user (0.10.0-alpha.74): the app id
+//! and hash they registered at my.telegram.org, then their phone number, the
+//! code Telegram sends and, if they set one, their password — which goes to
+//! Telegram and is kept nowhere. Between those steps the connection that
+//! asked is held in memory (`AppState.telegram`); what the sign-in leaves,
+//! and the app's id and hash, go to the secret store, never the database.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use mimic_core::db::IdentifierKind;
+use mimic_core::providers::SecretStore;
+use mimic_core::sources::telegram_account::{
+    self as telegram, AppCredentials, KeptSession, Live, LoginToken, Me, PasswordToken, Step, TelegramError,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tauri::State;
+
+use crate::error::{CommandError, CommandResult};
+use crate::SharedState;
+
+/// How long a sign-in waits for its code or password.
+const PENDING_FOR: Duration = Duration::from_secs(15 * 60);
+
+/// A sign-in under way: the connection that asked for the code, and what
+/// Telegram handed back to finish it with.
+pub struct PendingTelegram {
+    live: Live,
+    login: LoginToken,
+    password: Option<PasswordToken>,
+    started: Instant,
+}
+
+/// Whether the app's registration is kept, and its id (never its hash).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramApp {
+    pub saved: bool,
+    pub api_id: Option<i32>,
+}
+
+/// Where a sign-in stands: `code` (Telegram sent one), `password` (the
+/// account has one; `hint`, and whether the last one tried was `wrong`), or
+/// `done`, with the account's source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramStep {
+    pub step: String,
+    pub hint: Option<String>,
+    pub wrong: bool,
+    pub source: Option<mimic_core::db::Source>,
+}
+
+impl TelegramStep {
+    fn code() -> Self {
+        TelegramStep { step: "code".into(), hint: None, wrong: false, source: None }
+    }
+    fn password(hint: Option<String>, wrong: bool) -> Self {
+        TelegramStep { step: "password".into(), hint, wrong, source: None }
+    }
+    fn done(source: mimic_core::db::Source) -> Self {
+        TelegramStep { step: "done".into(), hint: None, wrong: false, source: Some(source) }
+    }
+}
+
+fn telegram_error(e: TelegramError) -> CommandError {
+    let code = match e {
+        TelegramError::BadCode => "bad_code",
+        TelegramError::App(_) => "app",
+        _ => "telegram",
+    };
+    CommandError::new(code, e.to_string())
+}
+
+fn saved_app(state: &crate::AppState) -> Option<AppCredentials> {
+    state.secrets.get(telegram::APP_KEY).and_then(|raw| serde_json::from_str(&raw).ok())
+}
+
+/// The sign-in under way, taken out to be worked on, if there is one still
+/// young enough.
+fn take_pending(state: &crate::AppState) -> Option<PendingTelegram> {
+    let mut held = state.telegram.lock().unwrap_or_else(|p| p.into_inner());
+    held.take().filter(|p| p.started.elapsed() < PENDING_FOR)
+}
+
+fn put_back(state: &crate::AppState, pending: PendingTelegram) {
+    *state.telegram.lock().unwrap_or_else(|p| p.into_inner()) = Some(pending);
+}
+
+const START_AGAIN: &str = "That sign-in has ended. Start again: I'll ask Telegram for a new code.";
+
+/// Whether the Telegram app registration is kept, and its id.
+#[tauri::command]
+pub fn telegram_app(state: State<'_, SharedState>) -> TelegramApp {
+    let app = saved_app(&state);
+    TelegramApp { saved: app.is_some(), api_id: app.map(|a| a.api_id) }
+}
+
+/// Ask Telegram to send a sign-in code to `phone`, with the app registration
+/// given (kept once Telegram has taken it) or the one kept before.
+#[tauri::command]
+pub async fn start_telegram_sign_in(
+    state: State<'_, SharedState>,
+    api_id: Option<String>,
+    api_hash: Option<String>,
+    phone: String,
+) -> CommandResult<TelegramStep> {
+    crate::commands::sources::refuse_without_identity(&state)?;
+    let given = match (api_id.as_deref().map(str::trim), api_hash.as_deref().map(str::trim)) {
+        (Some(id), Some(hash)) if !id.is_empty() || !hash.is_empty() => {
+            Some(AppCredentials::checked(id, hash).map_err(|why| CommandError::new("invalid", why))?)
+        }
+        _ => None,
+    };
+    let Some(app) = given.clone().or_else(|| saved_app(&state)) else {
+        return Err(CommandError::new(
+            "app",
+            "First give me the App api_id and App api_hash from my.telegram.org → API development tools.",
+        ));
+    };
+    let phone = phone.trim().to_string();
+    if phone.chars().filter(char::is_ascii_digit).count() < 6 {
+        return Err(CommandError::new("invalid", "Your phone number, with its country code, like +1 808 555 0123."));
+    }
+    // One sign-in at a time: an earlier one is closed.
+    if let Some(earlier) = take_pending(&state) {
+        earlier.live.close().await;
+    }
+    let live = Live::start(&app, Arc::new(KeptSession::default()));
+    match live.request_code(&phone, &app.api_hash).await {
+        Ok(login) => {
+            // Telegram took the registration: it is kept for next time.
+            if given.is_some() {
+                let raw = serde_json::to_string(&app).map_err(|e| CommandError::new("internal", e.to_string()))?;
+                state
+                    .secrets
+                    .set(telegram::APP_KEY, &raw)
+                    .map_err(|e| CommandError::new("secrets", format!("I couldn't keep the app's id and hash: {e}")))?;
+            }
+            put_back(&state, PendingTelegram { live, login, password: None, started: Instant::now() });
+            Ok(TelegramStep::code())
+        }
+        Err(e) => {
+            live.close().await;
+            Err(telegram_error(e))
+        }
+    }
+}
+
+/// Sign in with the code Telegram sent.
+#[tauri::command]
+pub async fn telegram_sign_in_code(state: State<'_, SharedState>, code: String) -> CommandResult<TelegramStep> {
+    let pending = take_pending(&state).ok_or_else(|| CommandError::new("ended", START_AGAIN))?;
+    match pending.live.sign_in(&pending.login, &code).await {
+        Ok(Step::Done(me)) => finish(state.inner(), pending, me).await,
+        Ok(Step::Password { token, hint, wrong }) => {
+            put_back(&state, PendingTelegram { password: Some(token), ..pending });
+            Ok(TelegramStep::password(hint, wrong))
+        }
+        // Another try at the code, with the same sign-in.
+        Err(TelegramError::BadCode) => {
+            put_back(&state, pending);
+            Err(telegram_error(TelegramError::BadCode))
+        }
+        Err(e) => {
+            pending.live.close().await;
+            Err(telegram_error(e))
+        }
+    }
+}
+
+/// Sign in with the account's password. It is handed to Telegram's check
+/// and kept nowhere, not even in memory once this returns.
+#[tauri::command]
+pub async fn telegram_sign_in_password(state: State<'_, SharedState>, password: String) -> CommandResult<TelegramStep> {
+    let mut pending = take_pending(&state).ok_or_else(|| CommandError::new("ended", START_AGAIN))?;
+    let Some(token) = pending.password.take() else {
+        put_back(&state, pending);
+        return Err(CommandError::new("ended", "Telegram hasn't asked for a password. Give it the code first."));
+    };
+    match pending.live.check_password(token, &password).await {
+        Ok(Step::Done(me)) => finish(state.inner(), pending, me).await,
+        Ok(Step::Password { token, hint, .. }) => {
+            put_back(&state, PendingTelegram { password: Some(token), ..pending });
+            Ok(TelegramStep::password(hint, true))
+        }
+        Err(e) => {
+            pending.live.close().await;
+            Err(telegram_error(e))
+        }
+    }
+}
+
+/// Stop a sign-in under way.
+#[tauri::command]
+pub async fn cancel_telegram_sign_in(state: State<'_, SharedState>) -> CommandResult<()> {
+    if let Some(pending) = take_pending(&state) {
+        pending.live.close().await;
+    }
+    Ok(())
+}
+
+fn check_soon(state: &crate::AppState, source_id: &str) -> CommandResult<()> {
+    let queued = state.db.list_jobs(500, true)?.into_iter().any(|j| {
+        j.kind == telegram::JOB_KIND && j.status == "queued" && j.payload["sourceId"].as_str() == Some(source_id)
+    });
+    if !queued {
+        state.jobs.enqueue(telegram::JOB_KIND, json!({ "sourceId": source_id }))?;
+    }
+    Ok(())
+}
+
+/// Signed in as `me`: keep the session — for the account already connected
+/// as them (signing in again), or a new one, which becomes the user's — and
+/// start a check.
+async fn finish(state: &SharedState, pending: PendingTelegram, me: Me) -> CommandResult<TelegramStep> {
+    let kept = pending.live.session().to_kept().map_err(|e| CommandError::new("internal", e.to_string()));
+    pending.live.close().await;
+    let kept = kept?;
+    if let Some(source_id) = telegram::connected_as(&state.db, me.id)? {
+        state
+            .secrets
+            .set(&telegram::secret_key(&source_id), &kept)
+            .map_err(|e| CommandError::new("secrets", format!("I couldn't keep the sign-in: {e}")))?;
+        state.db.set_source_status(&source_id, "ready", None)?;
+        check_soon(state, &source_id)?;
+        let source = state
+            .db
+            .get_source(&source_id)?
+            .ok_or_else(|| CommandError::new("not_found", "That account isn't connected any more."))?;
+        return Ok(TelegramStep::done(source));
+    }
+    // Signed in as them, so whoever it is, is them.
+    state.db.add_user_identifier(IdentifierKind::AccountId, &telegram::account_id(me.id))?;
+    crate::commands::people::reconcile_identity(&state.db, &state.jobs, "connect_telegram");
+    let new = telegram::new_source(&me).map_err(|e| CommandError::new("internal", e.to_string()))?;
+    let source = state.db.create_source(&new)?;
+    if let Err(e) = state.secrets.set(&telegram::secret_key(&source.id), &kept) {
+        // Without it the account can never be read; nothing is left behind
+        // that looks connected and isn't.
+        let _ = state.db.delete_source_and_contents(&source.id);
+        return Err(CommandError::new("secrets", format!("I couldn't keep the sign-in: {e}")));
+    }
+    state.db.set_source_status(&source.id, "ready", None)?;
+    check_soon(state, &source.id)?;
+    Ok(TelegramStep::done(state.db.get_source(&source.id)?.unwrap_or(source)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_a_telegram_sign_in_shows_matches_its_fixture() {
+        let app = TelegramApp { saved: true, api_id: Some(1234567) };
+        crate::fixtures::check_fixture("telegram_app.json", &serde_json::to_value(&app).unwrap());
+        let step = TelegramStep::password(Some("the usual".into()), true);
+        let json = serde_json::to_value(&step).unwrap();
+        assert!(json.to_string().contains("\"wrong\":true"), "{json}");
+        crate::fixtures::check_fixture("telegram_step.json", &json);
+    }
+
+    #[test]
+    fn a_wrong_code_says_so_in_its_own_words() {
+        assert_eq!(telegram_error(TelegramError::BadCode).code, "bad_code");
+        assert_eq!(telegram_error(TelegramError::App("API_ID_INVALID".into())).code, "app");
+        assert_eq!(telegram_error(TelegramError::NoAccount).code, "telegram");
+    }
+}

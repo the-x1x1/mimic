@@ -41,6 +41,9 @@ import {
   MailSignIns,
   SignInSetup,
   MailboxFolders,
+  TelegramApp,
+  TelegramStep,
+  telegramAccount,
   EncoderView,
   VoiceOverview,
   Dashboard,
@@ -128,6 +131,21 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
   it("parses which providers this copy can sign in to a mailbox with", () => {
     const view = MailSignIns.parse(read(contractFixture("mail_sign_ins.json")));
     expect(view).toEqual({ microsoft: false, google: true });
+  });
+
+  it("parses a Telegram sign-in, never with the app's hash", () => {
+    const app = TelegramApp.parse(read(contractFixture("telegram_app.json")));
+    expect(app).toEqual({ saved: true, apiId: 1234567 });
+    expect(JSON.stringify(app)).not.toMatch(/hash/i);
+    const step = TelegramStep.parse(read(contractFixture("telegram_step.json")));
+    expect(step).toEqual({ step: "password", hint: "the usual", wrong: true, source: null });
+    expect(
+      telegramAccount({
+        connector: "telegram_account",
+        config: { userId: 7, name: "C Haynes", username: "c", marks: {}, lastCheckedAt: null },
+      }),
+    ).toEqual({ name: "C Haynes", username: "c", lastCheckedAt: null });
+    expect(telegramAccount({ connector: "telegram", config: {} })).toBeNull();
   });
 
   it("parses the other folders a mailbox may be read in", () => {

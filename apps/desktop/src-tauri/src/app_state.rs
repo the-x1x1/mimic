@@ -37,6 +37,9 @@ pub struct AppState {
     pub teams_access: Arc<mimic_core::sources::teams::Access>,
     /// A mailbox sign-in waiting on the browser.
     pub sign_in: MailSignIn,
+    /// A Telegram sign-in waiting on the code, or the password
+    /// (0.10.0-alpha.74): the connection that asked, held in memory only.
+    pub telegram: std::sync::Mutex<Option<crate::commands::telegram::PendingTelegram>>,
     /// A look at the replies Mimic sends by itself is running: one at a time.
     pub replying: AtomicBool,
     /// Mailboxes watched for mail as it arrives (`watching`).

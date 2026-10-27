@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.74] — 2026-10-26
+
+Telegram, as it happens.
+
+### Added
+
+- **Connect Telegram.** Under Your mail, **Connect Telegram** signs in to your Telegram account: you register an app at my.telegram.org once (two minutes; I show you how), then give your phone number, the code Telegram sends you and, if your account has one, its password — which goes to Telegram and nowhere else. I read your one-to-one chats and private groups, not channels, bots or public groups, and check them as often as your mail. A chat you exported before and imported joins up with what I read, each message once. Reading changes nothing in Telegram.
+
 ## [0.10.0-alpha.73] — 2026-10-26
 
 Other folders.

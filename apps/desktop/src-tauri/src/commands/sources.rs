@@ -107,6 +107,11 @@ pub async fn start_source_import(
     if source.connector == mimic_core::sources::teams::CONNECTOR {
         return Ok(state.jobs.enqueue(mimic_core::sources::teams::JOB_KIND, json!({ "sourceId": source_id }))?);
     }
+    if source.connector == mimic_core::sources::telegram_account::CONNECTOR {
+        return Ok(state
+            .jobs
+            .enqueue(mimic_core::sources::telegram_account::JOB_KIND, json!({ "sourceId": source_id }))?);
+    }
     Ok(state.jobs.enqueue(mimic_core::import::JOB_KIND, json!({ "sourceId": source_id }))?)
 }
 
@@ -538,10 +543,13 @@ pub async fn delete_source(
     crate::commands::voice::stop_measuring(&state);
     let connector = state.db.get_source(&source_id)?.map(|s| s.connector);
     let report = state.db.delete_source_and_contents(&source_id)?;
-    // A workspace's token, or a Teams sign-in, goes with it.
+    // A workspace's token, a Teams sign-in, or a Telegram session goes with it.
     let key = match connector.as_deref() {
         Some(mimic_core::sources::slack::CONNECTOR) => Some(mimic_core::sources::slack::secret_key(&source_id)),
         Some(mimic_core::sources::teams::CONNECTOR) => Some(mimic_core::sources::teams::secret_key(&source_id)),
+        Some(mimic_core::sources::telegram_account::CONNECTOR) => {
+            Some(mimic_core::sources::telegram_account::secret_key(&source_id))
+        }
         _ => None,
     };
     if let Some(key) = key {

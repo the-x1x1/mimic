@@ -30,6 +30,8 @@ rustls.workspace = true
 webpki-roots.workspace = true
 zip.workspace = true
 flate2.workspace = true
+grammers-client.workspace = true
+grammers-session.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

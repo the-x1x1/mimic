@@ -144,6 +144,7 @@ pub(crate) fn queue_check(state: &SharedState, source_id: &str) {
     let kind = match source.map(|s| s.connector).as_deref() {
         Some(mimic_core::sources::slack::CONNECTOR) => mimic_core::sources::slack::JOB_KIND,
         Some(mimic_core::sources::teams::CONNECTOR) => mimic_core::sources::teams::JOB_KIND,
+        Some(mimic_core::sources::telegram_account::CONNECTOR) => mimic_core::sources::telegram_account::JOB_KIND,
         _ => mimic_core::sources::imap::JOB_KIND,
     };
     let queued = state.db.list_jobs(500, true).map(|jobs| {

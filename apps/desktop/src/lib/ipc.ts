@@ -52,6 +52,8 @@ import {
   AutoReplyState,
   MailboxSending,
   MailboxFolders,
+  TelegramApp,
+  TelegramStep,
   MailExchangers,
   MailSignIns,
   SignInSetup,
@@ -264,6 +266,20 @@ export const ipc = {
    * `cancelMailSignIn`.
    */
   connectTeams: () => call("connect_teams", Source),
+  /** Whether the Telegram app registration is kept, and its id (0.10.0-alpha.74). */
+  telegramApp: () => call("telegram_app", TelegramApp),
+  /**
+   * Ask Telegram to send a sign-in code to `phone`, with the app
+   * registration given (kept once Telegram takes it) or the one kept.
+   */
+  startTelegramSignIn: (phone: string, apiId: string | null, apiHash: string | null) =>
+    call("start_telegram_sign_in", TelegramStep, { phone, apiId, apiHash }),
+  /** Sign in with the code Telegram sent. */
+  telegramSignInCode: (code: string) => call("telegram_sign_in_code", TelegramStep, { code }),
+  /** Sign in with the account's password, which goes to Telegram only. */
+  telegramSignInPassword: (password: string) =>
+    call("telegram_sign_in_password", TelegramStep, { password }),
+  cancelTelegramSignIn: () => call("cancel_telegram_sign_in", z_void),
   /** Sign a connected Teams account in again, as the same account. */
   signInTeamsAgain: (sourceId: string) => call("sign_in_teams_again", Source, { sourceId }),
   /** Try a Slack workspace as a check would, sending nothing: what was found. */

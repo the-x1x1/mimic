@@ -264,6 +264,48 @@ export function teamsAccount(source: {
     : null;
 }
 
+/** A connected Telegram account, from its stored settings (0.10.0-alpha.74). */
+export function telegramAccount(source: {
+  connector: string;
+  config: Record<string, unknown>;
+}): { name: string; username: string | null; lastCheckedAt: string | null } | null {
+  if (source.connector !== "telegram_account") return null;
+  const parsed = z
+    .object({
+      name: z.string(),
+      username: z.string().nullable().optional(),
+      lastCheckedAt: z.string().nullable().optional(),
+    })
+    .safeParse(source.config);
+  return parsed.success
+    ? {
+        name: parsed.data.name,
+        username: parsed.data.username ?? null,
+        lastCheckedAt: parsed.data.lastCheckedAt ?? null,
+      }
+    : null;
+}
+
+/** Whether the user's Telegram app registration is kept, and its id; never its hash. */
+export const TelegramApp = z.object({
+  saved: z.boolean(),
+  apiId: z.number().nullable(),
+});
+export type TelegramApp = z.infer<typeof TelegramApp>;
+
+/**
+ * Where a Telegram sign-in stands (0.10.0-alpha.74): a code was sent, the
+ * account's password is wanted (its hint, and whether the last try was
+ * wrong), or it is done, with the account's source.
+ */
+export const TelegramStep = z.object({
+  step: z.enum(["code", "password", "done"]),
+  hint: z.string().nullable(),
+  wrong: z.boolean(),
+  source: Source.nullable(),
+});
+export type TelegramStep = z.infer<typeof TelegramStep>;
+
 /**
  * What a Slack app made for Mimic asks for, as a manifest to paste into
  * "Create New App → From a manifest": user scopes only, no bot, and a token
