@@ -121,6 +121,8 @@ What comes back is kept without what a model wrapped around it (`generation::tid
 
 ### In words: a reading of the numbers
 
+Run for real (0.10.0-alpha.86, `tests/live_model.rs`, job 312), qwen3:14b read the sample's lowercase, contraction-heavy writer as "very casual, concise"; llama3.2:3b read the same layer as "formal and highly polished", against its own numbers. A reading is therefore only ever shown as one, beside the numbers it was written from.
+
 A sentence such as "short and warm, lowercase, signs off with thanks" carries register better than twelve rates, and turning numbers into that sentence is the one thing here a model does better than arithmetic. So, when the user asks (How you write → In words; `voice::describe`), the model they chose is given each measurable layer's numbers — **only the numbers**, and the greetings and sign-offs from Mimic's own short lists; never a message, a phrase the user wrote, or who a layer is about (`describe::numbers`) — and asked for two or three plain sentences about register, saying nothing the numbers do not support. Up to 24 layers a run, the layer over everything first.
 
 The reading is kept with the profile (`qualitative_json.description`), with the provider and model that wrote it and a digest of the numbers it was written from. Measuring again keeps it. It is shown under the layer's numbers as the model's reading, never in place of them; one written from numbers that have since changed is shown as that. A draft is given the reading of the innermost measurable layer only while it is of that layer's numbers as they are now — never an outer layer's reading, which describes other numbers — and its evidence says so.
