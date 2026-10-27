@@ -2,6 +2,22 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.77] — 2026-10-26
+
+Telegram, tightened.
+
+### Fixed
+
+- **A reply that may have gone is never sent twice.** If the connection drops just as Telegram takes a reply, I no longer ask again, and Telegram's "I have that one already" or its own timeout now reads as "it may have gone" — never as a refusal that lets it be sent again.
+- **A busy chat is read through.** When more than 2,000 messages came into a chat since I last looked, I read on from where I stopped on the next check, instead of skipping the newest.
+- **You answered in another way.** A call, a GIF sent through a bot, a photo — anything you did in the chat after their message — stops a reply I'm holding there.
+- **Two Telegram accounts stay apart.** Each account numbers its messages its own way, so your chats with the same person from two accounts (or an export of another account) are no longer merged, and no message is dropped as a copy of a different one.
+- **One slow answer doesn't lose a check.** If Telegram slows me down or the connection drops partway, what I'd read is kept and the rest is read next time. I read up to 200 chats with something new per check, and say so when there were more; chats with nothing new don't count.
+- **Stopping a sign-in stops it.** Cancel while Telegram is checking your code or password, and the account isn't connected — and if Telegram had already let me in, I sign that session out again.
+- **A wrong password can be tried again.** After a wrong password I ask Telegram afresh for what the next try is checked against.
+- **A newer sign-in isn't written over.** Each use of a Telegram session keeps what changed only if no newer session was kept meanwhile, and never one Telegram has signed out. A signed-out session stops a held reply at once, saying to sign in again.
+- **Telegram's own account isn't a conversation.** Login codes and security notices from Telegram itself are left alone.
+
 ## [0.10.0-alpha.76] — 2026-10-26
 
 Replying by myself in Telegram.

@@ -110,9 +110,8 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
         // Each Telegram account through its own session (0.10.0-alpha.76),
         // kept again and closed once the reply is done with it.
         let telegram = |source_id: &str| -> Option<Box<dyn mimic_core::sources::telegram_account::TelegramPost>> {
-            let (app, session) = crate::commands::telegram::session_for(&shared, source_id)?;
-            let post =
-                crate::commands::telegram::KeptPost::start(handle.clone(), shared.clone(), source_id, &app, session);
+            let account = crate::commands::telegram::session_for(&shared, source_id)?;
+            let post = crate::commands::telegram::KeptPost::start(handle.clone(), shared.clone(), source_id, account);
             Some(Box::new(post))
         };
         autoreply::tick_every_now(&db, &credentials, &slack, &teams, &telegram)

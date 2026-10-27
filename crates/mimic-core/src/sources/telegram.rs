@@ -308,6 +308,10 @@ impl CommunicationSource for TelegramSource {
         sink: &mut dyn FnMut(DiscoveredConversation) -> SourceResult<()>,
     ) -> SourceResult<()> {
         let export = read_export(location)?;
+        // Whose account it is, when the export says: a chat's messages are
+        // numbered per account (`import::account_of`, 0.10.0-alpha.77).
+        let account =
+            export.owner.as_ref().map(|(id, _, _)| serde_json::json!({ "telegramAccount": format!("telegram:{id}") }));
         for chat in export.chats {
             if chat.messages.is_empty() {
                 continue;
@@ -322,7 +326,7 @@ impl CommunicationSource for TelegramSource {
                     author: author(&m.from_id, &m.from, export.owner.as_ref()),
                     sent_at: m.sent_at,
                     body: m.body,
-                    metadata: Value::Null,
+                    metadata: account.clone().unwrap_or(Value::Null),
                 })
                 .collect();
             // In the order they were sent, ids breaking ties.

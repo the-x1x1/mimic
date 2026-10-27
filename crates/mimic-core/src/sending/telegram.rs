@@ -142,6 +142,8 @@ pub(crate) fn still_theirs(telegram: &dyn TelegramPost, config: &TelegramSourceC
     match telegram.me() {
         Ok(me) if me.id == config.user_id => Ok(()),
         Ok(_) => Err(SendError::Cannot(NOT_THE_ACCOUNT.into())),
+        // Signed out: no wait makes it go (0.10.0-alpha.77).
+        Err(e @ TelegramError::SignIn(_)) => Err(SendError::Cannot(e.to_string())),
         Err(e) => Err(SendError::Service(e.to_string())),
     }
 }
@@ -205,10 +207,9 @@ fn message_number(incoming: &Message) -> Option<i32> {
     i32::try_from(id).ok()
 }
 
-/// What people said in a chat after `incoming`, asked just before a reply
+/// What was said in a chat after `incoming`, asked just before a reply
 /// goes by itself (0.10.0-alpha.76): `Ok(Err(why))` when Telegram refused
 /// to say, as it would again; `Err(why)` for a failure that may pass.
-/// Telegram's own lines and bots aren't anyone saying anything.
 pub(crate) fn said_since(
     telegram: &dyn TelegramPost,
     chat: &ChatRef,
@@ -219,16 +220,16 @@ pub(crate) fn said_since(
         return Ok(Err("I don't know which message this answers in Telegram".into()));
     };
     match telegram.after(chat, after) {
-        Ok(said) => {
-            let people: Vec<_> = said.iter().filter(|m| !m.notice && !m.bot).collect();
-            Ok(Ok(if people.iter().any(|m| m.outgoing) {
-                Since::You
-            } else if people.is_empty() {
-                Since::Nothing
-            } else {
-                Since::Them
-            }))
-        }
+        // Anything the user did there since answers it: a call, a GIF
+        // through a bot, a photo (0.10.0-alpha.77). Of the others, Telegram's
+        // own lines and bots aren't anyone saying anything.
+        Ok(said) => Ok(Ok(if said.iter().any(|m| m.outgoing) {
+            Since::You
+        } else if said.iter().all(|m| m.notice || m.bot) {
+            Since::Nothing
+        } else {
+            Since::Them
+        })),
         Err(e @ (TelegramError::Network(_) | TelegramError::RateLimited)) => Err(e.to_string()),
         Err(e) => Ok(Err(e.to_string())),
     }
@@ -252,6 +253,7 @@ pub(crate) fn record_in_conversation(
         "telegramChat": chat.id.to_string(),
         "telegramDirect": incoming.metadata.get("telegramDirect").cloned().unwrap_or(Value::Bool(chat.kind == "user")),
         "telegramKind": chat.kind,
+        "telegramAccount": account_id(config.user_id),
         "attachments": false,
     });
     if let Some(id) = sent.message_id.rsplit(':').next().and_then(|id| id.parse::<i64>().ok()) {
@@ -508,6 +510,47 @@ mod tests {
         assert!(err.to_string().contains("isn't the account you connected"), "{err}");
         assert!(w.db.recent_outgoing(5).unwrap().is_empty(), "nothing recorded");
         assert_eq!(w.telegram.said_in(4242).len(), 1, "nothing posted");
+    }
+
+    #[test]
+    fn anything_the_user_did_in_the_chat_since_answers_it() {
+        let w = world();
+        let incoming = answered(&w.db, &w.draft).unwrap().unwrap();
+        let chat = ChatRef::of(&incoming.metadata).unwrap();
+        let said = |extra: Said| {
+            let t = fake::Telegram::new(me(), vec![(4242, vec![ada_said(1, 0, "lunch on thursday?"), extra])]);
+            said_since(&t, &chat, &incoming).unwrap().unwrap()
+        };
+        use crate::sending::slack::Since;
+        // A call, or a GIF through a bot: the user answered.
+        let call = Said { id: 2, notice: true, outgoing: true, ..Default::default() };
+        assert!(matches!(said(call), Since::You));
+        let gif = Said { id: 2, bot: true, outgoing: true, text: "".into(), ..Default::default() };
+        assert!(matches!(said(gif), Since::You));
+        // Telegram's own line, or a bot of theirs: nobody said anything.
+        let pinned = Said { id: 2, notice: true, ..Default::default() };
+        assert!(matches!(said(pinned), Since::Nothing));
+        assert!(matches!(said(ada_said(2, 1, "or friday")), Since::Them));
+    }
+
+    #[test]
+    fn a_signed_out_session_says_so_and_sends_nothing() {
+        struct SignedOut;
+        impl TelegramPost for SignedOut {
+            fn me(&self) -> Result<Me, TelegramError> {
+                Err(TelegramError::SignIn("AUTH_KEY_UNREGISTERED".into()))
+            }
+            fn post(&self, _: &ChatRef, _: &str) -> Result<(i32, i64), PostError> {
+                panic!("nothing is posted")
+            }
+            fn after(&self, _: &ChatRef, _: i32) -> Result<Vec<Said>, TelegramError> {
+                panic!("nothing is asked")
+            }
+        }
+        let w = world();
+        let err = send_reply(&w.db, &SignedOut, &request(&w, "yes")).unwrap_err();
+        assert!(matches!(&err, SendError::Cannot(why) if why.contains("sign in again")), "{err:?}");
+        assert!(w.db.recent_outgoing(5).unwrap().is_empty());
     }
 
     #[test]
