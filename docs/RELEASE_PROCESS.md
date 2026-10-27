@@ -37,7 +37,7 @@ Registering, once, in the Microsoft Entra admin center (entra.microsoft.com, sig
 1. **App registrations → New registration.** Name: `Mimic`. Supported account types: _Accounts in any organizational directory and personal Microsoft accounts_ (both Outlook.com and Microsoft 365).
 2. **Redirect URI:** platform _Public client/native (mobile & desktop)_, value `http://localhost`. Microsoft accepts any port on `localhost` for this platform, which the sign-in needs (it listens on a port the system picks). Registered under _Web_ instead, the token exchange fails asking for a client secret.
 3. **Register**, and copy the _Application (client) ID_.
-4. **API permissions → Add a permission → Microsoft Graph → Delegated:** `IMAP.AccessAsUser.All`, `SMTP.Send` and `offline_access`. Mimic asks for them at sign-in either way (`SMTP.Send` since 0.10.0-alpha.23, to send replies); listing them lets an organisation's admin approve Mimic ahead of time. A work or school mailbox also needs its admin to allow authenticated SMTP for it (Exchange's `SmtpClientAuthenticationDisabled` off) before replies can be sent from it; reading is not affected.
+4. **API permissions → Add a permission → Microsoft Graph → Delegated:** `IMAP.AccessAsUser.All`, `SMTP.Send` and `offline_access`; for Teams (0.10.0-alpha.67) also `Chat.Read`, `ChatMessage.Send` and `User.Read`. Mimic asks for them at sign-in either way (`SMTP.Send` since 0.10.0-alpha.23, to send replies); listing them lets an organisation's admin approve Mimic ahead of time. A work or school mailbox also needs its admin to allow authenticated SMTP for it (Exchange's `SmtpClientAuthenticationDisabled` off) before replies can be sent from it; reading is not affected.
 5. Set the variable: `gh variable set MIMIC_MICROSOFT_CLIENT_ID --repo the-x1x1/mimic --body <client id>`.
 
 For a local build, set `MIMIC_MICROSOFT_CLIENT_ID` in the environment before `pnpm tauri dev` or `.\scripts\build.ps1`; cargo rebuilds when it changes.
@@ -54,14 +54,20 @@ Registering, once, in the Google Cloud console (console.cloud.google.com, signed
 
 1. **Create a project** named `Mimic`.
 2. **APIs & Services → Library → Gmail API → Enable.** IMAP and SMTP don't use the API, but its scope, `https://mail.google.com/`, is listed only once it is enabled.
-3. **Google Auth Platform → Branding** (the OAuth consent screen): app name `Mimic`, a support email; **Audience:** _External_. **Data Access → Add scopes:** `https://mail.google.com/`.
-4. **Audience → Publishing status.** In _Testing_, only the test users listed there can sign in, and Google lets their sign-ins lapse after seven days — Mimic would ask every week. _In production_ without Google's verification, anyone can sign in after a warning that Google hasn't verified the app (up to 100 people), and sign-ins last. For the owner's own use, publish it; verification of a restricted scope (a security assessment) is only worth it for wide distribution.
+3. **Google Auth Platform → Branding** (the OAuth consent screen): app name `Mimic`, a support email; **Audience:** _External_ — or, for a project made inside a Google Workspace organisation whose people are the only ones signing in, _Internal_, which needs no verification and never lapses, but lets no personal Gmail sign in. **Data Access → Add scopes:** `https://mail.google.com/`; for Google Chat (0.10.0-alpha.79) also `openid`, `email`, `profile`, `https://www.googleapis.com/auth/chat.spaces.readonly`, `https://www.googleapis.com/auth/chat.messages.readonly`, `https://www.googleapis.com/auth/chat.messages.create` and `https://www.googleapis.com/auth/chat.memberships.readonly`.
+4. **Audience → Publishing status** (External only). In _Testing_, only the test users listed there can sign in, and Google lets their sign-ins lapse after seven days — Mimic would ask every week. _In production_ without Google's verification, anyone can sign in after a warning that Google hasn't verified the app (up to 100 people), and sign-ins last. For the owner's own use, publish it; verification of a restricted scope (a security assessment) is only worth it for wide distribution.
 5. **Clients → Create client:** application type _Desktop app_, name `Mimic`. Copy the client id and the client secret. A desktop client takes the browser back to `http://127.0.0.1` on any port, which the sign-in needs; nothing else is registered.
 6. Set them: `gh variable set MIMIC_GOOGLE_CLIENT_ID --repo the-x1x1/mimic --body <client id>` and `gh secret set MIMIC_GOOGLE_CLIENT_SECRET --repo the-x1x1/mimic --body <client secret>`.
 
 For a local build, set both in the environment before `pnpm tauri dev` or `.\scripts\build.ps1`. Or, since 0.10.0-alpha.59, paste both into Settings → **Signing in with Microsoft and Google**, as for Microsoft; the secret is kept in the secret store and never shown again.
 
 Google Workspace admins can block apps that aren't on their list (Security → API controls); a Workspace user then sees that from Google when signing in, and an app password, if the admin allows those, still works.
+
+For Google Chat (0.10.0-alpha.79), in the same project, once:
+
+1. **APIs & Services → Library → Google Chat API → Enable.**
+2. **Google Chat API → Configuration:** an app name (`Mimic` — Google shows it beside every reply sent through it), an avatar URL, a description; **Interactive features** off. Without it every Chat API call answers 404 "Google Chat app not found", which Mimic says how to mend.
+3. The scopes in step 3 above. Only a Google Workspace account's Chat can be read; a personal Gmail has no Chat API. Signing in for Chat is its own sign-in under the same client: it doesn't change a mailbox's.
 
 ## Manual release checklist (spec §27.5)
 

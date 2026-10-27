@@ -1,4 +1,4 @@
-# Project status — 0.10.0-alpha.81
+# Project status — 0.10.0-alpha.82
 
 The truth table. Every row has a status and evidence naming the test, fixture or check that proves it. If this file and the code disagree, the code is right and this file is a bug.
 
