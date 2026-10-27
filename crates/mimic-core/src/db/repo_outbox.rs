@@ -109,6 +109,35 @@ pub struct OutboxEntry {
     pub created_at: String,
     pub updated_at: String,
     pub sent_at: Option<String>,
+    /// How it went, when not the usual way: `graph`, through Microsoft
+    /// Graph, for a Microsoft 365 mailbox whose organisation turned off
+    /// sending by SMTP (0.10.0-alpha.94).
+    #[serde(default)]
+    pub via: Option<String>,
+}
+
+/// A reply handed to Microsoft Graph whose copy in the Sent folder hasn't
+/// been read back yet (`Db::own_sends_unread`, 0.10.0-alpha.94).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentUnread {
+    pub id: String,
+    /// The `Message-ID` it was written with, which Exchange may or may not
+    /// have kept.
+    pub message_id: String,
+    /// Sent by itself (Trusted mode).
+    pub autonomous: bool,
+    /// Its words as kept in its conversation when it went; `None` while it
+    /// isn't known to have gone (`sending`, `unsure`), when its copy read
+    /// back is the only one.
+    pub kept_words: Option<String>,
+    /// Its words as sent, signature and all.
+    pub body: String,
+    /// The `Message-ID` of the message it answers: its copy says so.
+    pub answers: Option<String>,
+    /// When the message it answers was sent: its copy comes after it.
+    pub since: String,
+    /// When it went, or was last tried.
+    pub sent_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -138,7 +167,7 @@ pub struct InDoubt {
     pub since: String,
 }
 
-const COLS: &str = "id, draft_id, source_id, conversation_id, answers_message_id, participant_id, from_address, to_json, cc_json, subject, body, message_id, how, status, send_after, error, created_at, updated_at, sent_at";
+const COLS: &str = "id, draft_id, source_id, conversation_id, answers_message_id, participant_id, from_address, to_json, cc_json, subject, body, message_id, how, status, send_after, error, created_at, updated_at, sent_at, via";
 
 fn list(raw: String) -> Vec<String> {
     serde_json::from_str(&raw).unwrap_or_default()
@@ -165,6 +194,7 @@ fn map(r: &Row<'_>) -> rusqlite::Result<OutboxEntry> {
         created_at: r.get(16)?,
         updated_at: r.get(17)?,
         sent_at: r.get(18)?,
+        via: r.get(19)?,
     })
 }
 
@@ -216,7 +246,7 @@ impl Db {
                     "INSERT INTO outbox({COLS})
                      VALUES (?1,?2,?3,?4,?5,
                              (SELECT id FROM participants WHERE id = ?6),
-                             ?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?16,NULL)"
+                             ?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?16,NULL,NULL)"
                 ),
                 params![
                     id,
@@ -263,6 +293,76 @@ impl Db {
              WHERE id = ?1 AND status = 'sending'",
             params![id, now],
         )?;
+        Ok(())
+    }
+
+    /// It is being handed over another way than the usual (`via`: `graph`,
+    /// 0.10.0-alpha.94), said before it goes so a reply whose answer is lost
+    /// is still known to have gone that way.
+    pub fn outgoing_via(&self, id: &str, via: &str) -> DbResult<()> {
+        self.conn().execute(
+            "UPDATE outbox SET via = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'sending'",
+            params![id, via, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Replies into `conversation` handed to Microsoft Graph whose copy in
+    /// the Sent folder hasn't been read back (0.10.0-alpha.94): Graph doesn't
+    /// say which Message-ID Exchange gave it, so the importer knows its copy
+    /// by its own id, or else by its words (`import`) — not kept twice when
+    /// it was kept as it went, and Mimic's own, not the user's writing,
+    /// when it went by itself.
+    pub fn own_sends_unread(&self, conversation: &str) -> DbResult<Vec<SentUnread>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT o.id, o.message_id, o.how, o.status, o.body,
+                    (SELECT r.body FROM messages r WHERE r.source_id = o.source_id AND r.external_id = o.message_id
+                     LIMIT 1),
+                    m.external_id, COALESCE(m.sent_at, o.created_at), COALESCE(o.sent_at, o.updated_at)
+             FROM outbox o LEFT JOIN messages m ON m.id = o.answers_message_id
+             WHERE o.via = 'graph' AND o.status IN ('sending','sent','unsure') AND o.read_back IS NULL
+               AND o.conversation_id = ?1
+             ORDER BY o.created_at",
+        )?;
+        let rows = stmt.query_map([conversation], |r| {
+            let status: String = r.get(3)?;
+            let kept: Option<String> = r.get(5)?;
+            Ok(SentUnread {
+                id: r.get(0)?,
+                message_id: r.get(1)?,
+                autonomous: r.get::<_, String>(2)? == "autonomous",
+                // Kept as it went only once it went.
+                kept_words: kept.filter(|_| status == "sent"),
+                body: r.get(4)?,
+                answers: r.get(6)?,
+                since: r.get(7)?,
+                sent_at: r.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Which of these Message-IDs are of replies Mimic wrote, sent or not:
+    /// its own copy of one, recorded as it went, is never taken for another
+    /// one's copy read back (0.10.0-alpha.94).
+    pub fn outbox_message_ids_among(&self, message_ids: &[String]) -> DbResult<std::collections::HashSet<String>> {
+        if message_ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT message_id FROM outbox WHERE message_id IN (SELECT value FROM json_each(?1))")?;
+        let ids = serde_json::to_string(message_ids)?;
+        let rows = stmt.query_map([ids], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Its copy in the Sent folder was read, as `message_id`
+    /// (0.10.0-alpha.94): not looked for again.
+    pub fn outgoing_read_back(&self, id: &str, message_id: &str) -> DbResult<()> {
+        self.conn()
+            .execute("UPDATE outbox SET read_back = ?2 WHERE id = ?1 AND read_back IS NULL", params![id, message_id])?;
         Ok(())
     }
 

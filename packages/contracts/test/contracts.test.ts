@@ -1535,6 +1535,16 @@ describe("what was sent says where it went and whether it got there", () => {
     expect(listAddresses(["a@x.io", "b@x.io", "c@x.io"])).toBe("a@x.io, b@x.io and c@x.io");
   });
 
+  it("says when one went through Microsoft 365 itself", () => {
+    expect(describeOutboxEntry(entry({ via: "graph" }))).toBe(
+      "Sent to ada@example.com, through Microsoft 365.",
+    );
+    expect(describeOutboxEntry(entry({ via: "graph", how: "autonomous" }))).toBe(
+      "I sent this to ada@example.com by myself, through Microsoft 365.",
+    );
+    expect(OutboxEntry.parse({ ...entry(), via: null }).via).toBeNull();
+  });
+
   it("says why one didn't go, and that one waiting can still be stopped", () => {
     expect(
       describeOutboxEntry(entry({ status: "failed", error: "The mail server said no: 550" })),

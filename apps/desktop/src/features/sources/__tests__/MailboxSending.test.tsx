@@ -46,6 +46,20 @@ describe("how a mailbox sends", () => {
     expect(screen.queryByRole("button", { name: "Use the usual server" })).toBeNull();
   });
 
+  it("says replies go through Microsoft 365 itself where SMTP is turned off", async () => {
+    native.mailboxSending.mockResolvedValue({
+      sending: { ...gmail, host: "smtp.office365.com", port: 587, security: "startTls" as const },
+      setByUser: false,
+      keepsSent: true,
+      throughGraph: true,
+    });
+    renderIt();
+    expect(
+      await screen.findByText(/Replies go out through Microsoft 365 itself as me@example.org/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/smtp.office365.com/)).toBeNull();
+  });
+
   it("is set up by hand for a provider it doesn't know, checked before it is kept", async () => {
     native.mailboxSending.mockResolvedValue({ sending: null, setByUser: false, keepsSent: false });
     native.setMailboxSending.mockImplementation(async (_id: string, sending: unknown) => ({

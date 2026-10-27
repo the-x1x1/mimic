@@ -56,9 +56,11 @@ export function MailboxSending({ sourceId, name }: { sourceId: string; name: str
     return (
       <div className="stack gap-1">
         <p className="muted small">
-          {sending
-            ? `Replies go out through ${sending.host} as ${sending.fromAddress}${current.data?.setByUser ? "" : ", this provider's usual server"}${(sending.copyToSent ?? !current.data?.keepsSent) ? ", and I put a copy of each in your Sent folder" : ""}. `
-            : "I can't send replies from this mailbox until you tell me its outgoing server. "}
+          {sending && current.data?.throughGraph
+            ? `Replies go out through Microsoft 365 itself as ${sending.fromAddress}: your organization turned off sending from apps by SMTP, so Microsoft 365 keeps them in Sent Items. `
+            : sending
+              ? `Replies go out through ${sending.host} as ${sending.fromAddress}${current.data?.setByUser ? "" : ", this provider's usual server"}${(sending.copyToSent ?? !current.data?.keepsSent) ? ", and I put a copy of each in your Sent folder" : ""}. `
+              : "I can't send replies from this mailbox until you tell me its outgoing server. "}
           <button type="button" className="linkish" onClick={start}>
             {sending ? "Change" : "Set up sending"}
           </button>

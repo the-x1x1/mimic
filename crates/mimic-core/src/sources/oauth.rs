@@ -76,6 +76,12 @@ pub struct Provider {
     /// Whether the token requests name the scope again: Microsoft's want it,
     /// Google's have no use for it.
     pub scope_in_token_requests: bool,
+    /// Another resource's scopes, asked for in the sign-in address so the
+    /// user agrees to them once, but not in token requests, which name one
+    /// resource: Microsoft's Graph `Mail.Send` (`with_graph_send`), for a
+    /// mailbox whose organisation turned off sending by SMTP, traded for
+    /// with `refresh_for` (0.10.0-alpha.94). Empty otherwise.
+    pub consent_also: &'static str,
     /// Sent with every token request when there is one (Google's): this
     /// build's, or the one the user saved with their own registration
     /// (0.10.0-alpha.59).
@@ -112,8 +118,18 @@ impl Provider {
             redirect_host: "localhost",
             authorize_extra: &[("response_mode", "query")],
             scope_in_token_requests: true,
+            consent_also: "",
             client_secret: None,
         }
+    }
+
+    /// The same, asking as well for sending as the user through Microsoft
+    /// Graph (`GRAPH_SEND`): only for a mailbox whose organisation turned off
+    /// sending by SMTP (`ImapSourceConfig.through_graph`), so no one else is
+    /// asked for a permission they'll never use, nor held up where an admin
+    /// approved only reading and SMTP (0.10.0-alpha.94).
+    pub fn with_graph_send(self) -> Self {
+        Provider { consent_also: GRAPH_SEND, ..self }
     }
 
     /// Gmail and Google Workspace. `https://mail.google.com/` is the only
@@ -132,6 +148,7 @@ impl Provider {
             redirect_host: "127.0.0.1",
             authorize_extra: &[("access_type", "offline"), ("prompt", "consent")],
             scope_in_token_requests: false,
+            consent_also: "",
             client_secret: google_client_secret().map(str::to_string),
         }
     }
@@ -266,6 +283,9 @@ pub fn new_state() -> String {
     base64_url(&bytes)
 }
 
+/// Sending as the user through Microsoft Graph (0.10.0-alpha.94).
+pub const GRAPH_SEND: &str = "https://graph.microsoft.com/Mail.Send";
+
 /// The address the browser is sent to.
 pub fn authorization_url(
     provider: &Provider,
@@ -275,11 +295,16 @@ pub fn authorization_url(
     pkce: &Pkce,
     login_hint: Option<&str>,
 ) -> String {
+    let scope = if provider.consent_also.is_empty() {
+        provider.scope.to_string()
+    } else {
+        format!("{} {}", provider.scope, provider.consent_also)
+    };
     let mut params = vec![
         ("client_id", client_id),
         ("response_type", "code"),
         ("redirect_uri", redirect_uri),
-        ("scope", provider.scope),
+        ("scope", scope.as_str()),
         ("state", state),
         ("code_challenge", pkce.challenge.as_str()),
         ("code_challenge_method", "S256"),
@@ -555,8 +580,29 @@ pub fn refresh(provider: &Provider, client_id: &str, refresh_token: &str) -> Res
     )
 }
 
+/// Trade a refresh token for an access token to another resource the user
+/// agreed to (`Provider.consent_also`): `scope` names it alone, since a
+/// Microsoft token is for one resource (0.10.0-alpha.94). A sign-in from
+/// before the user was asked is `SignInAgain`.
+pub fn refresh_for(
+    provider: &Provider,
+    client_id: &str,
+    refresh_token: &str,
+    scope: &str,
+) -> Result<Tokens, OAuthError> {
+    token_request(
+        provider,
+        vec![
+            ("client_id", client_id),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("scope", scope),
+        ],
+    )
+}
+
 fn token_request<'a>(provider: &'a Provider, mut form: Vec<(&'a str, &'a str)>) -> Result<Tokens, OAuthError> {
-    if provider.scope_in_token_requests {
+    if provider.scope_in_token_requests && !form.iter().any(|&(k, _)| k == "scope") {
         form.push(("scope", provider.scope));
     }
     if let Some(secret) = provider.client_secret.as_deref() {
@@ -808,7 +854,7 @@ mod tests {
         for part in [
             "response_type=code",
             "redirect_uri=http%3A%2F%2Flocalhost%3A4321",
-            "scope=https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All%20https%3A%2F%2Foutlook.office.com%2FSMTP.Send%20offline_access",
+            "scope=https%3A%2F%2Foutlook.office.com%2FIMAP.AccessAsUser.All%20https%3A%2F%2Foutlook.office.com%2FSMTP.Send%20offline_access&",
             "state=st4te",
             "code_challenge_method=S256",
             "login_hint=c%40outlook.com",
@@ -817,6 +863,17 @@ mod tests {
         }
         assert!(url.contains(&format!("code_challenge={}", pkce.challenge)));
         assert!(!url.contains(&pkce.verifier));
+        // Graph's sending, only when asked for (0.10.0-alpha.94).
+        assert!(!url.contains("graph.microsoft.com"));
+        let graph = authorization_url(
+            &Provider::microsoft().with_graph_send(),
+            "client-1",
+            "http://localhost:1",
+            "s",
+            &pkce,
+            None,
+        );
+        assert!(graph.contains("offline_access%20https%3A%2F%2Fgraph.microsoft.com%2FMail.Send&"), "{graph}");
     }
 
     /// What a browser sends back, and what it gets.
@@ -1047,7 +1104,23 @@ mod tests {
         refresh(&provider, "m-1", "rt").unwrap();
         let form = parse_query(&forms.recv().unwrap());
         assert_eq!(form["scope"], Provider::microsoft().scope);
+        assert!(!form["scope"].contains("graph.microsoft.com"), "one resource a token");
         assert!(!form.contains_key("client_secret"), "{form:?}");
+    }
+
+    #[test]
+    fn a_token_for_graph_names_graph_alone_and_an_older_sign_in_is_asked_again() {
+        let (token_url, forms) = fake::token_endpoint(vec![
+            (200, r#"{"access_token":"graph-at","refresh_token":"rt-2","expires_in":3599}"#.into()),
+            (400, r#"{"error":"invalid_grant","error_description":"AADSTS65001: The user or administrator has not consented to use the application."}"#.into()),
+        ]);
+        let provider = Provider { token_url, ..Provider::microsoft() };
+        let tokens = refresh_for(&provider, "m-1", "rt", GRAPH_SEND).unwrap();
+        assert_eq!((tokens.access_token.as_str(), tokens.refresh_token.as_deref()), ("graph-at", Some("rt-2")));
+        let form = parse_query(&forms.recv().unwrap());
+        assert_eq!(form["scope"], GRAPH_SEND, "only Graph's, once");
+        // Signed in before Graph was asked for: Microsoft wants consent.
+        assert!(matches!(refresh_for(&provider, "m-1", "rt", GRAPH_SEND), Err(OAuthError::SignInAgain(_))));
     }
 
     #[test]

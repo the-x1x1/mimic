@@ -1638,6 +1638,7 @@ mod tests {
             signature: None,
             also_read: Vec::new(),
             passed_over: Vec::new(),
+            through_graph: false,
         };
         let mailbox = db
             .create_source(&NewSource {

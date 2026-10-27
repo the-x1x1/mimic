@@ -249,6 +249,30 @@ fn own_words(doubt: &crate::db::InDoubt, raw: &sources::RawMessage) -> bool {
     after && doubt.body.split_whitespace().eq(raw.body.split_whitespace())
 }
 
+/// Whether a message of the user's read from a mailbox is the copy in the
+/// Sent folder of a reply handed to Microsoft Graph, under another
+/// Message-ID than the one it was written with (0.10.0-alpha.94): an answer
+/// to the same message, with the same words — as kept when it went, else as
+/// sent, read as any mail is — sent after the message it answers and within
+/// two days of going.
+fn read_back_as_another(sent: &crate::db::SentUnread, raw: &sources::RawMessage) -> bool {
+    let parse = |t: &str| chrono::DateTime::parse_from_rfc3339(t).ok();
+    let within = match (raw.sent_at.as_deref().and_then(parse), parse(&sent.since), parse(&sent.sent_at)) {
+        (Some(at), Some(since), Some(went)) => at >= since && at <= went + chrono::Duration::days(2),
+        _ => false,
+    };
+    let answers = raw.metadata.get("inReplyTo").and_then(serde_json::Value::as_str);
+    let words = match &sent.kept_words {
+        Some(w) => w.clone(),
+        None => sources::normalize::clean_body(&sent.body),
+    };
+    raw.external_id != sent.message_id
+        && within
+        && sent.answers.is_some()
+        && answers == sent.answers.as_deref()
+        && words.split_whitespace().eq(raw.body.split_whitespace())
+}
+
 fn same_ids(connector: &str) -> Option<&'static [&'static str]> {
     SAME_IDS_FAMILIES.iter().copied().find(|family| family.contains(&connector))
 }
@@ -359,6 +383,15 @@ impl ImportState<'_> {
         let mut in_doubt = if self.sends { self.db.own_sends_in_doubt(&conversation_id)? } else { Vec::new() };
         let its_own = if is_email || self.sends { self.db.sent_on_its_own_among(&ids)? } else { HashSet::new() };
         let mut found: Vec<(String, String)> = Vec::new();
+        // Replies that went through Microsoft Graph, kept in this
+        // conversation when they went, whose copy in the Sent folder hasn't
+        // been read: Graph doesn't say which Message-ID Exchange gave it
+        // (0.10.0-alpha.94).
+        let mut unread = if is_email { self.db.own_sends_unread(&conversation_id)? } else { Vec::new() };
+        let mut read_back: Vec<(String, String)> = Vec::new();
+        // Mimic's own replies' copies, recorded as each went: never another
+        // reply's copy read back.
+        let written = if unread.is_empty() { HashSet::new() } else { self.db.outbox_message_ids_among(&ids)? };
         // A conversation already here that is not joined by Message-ID — a
         // later export of the same chat — gets its new messages after the
         // ones it has: numbered from zero, they would sit among the old ones,
@@ -382,6 +415,13 @@ impl ImportState<'_> {
                     readings.push(reading);
                 }
             }
+            // The copy of a reply that went through Graph, under the id it was
+            // written with: Exchange kept it.
+            if already.contains(&raw.external_id) {
+                if let Some(at) = unread.iter().position(|u| u.message_id == raw.external_id) {
+                    read_back.push((unread.remove(at).id, raw.external_id.clone()));
+                }
+            }
             // Kept once: a copy another source has, or a second copy here —
             // the same message read from two folders, where the connector
             // puts the copy to keep first. Nobody is made up for the other.
@@ -390,6 +430,23 @@ impl ImportState<'_> {
                 continue;
             }
             let (direction, participant_id) = self.attribute(&raw.author)?;
+            // Or its copy under another id Exchange gave it, known by its
+            // words, once: kept already as it went, so not kept again; or,
+            // not known to have gone, kept now — and, sent by itself, never as
+            // the user's writing.
+            let mut by_graph = false;
+            if direction == Direction::Self_ && !written.contains(&raw.external_id) {
+                if let Some(at) = unread.iter().position(|u| read_back_as_another(u, raw)) {
+                    let sent = unread.remove(at);
+                    read_back.push((sent.id.clone(), raw.external_id.clone()));
+                    if sent.kept_words.is_some() {
+                        counts.duplicates += 1;
+                        continue;
+                    }
+                    by_graph = sent.autonomous;
+                    found.push((sent.id, raw.external_id.clone()));
+                }
+            }
             if let Some(pid) = &participant_id {
                 self.db.link_conversation_participant(&conversation_id, pid)?;
             }
@@ -424,6 +481,7 @@ impl ImportState<'_> {
                 metadata: if its_own.contains(&raw.external_id)
                     || (direction == Direction::Self_ && sources::outgoing::is_sent_on_its_own(&raw.external_id))
                     || by_words
+                    || by_graph
                 {
                     let mut m = raw.metadata.clone();
                     if let Some(map) = m.as_object_mut() {
@@ -446,6 +504,9 @@ impl ImportState<'_> {
         // What was found went, under the id it was read back by.
         for (outgoing, message) in found {
             self.db.outgoing_found_as(&outgoing, &message)?;
+        }
+        for (outgoing, message) in read_back {
+            self.db.outgoing_read_back(&outgoing, &message)?;
         }
         for keys in self.db.add_readings(&self.source_id, &readings)? {
             if keys.iter().any(|k| k == "sentFolder") {
