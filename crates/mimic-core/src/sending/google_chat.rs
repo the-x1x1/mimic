@@ -396,6 +396,7 @@ mod tests {
             cc: Vec::new(),
             subject: String::new(),
             quote: None,
+            shown_quote: None,
             text: text.into(),
         }
     }
@@ -494,6 +495,7 @@ mod tests {
                 cc: Vec::new(),
                 subject: String::new(),
                 quote: None,
+                shown_quote: None,
                 text: "on it this afternoon".into(),
             },
         )

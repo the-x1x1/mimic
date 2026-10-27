@@ -1908,6 +1908,7 @@ mod tests {
             cc: vec![],
             subject: "Re: Lunch".into(),
             quote: None,
+            shown_quote: None,
         };
         let e = sending::send_reply(&w.db, &credentials(), &req).unwrap_err();
         assert!(matches!(e, SendError::Db(DbError::Invalid(ref m)) if m == sending::HELD), "{e}");

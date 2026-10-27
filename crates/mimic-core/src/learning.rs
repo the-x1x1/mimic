@@ -564,10 +564,15 @@ struct WayTally {
 /// enough, not that shorter was wrong.
 fn count_choice(t: &mut BTreeMap<Adjustment, WayTally>, c: &ChoiceMade) {
     let chosen = c.chosen.as_deref().and_then(adjustment);
+    let already = carried(&c.first_context);
     if let Some(a) = chosen {
         let e = t.entry(a).or_default();
         e.chosen += 1;
-        if axis(a) == Axis::Length {
+        // How much shorter or longer is measured only against a first draft
+        // written without that way (0.10.0-alpha.100): against one written
+        // shorter already, "shorter still" says nothing of how much shorter
+        // than the measurements the user wants.
+        if axis(a) == Axis::Length && !already.contains(&a) {
             let d = diff_draft(&c.first_text, &c.sent_text);
             let moved = if a == Adjustment::Shorter { "shorter" } else { "longer" };
             if d.length_direction == moved && d.draft_words > 0 {
@@ -577,7 +582,6 @@ fn count_choice(t: &mut BTreeMap<Adjustment, WayTally>, c: &ChoiceMade) {
         }
         t.entry(opposite(a)).or_default().against += 1;
     }
-    let already = carried(&c.first_context);
     let passed: BTreeSet<Adjustment> = c.passed_over.iter().filter_map(|p| adjustment(p.as_str())).collect();
     for d in passed {
         if Some(d) == chosen || Some(opposite(d)) == chosen || already.contains(&d) {
@@ -1126,10 +1130,19 @@ mod tests {
         assert_eq!((s.chosen, s.against), (3, 0));
         assert!(s.holds);
 
+        // Shorter still, chosen over a first draft written shorter: it counts,
+        // but how much shorter stays measured from first drafts written
+        // without it (0.10.0-alpha.100).
+        let first = written(&db, None, SHORT, serde_json::json!({ "ways": ["shorter"] }), None);
+        let still = written(&db, None, "Tuesday works.", serde_json::json!({ "adjustment": "shorter" }), Some(&first));
+        db.resolve_draft(&still, "sent_unedited", Some("Tuesday works.")).unwrap();
+        let s = way(&patterns(&db).unwrap(), Adjustment::Shorter, None).unwrap();
+        assert_eq!((s.chosen, s.against, s.mean_change), (4, 0, Some(-0.67)), "not -0.63");
+
         // Longer sent instead of a first draft written shorter does count.
         choice(&db, None, &["shorter"], &["shorter", "longer"], &[], Some("longer"));
         let s = way(&patterns(&db).unwrap(), Adjustment::Shorter, None).unwrap();
-        assert_eq!((s.chosen, s.against), (3, 1));
+        assert_eq!((s.chosen, s.against), (4, 1));
     }
 
     #[test]

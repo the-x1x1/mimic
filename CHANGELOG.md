@@ -2,6 +2,20 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.100] — 2026-10-26
+
+Tightened after a review of alpha.95–99.
+
+### Fixed
+
+- **Slack channels never hold back replies to direct messages.** When Slack asked Mimic to slow down while reading channels, or a token could list private channels but not read them, the whole check counted as unfinished, so a reply waiting to go by itself to a direct message could wait indefinitely. Channels now say what stopped them on their own, and what's read of your direct messages counts as read.
+- **Join notices and bots' mentions aren't threads you're in.** "@you has joined the channel" or a bot naming you no longer makes Mimic follow that thread. Every thread you follow now gets its turn to be checked, not only the busiest thirty.
+- **In Write, nothing is sent or put aside while another way is being written,** so a way you never saw can't be counted as one you passed over.
+- **A chosen length is measured from your first drafts as Mimic would write them,** not from drafts already written shorter, so choosing "shorter still" no longer makes the next drafts longer.
+- **A Google Chat thread's start is asked for again** when Google couldn't be reached the first time, instead of being lost.
+- **Readings of how you write are checked more closely:** "no emoji and formal phrasing" and "a little formal" are seen as calling a casual writer formal again.
+- **A reply's quote goes only as the Send panel showed it.** If the name or time it shows changed meanwhile, Mimic asks you to look again rather than send something different.
+
 ## [0.10.0-alpha.99] — 2026-10-26
 
 What's said to you in Slack channels.

@@ -270,6 +270,10 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     const a = adjustmentOf(d);
     return a ? ADJUSTMENT_LABELS[a] : "Another way";
   };
+  // While another way is being written, nothing in the set is used or put
+  // aside (0.10.0-alpha.100): one finished after it would be counted as
+  // passed over without the user ever seeing it.
+  const writingAnother = another.isPending;
   const offered = new Set(ways.map(adjustmentOf));
 
   // The latest `run`, for the draft written at once: an effect that named
@@ -626,7 +630,12 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
               ) : null}
               <div className="row gap-2">
                 {fromAnywhere && pressEnter ? (
-                  <Button ref={pasteButton} variant="primary" onClick={() => void pasteThere(true)}>
+                  <Button
+                    ref={pasteButton}
+                    variant="primary"
+                    disabled={writingAnother}
+                    onClick={() => void pasteThere(true)}
+                  >
                     Paste it there and send
                   </Button>
                 ) : null}
@@ -635,16 +644,25 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                     <Button
                       ref={pressEnter ? undefined : pasteButton}
                       variant={pressEnter ? "ghost" : "primary"}
+                      disabled={writingAnother}
                       onClick={() => void pasteThere()}
                     >
                       Paste it there
                     </Button>
-                    <Button variant="ghost" onClick={() => void copyAndGoBack()}>
+                    <Button
+                      variant="ghost"
+                      disabled={writingAnother}
+                      onClick={() => void copyAndGoBack()}
+                    >
                       Copy and go back
                     </Button>
                   </>
                 ) : null}
-                <Button variant={fromAnywhere ? "ghost" : "primary"} onClick={markSent}>
+                <Button
+                  variant={fromAnywhere ? "ghost" : "primary"}
+                  disabled={writingAnother}
+                  onClick={markSent}
+                >
                   {dirty ? "I sent my edited version" : "I sent this"}
                 </Button>
                 {fromAnywhere ? null : (
@@ -655,6 +673,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                 {draft.id !== first.id ? (
                   <Button
                     variant="ghost"
+                    disabled={writingAnother}
                     onClick={() => void dropWay(draft).catch(() => undefined)}
                   >
                     Not this one
@@ -662,6 +681,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                 ) : null}
                 <Button
                   variant="ghost"
+                  disabled={writingAnother}
                   onClick={async () => {
                     // The first draft, which puts every other way aside with it.
                     await resolve.mutateAsync({

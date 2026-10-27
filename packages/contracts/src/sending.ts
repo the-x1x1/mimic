@@ -129,6 +129,8 @@ export interface SendRequest {
   subject: string;
   /** Quote the message it answers under it, or not; unset is as its mailbox does (0.10.0-alpha.96). */
   quote?: boolean;
+  /** The quote as the Send panel showed it: a reply that quotes goes only with that one (0.10.0-alpha.100). */
+  shownQuote?: string | null;
 }
 
 /** The address list as one would write it on an envelope. */

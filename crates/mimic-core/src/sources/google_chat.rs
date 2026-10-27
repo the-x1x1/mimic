@@ -907,6 +907,11 @@ fn sync_inner(
         // A thread followed only now — someone just mentioned them in it, or
         // they just wrote there — is read from its start too, as far as
         // `THREAD_BEFORE`, so a draft has what was asked (0.10.0-alpha.95).
+        // When Google asks to slow down, or isn't reached, the space is left
+        // as it was — nothing of it taken, its mark where it was — so the
+        // next check finds the thread new again and asks once more
+        // (0.10.0-alpha.100); a slow-down also ends the check's reading.
+        let (mut again, mut slow) = (false, false);
         for thread in &newly {
             let Some(first) = raw
                 .iter()
@@ -936,12 +941,26 @@ fn sync_inner(
                 }
                 Err(GoogleChatError::RateLimited) => {
                     summary.partial = true;
+                    slow = true;
                     break;
                 }
+                Err(GoogleChatError::Network(e)) => {
+                    tracing::warn!(target: "google_chat", error = %e, "a thread's earlier messages couldn't be reached");
+                    summary.partial = true;
+                    again = true;
+                    break;
+                }
+                // Refused for good: what was read is kept without them.
                 Err(e) => {
                     tracing::warn!(target: "google_chat", error = %e, "a thread's earlier messages couldn't be read")
                 }
             }
+        }
+        if slow {
+            break;
+        }
+        if again {
+            continue;
         }
         let read = |m: &Value| kept(m) && (!named || thread_name(m).is_some_and(|t| followed.contains(t)));
         // Who wrote, by name: as each message read says, else as the space's
@@ -1639,6 +1658,50 @@ mod tests {
         };
         assert_eq!(thread, vec!["who owns the Q3 budget?".to_string(), "@C Haynes can you answer the above?".into()]);
         assert_eq!(seen.lock().unwrap().iter().filter(|r| r.contains("thread.name")).count(), 1, "once");
+    }
+
+    #[test]
+    fn a_thread_whose_start_couldnt_be_reached_is_asked_for_again_next_time() {
+        let db = Db::open_in_memory().unwrap();
+        let source = account(&db);
+        let round = Arc::new(StdMutex::new(0u32));
+        let on = round.clone();
+        let unreachable = Arc::new(StdMutex::new(true));
+        let down = unreachable.clone();
+        let (api, seen) = chat_api(Box::new(move |path, query| {
+            let round = *on.lock().unwrap();
+            match path {
+                "/userinfo" => (200, USERINFO_BODY.into()),
+                "/spaces" => {
+                    let last = if round == 0 { "2026-10-26T09:10:00Z" } else { "2026-10-26T09:20:00Z" };
+                    (200, json!({ "spaces": [{ "name": "spaces/ROOM", "spaceType": "SPACE", "displayName": "Budget", "lastActiveTime": last }] }).to_string())
+                }
+                // Google not reached the first time it is asked (0.10.0-alpha.100).
+                "/spaces/ROOM/messages" if query.contains("thread.name") => {
+                    if std::mem::replace(&mut *down.lock().unwrap(), false) {
+                        return (503, "{}".into());
+                    }
+                    (200, json!({ "messages": [said("spaces/ROOM", 1, "users/44", "Alan Turing", 10, "who owns the Q3 budget?")] }).to_string())
+                }
+                "/spaces/ROOM/messages" if round == 0 => {
+                    (200, json!({ "messages": [said("spaces/ROOM", 1, "users/44", "Alan Turing", 10, "who owns the Q3 budget?")] }).to_string())
+                }
+                "/spaces/ROOM/messages" => {
+                    let mut asked = said("spaces/ROOM", 2, "users/45", "Grace Hopper", 20, "@C Haynes can you answer the above?");
+                    asked["annotations"] = json!([{ "type": "USER_MENTION", "userMention": { "user": { "name": "users/7" } } }]);
+                    (200, json!({ "messages": [asked] }).to_string())
+                }
+                other => panic!("not asked for: {other}"),
+            }
+        }));
+        sync(&db, &source, &api, &|| false).unwrap();
+        *round.lock().unwrap() = 1;
+        let missed = sync(&db, &source, &api, &|| false).unwrap();
+        assert!(missed.partial, "{missed:?}");
+        assert_eq!(missed.inserted, 0, "nothing of the space taken without its start: {missed:?}");
+        let next = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((next.inserted, next.mentions), (2, 1), "{next:?}");
+        assert_eq!(seen.lock().unwrap().iter().filter(|r| r.contains("thread.name")).count(), 2, "asked again");
     }
 
     #[test]
