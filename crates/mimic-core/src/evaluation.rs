@@ -396,8 +396,10 @@ pub fn write_answers(
         }
         sources.sort_unstable();
         sources.dedup();
+        // Measured as a draft would be kept: without what the model wrapped
+        // around it (0.10.0-alpha.84), and the generic answer the same way.
         let mimic = match provider.generate(&prompt) {
-            Ok(r) => r.text,
+            Ok(r) => crate::generation::tidy(&r.text),
             Err(e) => {
                 out.failed += 1;
                 out.last_error = Some(e.to_string());
@@ -405,7 +407,7 @@ pub fn write_answers(
             }
         };
         let generic = match provider.generate(&generic_prompt(&prompt)) {
-            Ok(r) => r.text,
+            Ok(r) => crate::generation::tidy(&r.text),
             Err(e) => {
                 out.failed += 1;
                 out.last_error = Some(e.to_string());

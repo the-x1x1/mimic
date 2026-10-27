@@ -24,6 +24,8 @@ Default: `http://127.0.0.1:11434/v1` with `llama3.2:3b`, which is Ollama out of 
 
 `info().local` is computed from the configured URL rather than hard-coded. Pointing "local" at `192.168.1.50` stops it being local, the badge changes, and the description says the messages are sent to it. A provider that claims to be private while it is not is worse than no provider.
 
+**A model that thinks before it answers** (0.10.0-alpha.84). Every request asks `reasoning_effort: "none"`. Ollama takes it for every model, thinking or not, and a model such as qwen3 then answers at once; allowed to think, qwen3:14b through Ollama spent all 120 tokens of a short reply's length thinking and came back with no words (run on the owner's desktop: Ollama 0.40.11, job 308; `think: false` is ignored on `/v1`). An endpoint that turns the field down — OpenAI's for a model that doesn't reason, or a server that knows no such field — answers 400 naming it, and is asked once more without it (`turned_down_thinking`); any other refusal is reported as it came. Thinking written into the reply itself (`<think>…</think>`, `<thinking>…</thinking>`, or an opening tag never closed) is taken out (`without_thinking`), and a reply with no words left says whether the model thought instead (`THOUGHT_INSTEAD`) rather than becoming an empty draft.
+
 ### `anthropic` — the Claude Messages API
 
 For users who would rather have the quality than the locality, having been told which it is. The description states exactly what is sent: the message being replied to, the intent, and a handful of the user's own past messages. It refuses to run without an API key rather than failing at the network.

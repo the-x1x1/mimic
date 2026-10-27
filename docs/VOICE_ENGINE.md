@@ -117,6 +117,8 @@ Then, when there is one, a model's reading of those numbers in words (below), la
 
 The output token budget is derived from `p90WordsPerMessage`, so a model cannot answer a two-word texter with four paragraphs.
 
+What comes back is kept without what a model wrapped around it (`generation::tidy`, 0.10.0-alpha.84): a line that only introduces the reply ("Here's a reply in your voice:", "**Draft:**" — it must end with a colon and say it is about a reply, draft, response or version), a "Subject:" line, a code fence, or quotation marks around the whole of it with none inside. Nothing inside the reply is changed, and a line that only might be an introduction ("Here's what I think:", "Sure, here's the email address:") stays. A reply with nothing left is not kept as a draft. Measuring the drafts tidies Mimic's answer and the generic one the same way.
+
 ### In words: a reading of the numbers
 
 A sentence such as "short and warm, lowercase, signs off with thanks" carries register better than twelve rates, and turning numbers into that sentence is the one thing here a model does better than arithmetic. So, when the user asks (How you write → In words; `voice::describe`), the model they chose is given each measurable layer's numbers — **only the numbers**, and the greetings and sign-offs from Mimic's own short lists; never a message, a phrase the user wrote, or who a layer is about (`describe::numbers`) — and asked for two or three plain sentences about register, saying nothing the numbers do not support. Up to 24 layers a run, the layer over everything first.

@@ -635,6 +635,62 @@ fn sent_how(channel: &str) -> &'static str {
     }
 }
 
+/// The reply alone, without what a model wrapped around it (0.10.0-alpha.84):
+/// a line introducing it ("Here's a reply in your voice:", "**Draft:**"), a
+/// subject line, a code fence, or quotation marks around the whole of it.
+/// Only the outside is touched: nothing inside the reply changes, and a line
+/// that only might be one of these ("Here's what I think:") stays.
+pub fn tidy(text: &str) -> String {
+    let mut s = text.trim().to_string();
+    if let Some(inner) = s.strip_prefix("```").and_then(|t| t.strip_suffix("```")) {
+        // A fence's first line may name a language, never a reply's words.
+        let inner = match inner.split_once('\n') {
+            Some((tag, rest)) if !tag.trim().contains(' ') => rest,
+            _ => inner,
+        };
+        s = inner.trim().to_string();
+    }
+    while let Some((first, rest)) = s.split_once('\n') {
+        if rest.trim().is_empty() || !(introduces(first) || is_subject_line(first)) {
+            break;
+        }
+        s = rest.trim().to_string();
+    }
+    for (open, close) in [('"', '"'), ('\u{201c}', '\u{201d}')] {
+        let inner = s.strip_prefix(open).and_then(|t| t.strip_suffix(close));
+        if let Some(inner) = inner.filter(|i| !i.trim().is_empty() && !i.contains(open) && !i.contains(close)) {
+            s = inner.trim().to_string();
+            break;
+        }
+    }
+    s
+}
+
+/// A line that only introduces what follows: "Here's a draft reply:",
+/// "Sure! Here is a response in your voice:", "Reply:".
+fn introduces(line: &str) -> bool {
+    const OPENERS: [&str; 9] =
+        ["here's", "here\u{2019}s", "here is", "sure", "certainly", "of course", "okay", "ok,", "absolutely"];
+    // Words that say it is about the reply, not something in it: "here's
+    // the email address:" begins a reply; "here's a draft:" begins none.
+    const OF_A_REPLY: [&str; 7] = ["reply", "draft", "response", "version", "rewrite", "your voice", "as you"];
+    const ALONE: [&str; 7] =
+        ["reply:", "draft:", "response:", "message:", "answer:", "draft reply:", "suggested reply:"];
+    let l = line.trim().trim_matches('*').trim().to_lowercase();
+    if !l.ends_with(':') || l.chars().count() > 120 {
+        return false;
+    }
+    ALONE.contains(&l.as_str())
+        || (OPENERS.iter().any(|o| l.starts_with(o)) && OF_A_REPLY.iter().any(|w| l.contains(w)))
+}
+
+/// "Subject: …" on a line of its own: the subject is chosen apart from the
+/// words, in the Send panel.
+fn is_subject_line(line: &str) -> bool {
+    let l = line.trim().trim_matches('*').trim();
+    l.len() < 200 && l.to_lowercase().starts_with("subject:")
+}
+
 fn one_line(text: &str, limit: usize) -> String {
     let collapsed = text.trim();
     if collapsed.chars().count() <= limit {
@@ -729,7 +785,11 @@ fn write(
     let ctx = build_context(db, req)?;
     let prompt = assemble(&ctx, req);
     let prompt_hash = crate::ids::stable_json_hash(&serde_json::to_value(&prompt).unwrap_or(json!({})));
-    let response = provider.generate(&prompt)?;
+    let mut response = provider.generate(&prompt)?;
+    response.text = tidy(&response.text);
+    if response.text.is_empty() {
+        return Err(ProviderError::Malformed("it wrote nothing to send".into()).into());
+    }
     let info = provider.info();
     let draft = db.create_draft(&NewDraft {
         participant_id: req.participant_id.clone(),
@@ -1380,6 +1440,53 @@ mod tests {
         assert!(prompt.system.contains("\n--- (sent by email)"), "{}", prompt.system);
         assert!(prompt.system.contains("not how long a chat message runs or how it is laid out"), "{}", prompt.system);
         assert!(!prompt.system.contains("Match their register, length and punctuation"));
+    }
+
+    #[test]
+    fn what_a_model_wraps_around_a_reply_is_taken_off() {
+        for (given, kept) in [
+            ("Here's a reply in your voice:\n\nyeah from 6", "yeah from 6"),
+            ("Sure! Here is a draft response:\nyeah from 6", "yeah from 6"),
+            ("**Reply:**\n\nyeah from 6", "yeah from 6"),
+            ("Subject: Re: later\n\nyeah from 6", "yeah from 6"),
+            ("Here\u{2019}s my reply:\n\"yeah from 6\"", "yeah from 6"),
+            ("\"yeah from 6\"", "yeah from 6"),
+            ("\u{201c}yeah from 6\u{201d}", "yeah from 6"),
+            ("```\nyeah from 6\n```", "yeah from 6"),
+            ("```text\nyeah from 6\n```", "yeah from 6"),
+            ("  yeah from 6  ", "yeah from 6"),
+        ] {
+            assert_eq!(tidy(given), kept, "{given:?}");
+        }
+    }
+
+    #[test]
+    fn what_only_might_be_wrapping_is_left_as_the_reply() {
+        for given in [
+            "Here's what I think:\n- the deck is fine\n- send it",
+            "Sure, here's the email address:\nada@example.com",
+            "Sure, 6 works",
+            "Here's a draft reply:",
+            "\"yes\" she said, \"from 6\"",
+            "He said \"no\"",
+            "Reply: yes from 6",
+        ] {
+            assert_eq!(tidy(given), given, "{given:?}");
+        }
+    }
+
+    #[test]
+    fn a_draft_is_kept_without_its_wrapping_and_an_empty_one_is_not_kept() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let wrapped = MockProvider::answering("Here's a reply in your voice:\n\nyeah, tomorrow morning");
+        let draft = compose(&db, &wrapped, &request(&ada)).unwrap();
+        assert_eq!(draft.generated_text, "yeah, tomorrow morning");
+
+        let nothing = MockProvider::answering("```\n```");
+        let before = db.pending_drafts(100).unwrap().len();
+        let err = compose(&db, &nothing, &request(&ada)).unwrap_err();
+        assert!(err.to_string().contains("wrote nothing to send"), "{err}");
+        assert_eq!(db.pending_drafts(100).unwrap().len(), before, "no empty draft kept");
     }
 
     #[test]

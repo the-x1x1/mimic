@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.84] — 2026-10-26
+
+Drafts from any model on your computer.
+
+### Fixed
+
+- **A model that thinks before it answers no longer gives empty drafts.** Through Ollama, qwen3 spent the whole length of a short reply thinking and came back with nothing. Mimic now asks every model on your computer to answer without thinking first — Ollama does this for any model — and asks again without that if the endpoint doesn't know it. Thinking written into a reply is taken out, and a model that only thought says so instead of leaving an empty draft.
+
+### Changed
+
+- **A draft is just the reply.** "Here's a reply in your voice:", a subject line, a code block or quotation marks around the whole reply are taken off what the model wrote. Nothing inside the reply is changed.
+
 ## [0.10.0-alpha.83] — 2026-10-26
 
 A chat reads like a chat.
