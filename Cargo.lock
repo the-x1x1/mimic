@@ -2750,7 +2750,7 @@ dependencies = [
 
 [[package]]
 name = "mimic-core"
-version = "0.10.0-alpha.80"
+version = "0.10.0-alpha.81"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2777,7 +2777,7 @@ dependencies = [
 
 [[package]]
 name = "mimic-desktop"
-version = "0.10.0-alpha.80"
+version = "0.10.0-alpha.81"
 dependencies = [
  "anyhow",
  "hex",
@@ -2808,7 +2808,7 @@ dependencies = [
 
 [[package]]
 name = "mimic-keychain"
-version = "0.10.0-alpha.80"
+version = "0.10.0-alpha.81"
 dependencies = [
  "chacha20poly1305",
  "rand 0.9.5",

@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.81] — 2026-10-26
+
+Google Chat, tightened.
+
+### Fixed
+
+- **A photo counts as an answer.** If they send a photo or a file after the message I'm holding a reply to, the reply doesn't go by itself — not only when they write words.
+- **Nothing becomes a mention.** A reply with `<users/all>` or a link written in Google Chat's own way in it is sent as you wrote it, never as a mention of everyone. The Send panel says that Google Chat shows your app's name beside a reply, and that its own _bold_ and _italic_ still apply.
+- **Only the permissions it needs.** Signing in asks to read and to send messages — not to edit or delete them — and if you untick any permission on Google's page, I say to sign in again with every box ticked, instead of failing every check with the wrong advice. An app not yet configured in your Google Cloud project says how to configure it.
+- **Gentler with Google.** Asked to slow down without being told for how long, I wait a second, then two, four and eight, before leaving the rest for the next check. A chat with nothing to read (history off) isn't asked again until something new comes.
+- **A direct message has a name.** One only you have written in yet is named after the other person, not "Chat".
+
 ## [0.10.0-alpha.80] — 2026-10-26
 
 Replying in Google Chat.

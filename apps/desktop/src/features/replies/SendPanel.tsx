@@ -256,6 +256,9 @@ export function SendPanel({
         <p className="muted small">
           It goes into that conversation in {service}, as you, and nowhere else &mdash; word for
           word, with nothing in it read as a mention.
+          {envelope.kind === "googleChat"
+            ? " Google Chat shows the name you gave its app beside it, and its own *bold* and _italic_ still apply."
+            : ""}
         </p>
       ) : (
         <p className="muted small">

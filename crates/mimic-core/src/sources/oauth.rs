@@ -210,6 +210,9 @@ pub struct Tokens {
     pub refresh_token: Option<String>,
     /// Seconds the access token is good for, as the provider said.
     pub expires_in: u64,
+    /// The scopes granted, when the provider says (0.10.0-alpha.81): a user
+    /// may grant fewer than were asked for.
+    pub scope: Option<String>,
 }
 
 impl std::fmt::Debug for Tokens {
@@ -520,6 +523,7 @@ struct TokenResponse {
     expires_in: Option<u64>,
     error: Option<String>,
     error_description: Option<String>,
+    scope: Option<String>,
 }
 
 /// Exchange the code the browser brought back for tokens.
@@ -577,6 +581,7 @@ fn token_request<'a>(provider: &'a Provider, mut form: Vec<(&'a str, &'a str)>) 
             access_token,
             refresh_token: parsed.refresh_token.filter(|t| !t.is_empty()),
             expires_in: parsed.expires_in.unwrap_or(0),
+            scope: parsed.scope.filter(|s| !s.trim().is_empty()),
         });
     }
     match parsed.error.as_deref() {
