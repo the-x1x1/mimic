@@ -50,6 +50,7 @@ use crate::sources::imap::{self, Credentials, ImapSourceConfig};
 use crate::sources::outgoing::{self, Mailbox, Outgoing, OutgoingError};
 use crate::sources::smtp::{self, SmtpAccount, SmtpError};
 
+pub mod google_chat;
 pub mod slack;
 pub mod teams;
 pub mod telegram;
@@ -123,7 +124,8 @@ pub struct SendingMailbox {
 }
 
 /// Where a reply goes: out of a mailbox, or into Slack (0.10.0-alpha.65),
-/// Teams (0.10.0-alpha.68) or Telegram (0.10.0-alpha.75).
+/// Teams (0.10.0-alpha.68), Telegram (0.10.0-alpha.75) or Google Chat
+/// (0.10.0-alpha.80).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReplyKind {
@@ -132,6 +134,7 @@ pub enum ReplyKind {
     Slack,
     Teams,
     Telegram,
+    GoogleChat,
 }
 
 /// Everything the Send panel shows before anything goes.
@@ -234,6 +237,9 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
             return Ok(envelope);
         }
         if let Some(envelope) = telegram::envelope_for(db, &draft, m)? {
+            return Ok(envelope);
+        }
+        if let Some(envelope) = google_chat::envelope_for(db, &draft, m)? {
             return Ok(envelope);
         }
     }

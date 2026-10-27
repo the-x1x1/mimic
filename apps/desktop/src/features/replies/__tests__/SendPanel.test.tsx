@@ -257,6 +257,44 @@ describe("sending a reply from Mimic", () => {
     expect(native.sendReply).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "s10" }));
   });
 
+  it("sends a reply to a Google Chat message into that chat", async () => {
+    native.replyEnvelope.mockResolvedValue(
+      envelope({
+        kind: "googleChat",
+        mailboxes: [
+          {
+            sourceId: "s11",
+            name: "c@formicaria.example (Google Chat)",
+            fromAddress: "C Haynes in Google Chat",
+            server: "Google Chat",
+            whyNot: null,
+          },
+        ],
+        mailbox: "s11",
+        to: ["Ada Lovelace"],
+        otherAddresses: [],
+        subject: "",
+      }),
+    );
+    native.sendReply.mockImplementation(async (r: { to: string[] }) => ({
+      ...sent(r.to),
+      sourceId: "s11",
+      fromAddress: "google_chat:users/7",
+      subject: "",
+    }));
+    const onDone = renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    expect(within(panel).getByText("C Haynes in Google Chat")).toBeInTheDocument();
+    expect(within(panel).queryByLabelText("Subject")).toBeNull();
+    expect(
+      within(panel).getByText(/into that conversation in Google Chat, as you/),
+    ).toBeInTheDocument();
+    await sendIt(panel);
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(native.sendReply).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "s11" }));
+  });
+
   it("copies in only the others on their message that are ticked", async () => {
     native.replyEnvelope.mockResolvedValue(
       envelope({ othersOnIt: ["bob@example.com", "cy@example.com", "di@example.com"] }),

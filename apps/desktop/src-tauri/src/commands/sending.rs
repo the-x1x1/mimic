@@ -46,6 +46,19 @@ pub async fn send_reply(state: State<'_, SharedState>, request: SendRequest) -> 
         .map_err(|e| CommandError::new("internal", e.to_string()))?
         .map_err(CommandError::from);
     }
+    // Into Google Chat, with the account's own sign-in (0.10.0-alpha.80).
+    if connector.as_deref() == Some(mimic_core::sources::google_chat::CONNECTOR) {
+        let (db, access) = (state.db.clone(), state.google_chat_access.clone());
+        return tauri::async_runtime::spawn_blocking(move || {
+            let token = access.token(&request.source_id).map_err(sending::SendError::Cannot)?;
+            let api = mimic_core::sources::google_chat::ChatApi::new(&token)
+                .map_err(|e| sending::SendError::Service(e.to_string()))?;
+            sending::google_chat::send_reply(&db, &api, &request)
+        })
+        .await
+        .map_err(|e| CommandError::new("internal", e.to_string()))?
+        .map_err(CommandError::from);
+    }
     if connector.as_deref() == Some(mimic_core::sources::teams::CONNECTOR) {
         let (db, access) = (state.db.clone(), state.teams_access.clone());
         return tauri::async_runtime::spawn_blocking(move || {

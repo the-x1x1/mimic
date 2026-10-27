@@ -39,7 +39,9 @@
 //!   message (`sending::slack::said_since`), as a mailbox's Sent folder is.
 //!   Telegram the same way (0.10.0-alpha.76): a one-to-one chat with a
 //!   person only (`telegramDirect`), through the account's own session
-//!   (`sending::telegram::still_theirs`, `said_since`).
+//!   (`sending::telegram::still_theirs`, `said_since`). And Google Chat
+//!   (0.10.0-alpha.80): a direct message only (`googleChatDirect`), with
+//!   the account's own sign-in (`sending::google_chat`).
 
 use std::collections::HashSet;
 
@@ -49,6 +51,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::{Db, DbError, Draft, IdentifierInput, IdentifierKind, Message, NewOutgoing, SendHow};
 use crate::ids::fmt_rfc3339;
 use crate::sending::{self, SendError};
+use crate::sources::google_chat::{ChatApi, GoogleChatSourceConfig};
 use crate::sources::imap::{Credentials, ImapError, ImapSourceConfig};
 use crate::sources::outgoing;
 use crate::sources::slack::{SlackApi, SlackSourceConfig};
@@ -110,6 +113,14 @@ pub const SAID_SINCE_TELEGRAM: &str =
     "They wrote again in Telegram after the message this answers, so it waits for you.";
 pub const TELEGRAM_UNKNOWN: &str = "I couldn't look in Telegram for a reply already there, so this one waits for you.";
 pub const NO_TELEGRAM: &str = "I don't have a Telegram sign-in I can use for this account, so this one waits for you.";
+/// Google Chat (0.10.0-alpha.80).
+pub const ALREADY_IN_GOOGLE_CHAT: &str = "You'd already replied in Google Chat, so this one didn't go.";
+pub const SAID_SINCE_GOOGLE_CHAT: &str =
+    "They wrote again in Google Chat after the message this answers, so it waits for you.";
+pub const GOOGLE_CHAT_UNKNOWN: &str =
+    "I couldn't look in Google Chat for a reply already there, so this one waits for you.";
+pub const NO_GOOGLE_CHAT: &str =
+    "I don't have a Google Chat sign-in I can use for this account, so this one waits for you.";
 pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
 pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
@@ -361,6 +372,7 @@ fn answers_chat(db: &Db, draft: &Draft) -> Result<bool, DbError> {
         s.connector == crate::sources::slack::CONNECTOR
             || s.connector == crate::sources::teams::CONNECTOR
             || s.connector == crate::sources::telegram_account::CONNECTOR
+            || s.connector == crate::sources::google_chat::CONNECTOR
     }))
 }
 
@@ -468,7 +480,7 @@ fn refusal(
     // copied in (0.10.0-alpha.54).
     if in_chat {
         // A direct message is to the user; a group's reply goes to the group.
-        let direct = ["slackDirect", "teamsDirect", "telegramDirect"]
+        let direct = ["slackDirect", "teamsDirect", "telegramDirect", "googleChatDirect"]
             .iter()
             .any(|k| incoming.metadata.get(*k).and_then(serde_json::Value::as_bool) == Some(true));
         if !direct {
@@ -656,6 +668,13 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
                 draft.generated_text.clone(),
                 sending::telegram::pending_id(&chat),
             )
+        } else if envelope.kind == sending::ReplyKind::GoogleChat {
+            let Ok((config, space)) = sending::google_chat::route(db, &incoming) else { continue };
+            (
+                sending::google_chat::from_address(&config),
+                draft.generated_text.clone(),
+                sending::google_chat::pending_id(&space),
+            )
         } else {
             let Ok((config, account)) = sending::sending_from(db, &incoming.source_id) else { continue };
             if !goes_to_them(db, draft.participant_id.as_deref(), &envelope.to)? {
@@ -749,6 +768,10 @@ pub type SlackFor<'a> = dyn Fn(&str) -> Option<SlackApi> + 'a;
 /// when there is one to use (0.10.0-alpha.76). Dropping it closes it.
 pub type TelegramFor<'a> = dyn Fn(&str) -> Option<Box<dyn TelegramPost>> + 'a;
 
+/// A Google Chat account's API with its own sign-in (by source id), or why
+/// it can't be had now (0.10.0-alpha.80).
+pub type GoogleChatFor<'a> = dyn Fn(&str) -> Result<ChatApi, TeamsUnavailable> + 'a;
+
 /// How long past its time a reply waits for its Sent folder to be read
 /// before it is left for the user.
 pub const SENT_PATIENCE_MINUTES: i64 = 30;
@@ -841,6 +864,28 @@ pub fn send_due_every(
     teams: &TeamsFor<'_>,
     telegram: &TelegramFor<'_>,
 ) -> Result<Run, SendError> {
+    let no_chat = |_: &str| Err(TeamsUnavailable::NotSignedIn);
+    send_due_everywhere(db, credentials, now, in_sent, &Through { slack, teams, telegram, google_chat: &no_chat })
+}
+
+/// Each chat service's way in, by source id: what a reply held to go into
+/// one is sent through (0.10.0-alpha.80).
+pub struct Through<'a> {
+    pub slack: &'a SlackFor<'a>,
+    pub teams: &'a TeamsFor<'a>,
+    pub telegram: &'a TelegramFor<'a>,
+    pub google_chat: &'a GoogleChatFor<'a>,
+}
+
+/// `send_due_every`, and Google Chat (0.10.0-alpha.80).
+pub fn send_due_everywhere(
+    db: &Db,
+    credentials: &Credentials,
+    now: DateTime<Utc>,
+    in_sent: &SentCheck<'_>,
+    through: &Through<'_>,
+) -> Result<Run, SendError> {
+    let Through { slack, teams, telegram, google_chat } = *through;
     let mut run = Run::default();
     let now_text = fmt_rfc3339(now);
     let due: Vec<_> = db.due_outgoing(&now_text)?.into_iter().filter(|e| e.how == SendHow::Autonomous).collect();
@@ -882,6 +927,10 @@ pub fn send_due_every(
         }
         if connector.as_deref() == Some(crate::sources::telegram_account::CONNECTOR) {
             send_into_telegram(db, &rules, &draft, &entry, now, telegram, &mut run)?;
+            continue;
+        }
+        if connector.as_deref() == Some(crate::sources::google_chat::CONNECTOR) {
+            send_into_google_chat(db, &rules, &draft, &entry, now, google_chat, &mut run)?;
             continue;
         }
         let (config, account) = match sending::sending_from(db, &entry.source_id) {
@@ -1271,6 +1320,117 @@ fn send_into_telegram(
     Ok(())
 }
 
+/// `send_into_teams`, for a reply held to go into Google Chat
+/// (0.10.0-alpha.80).
+fn send_into_google_chat(
+    db: &Db,
+    rules: &Rules,
+    draft: &Draft,
+    entry: &crate::db::OutboxEntry,
+    now: DateTime<Utc>,
+    google_chat: &GoogleChatFor<'_>,
+    run: &mut Run,
+) -> Result<(), SendError> {
+    let Some(incoming) = sending::answered(db, draft)? else { return stopped(db, entry, run, NOT_WAITING) };
+    let (config, space) = match sending::google_chat::route(db, &incoming) {
+        Ok(found) => found,
+        Err(why) => return stopped(db, entry, run, why),
+    };
+    if entry.from_address != sending::google_chat::from_address(&config) {
+        return stopped(db, entry, run, FROM_CHANGED);
+    }
+    if !google_chat_read_since(db, &config, &entry.source_id, &entry.send_after)? {
+        if !run.waiting_for_check.contains(&entry.source_id) {
+            run.waiting_for_check.push(entry.source_id.clone());
+        }
+        return Ok(());
+    }
+    let waiting = waiting_now(db)?;
+    if let Some(why) = refusal(db, rules, draft, &waiting, Some(&entry.id), false, now)? {
+        return stopped(db, entry, run, why);
+    }
+    let waited_long = || {
+        DateTime::parse_from_rfc3339(&entry.send_after)
+            .ok()
+            .is_none_or(|t| now - t.with_timezone(&Utc) > Duration::minutes(SENT_PATIENCE_MINUTES))
+    };
+    let api = match google_chat(&entry.source_id) {
+        Ok(api) => api,
+        Err(TeamsUnavailable::NotSignedIn) => return stopped(db, entry, run, NO_GOOGLE_CHAT),
+        Err(TeamsUnavailable::Failed(why)) => {
+            tracing::warn!(target: "autoreply", error = %why, "couldn't sign in to Google Chat");
+            return if waited_long() { stopped(db, entry, run, GOOGLE_CHAT_UNKNOWN) } else { Ok(()) };
+        }
+    };
+    match sending::google_chat::still_theirs(&api, &config) {
+        Ok(()) => {}
+        Err(SendError::Cannot(why)) => return stopped(db, entry, run, &why),
+        Err(e) => {
+            tracing::warn!(target: "autoreply", error = %e, "couldn't ask Google Chat whose sign-in it is");
+            return if waited_long() { stopped(db, entry, run, GOOGLE_CHAT_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    match sending::google_chat::said_since(&api, &config, &space, &incoming) {
+        Ok(Ok(sending::slack::Since::Nothing)) => {}
+        Ok(Ok(sending::slack::Since::You)) => return stopped(db, entry, run, ALREADY_IN_GOOGLE_CHAT),
+        Ok(Ok(sending::slack::Since::Them)) => return stopped(db, entry, run, SAID_SINCE_GOOGLE_CHAT),
+        Ok(Err(why)) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = true, "couldn't look in Google Chat");
+            return stopped(db, entry, run, GOOGLE_CHAT_UNKNOWN);
+        }
+        Err(why) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = false, "couldn't look in Google Chat");
+            return if waited_long() { stopped(db, entry, run, GOOGLE_CHAT_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    if rules.rehearse {
+        run.rehearsed += usize::from(db.stop_held_outgoing(&entry.id, REHEARSED)?);
+        return Ok(());
+    }
+    if !db.take_held_outgoing(&entry.id, &fmt_rfc3339(now))? {
+        return Ok(());
+    }
+    match sending::google_chat::post(db, &api, entry, &space, &entry.body) {
+        Ok(created) => {
+            run.sent += 1;
+            if let Err(e) = db
+                .mark_sent_on_its_own(&draft.id)
+                .and_then(|_| sending::record_sent_draft(db, draft, &draft.generated_text))
+            {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be recorded on its draft");
+            }
+            if let Err(e) = sending::google_chat::record_in_conversation(
+                db,
+                entry,
+                &config,
+                &incoming,
+                &entry.body,
+                created.as_deref(),
+                true,
+            ) {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be put in its conversation");
+            }
+        }
+        Err(e) if e.may_have_gone() => run.unsure += 1,
+        Err(_) => run.failed += 1,
+    }
+    Ok(())
+}
+
+/// Whether a check that read the Google Chat account through began after
+/// `since`.
+fn google_chat_read_since(
+    db: &Db,
+    config: &GoogleChatSourceConfig,
+    source_id: &str,
+    since: &str,
+) -> Result<bool, DbError> {
+    let settled = db.get_source(source_id)?.is_some_and(|s| s.status != "failed" && s.status != "importing");
+    let read = config.last_read_at.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let held = DateTime::parse_from_rfc3339(since).ok();
+    Ok(settled && matches!((read, held), (Some(r), Some(h)) if r > h))
+}
+
 /// Whether a check that read the Telegram account through began after `since`.
 fn telegram_read_since(db: &Db, config: &TelegramSourceConfig, source_id: &str, since: &str) -> Result<bool, DbError> {
     let settled = db.get_source(source_id)?.is_some_and(|s| s.status != "failed" && s.status != "importing");
@@ -1370,9 +1530,16 @@ pub fn tick_every_now(
     teams: &TeamsFor<'_>,
     telegram: &TelegramFor<'_>,
 ) -> Result<Run, SendError> {
+    let no_chat = |_: &str| Err(TeamsUnavailable::NotSignedIn);
+    tick_everywhere_now(db, credentials, &Through { slack, teams, telegram, google_chat: &no_chat })
+}
+
+/// `tick` at the current time, through each chat service's way in
+/// (0.10.0-alpha.80).
+pub fn tick_everywhere_now(db: &Db, credentials: &Credentials, through: &Through<'_>) -> Result<Run, SendError> {
     let now = Utc::now();
     let held = hold_replies(db, now)?;
-    let mut run = send_due_every(db, credentials, now, &reply_in_sent(credentials), slack, teams, telegram)?;
+    let mut run = send_due_everywhere(db, credentials, now, &reply_in_sent(credentials), through)?;
     run.held = held;
     Ok(run)
 }
@@ -3020,5 +3187,193 @@ mod telegram_tests {
                 .query_row("SELECT metadata_json FROM messages WHERE external_id = 'telegram:4242:9'", [], |r| r.get(0))
                 .unwrap();
         assert!(metadata.contains(r#""sentOnItsOwn":true"#), "{metadata}");
+    }
+}
+
+#[cfg(test)]
+mod google_chat_tests {
+    //! Replying by itself in Google Chat (0.10.0-alpha.80), against a Chat
+    //! API that keeps what it is told (`sources::google_chat::live`).
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::db::{NewDraft, SendStatus};
+    use crate::sources::google_chat::live::{self, said, Spaces};
+    use crate::sources::google_chat::{new_source, sync, ChatApi, Me};
+    use crate::sources::teams::fake::{graph as server, TOKEN};
+
+    fn credentials() -> Credentials {
+        Credentials::new(
+            Arc::new(|_: &str| None),
+            Arc::new(|_: &str, _: &str| Ok(())),
+            crate::sources::oauth::Provider::microsoft(),
+            None,
+        )
+    }
+
+    fn at(minutes: i64) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-26T09:00:00Z").unwrap().with_timezone(&Utc) + Duration::minutes(minutes)
+    }
+
+    fn time(minutes: i64) -> String {
+        at(minutes).to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+    }
+
+    struct World {
+        db: Db,
+        source: String,
+        spaces: Spaces,
+        base: String,
+        direct: String,
+        group: String,
+    }
+
+    /// One Google Chat account read once: a direct message with Ada, where
+    /// her question waits, and a group chat where Bob's does; a draft
+    /// prepared for each; replying by itself on for the account.
+    fn world() -> World {
+        let spaces: Spaces = Arc::new(Mutex::new(vec![
+            live::Space {
+                name: "spaces/DM1".into(),
+                other: Some(("users/42".into(), "Ada Lovelace".into())),
+                messages: vec![
+                    said("spaces/DM1", "a1", "users/7", "C Haynes", &time(-120), "lunch soon?"),
+                    said("spaces/DM1", "a2", "users/42", "Ada Lovelace", &time(-10), "the place by the river?"),
+                ],
+            },
+            live::Space {
+                name: "spaces/G1".into(),
+                other: None,
+                messages: vec![said("spaces/G1", "g1", "users/43", "Bob", &time(-10), "dinner sunday, all of us?")],
+            },
+        ]));
+        let (base, _) = server(live::chat(spaces.clone(), Arc::new(Mutex::new(Vec::new()))));
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C Haynes").unwrap();
+        db.add_user_identifier(IdentifierKind::AccountId, &crate::sources::google_chat::account_id("users/7")).unwrap();
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
+        db.set_setting(crate::assist::SETTING, &true).unwrap();
+        let me = Me { id: "users/7".into(), name: "C Haynes".into(), email: Some("c@formicaria.example".into()) };
+        let source = db.create_source(&new_source(&me).unwrap()).unwrap().id;
+        sync(&db, &source, &api(&base), &|| false).unwrap();
+        db.conn().execute("UPDATE messages SET imported_at = ?1", [fmt_rfc3339(at(-5))]).unwrap();
+        read_through(&db, &source, at(-5));
+        let direct = prepared(&db, "google_chat:spaces/DM1/messages/a2", "yes, the river place. 12:30?");
+        let group = prepared(&db, "google_chat:spaces/G1/messages/g1", "sunday works");
+        set_rules(&db, Rules { enabled: true, mailboxes: vec![source.clone()], ..Rules::default() }).unwrap();
+        let on = Rules { enabled_at: Some("2026-01-01T00:00:00.000Z".into()), ..rules(&db).unwrap() };
+        db.set_setting(SETTING, &on).unwrap();
+        World { db, source, spaces, base, direct, group }
+    }
+
+    fn api(base: &str) -> ChatApi {
+        ChatApi::at(base, &format!("{base}/userinfo"), TOKEN).unwrap()
+    }
+
+    fn prepared(db: &Db, external_id: &str, text: &str) -> String {
+        let (message, conversation, person, body): (String, String, Option<String>, String) = db
+            .conn()
+            .query_row(
+                "SELECT id, conversation_id, participant_id, body FROM messages WHERE external_id = ?1",
+                [external_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        let draft = db
+            .create_draft(&NewDraft {
+                participant_id: person,
+                conversation_id: Some(conversation),
+                channel: "chat".into(),
+                situation_id: None,
+                incoming_message: Some(body),
+                incoming_message_id: Some(message),
+                intent: None,
+                generated_text: text.into(),
+                provider: "mock".into(),
+                model: "m".into(),
+                context: json!({}),
+                prompt_hash: "h".into(),
+                evidence: json!({}),
+                alternative_to: None,
+            })
+            .unwrap();
+        db.mark_prepared(&draft.id).unwrap();
+        draft.id
+    }
+
+    fn read_through(db: &Db, source: &str, began: DateTime<Utc>) {
+        let mut config: GoogleChatSourceConfig =
+            serde_json::from_value(db.get_source(source).unwrap().unwrap().config).unwrap();
+        config.last_read_at = Some(fmt_rfc3339(began));
+        db.set_source_config(source, &serde_json::to_value(&config).unwrap()).unwrap();
+        db.set_source_status(source, "imported", None).unwrap();
+    }
+
+    fn send(w: &World, minutes: i64) -> Run {
+        let chat = |_: &str| Ok(api(&w.base));
+        let through = Through {
+            slack: &|_| None,
+            teams: &|_| Err(TeamsUnavailable::NotSignedIn),
+            telegram: &|_| None,
+            google_chat: &chat,
+        };
+        send_due_everywhere(&w.db, &credentials(), at(minutes), &|_, _, _, _| Ok(false), &through).unwrap()
+    }
+
+    #[test]
+    fn a_direct_message_is_answered_by_itself_and_a_group_is_not() {
+        let w = world();
+        assert_eq!(why_not_by_itself(&w.db, &w.group, at(0)).unwrap().as_deref(), Some(GROUP));
+        assert_eq!(why_not_by_itself(&w.db, &w.direct, at(0)).unwrap(), None);
+        assert_eq!(hold_replies(&w.db, at(0)).unwrap(), 1);
+        let held = w.db.recent_outgoing(5).unwrap();
+        assert_eq!((held[0].status, held[0].from_address.as_str()), (SendStatus::Held, "google_chat:users/7"));
+
+        let early = send(&w, 20);
+        assert_eq!((early.sent, early.waiting_for_check.clone()), (0, vec![w.source.clone()]));
+        read_through(&w.db, &w.source, at(60 * 24));
+        let run = send(&w, 20);
+        assert_eq!(run.sent, 1, "{run:?}");
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert_eq!(entry.status, SendStatus::Sent);
+        assert_eq!(entry.message_id, "google_chat:spaces/DM1/messages/p2");
+        let posted = w.spaces.lock().unwrap()[0].messages.last().cloned().unwrap();
+        assert_eq!(posted["text"], "yes, the river place. 12:30?");
+
+        // Read back by the next check: known as sent by itself, not the
+        // user's writing.
+        let summary = sync(&w.db, &w.source, &api(&w.base), &|| false).unwrap();
+        assert_eq!(summary.inserted, 0, "{summary:?}");
+        let metadata: String =
+            w.db.conn()
+                .query_row(
+                    "SELECT metadata_json FROM messages WHERE external_id = 'google_chat:spaces/DM1/messages/p2'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert!(metadata.contains(r#""sentOnItsOwn":true"#), "{metadata}");
+    }
+
+    #[test]
+    fn what_was_said_in_google_chat_since_stops_it() {
+        let w = world();
+        assert_eq!(hold_replies(&w.db, at(0)).unwrap(), 1);
+        read_through(&w.db, &w.source, at(60 * 24));
+        w.spaces.lock().unwrap()[0].messages.push(said(
+            "spaces/DM1",
+            "a3",
+            "users/42",
+            "Ada Lovelace",
+            &time(-1),
+            "actually, friday?",
+        ));
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1), "{run:?}");
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert_eq!(entry.error.as_deref(), Some(SAID_SINCE_GOOGLE_CHAT));
+        assert_eq!(w.spaces.lock().unwrap()[0].messages.len(), 3, "nothing posted");
     }
 }

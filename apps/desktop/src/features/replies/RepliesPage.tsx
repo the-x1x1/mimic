@@ -858,7 +858,8 @@ export function DraftReview({
       {draft.channel === "email" ||
       envelope.data?.kind === "slack" ||
       envelope.data?.kind === "teams" ||
-      envelope.data?.kind === "telegram" ? (
+      envelope.data?.kind === "telegram" ||
+      envelope.data?.kind === "googleChat" ? (
         <ByMyself draftId={draft.id} participantId={draft.participantId} />
       ) : null}
       <div className="thread__actions">

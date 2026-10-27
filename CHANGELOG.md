@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.80] — 2026-10-26
+
+Replying in Google Chat.
+
+### Added
+
+- **Send it, in Google Chat.** A reply to a Google Chat message goes into that conversation, as you, exactly as the Send panel shows it, once you press Send. If Google's answer is lost as it goes, I say it may have gone and don't send it again until you've looked.
+- **Google Chat, by itself.** Tick a Google Chat account beside your mailboxes under Replying by myself, and I answer direct messages there the way I do email, Slack, Teams and Telegram: held first, checked again after I've read the account, and — just before it goes — I look at the conversation: if you've answered there, or they've written again, it doesn't go. Never a group chat. **Check it all now** tries your Google Chat sign-in too, sending nothing.
+
 ## [0.10.0-alpha.79] — 2026-10-26
 
 Google Chat.

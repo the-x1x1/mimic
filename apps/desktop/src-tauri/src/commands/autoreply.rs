@@ -84,6 +84,7 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
     }
     let (db, credentials, secrets) = (state.db.clone(), state.mail_credentials.clone(), state.secrets.clone());
     let teams_access = state.teams_access.clone();
+    let chat_access = state.google_chat_access.clone();
     let (shared, handle) = (state.clone(), tokio::runtime::Handle::current());
     let ran = tauri::async_runtime::spawn_blocking(move || {
         // Each Slack workspace with its own token (0.10.0-alpha.66), each
@@ -114,7 +115,22 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
             let post = crate::commands::telegram::KeptPost::start(handle.clone(), shared.clone(), source_id, account);
             Some(Box::new(post))
         };
-        autoreply::tick_every_now(&db, &credentials, &slack, &teams, &telegram)
+        // Each Google Chat account with its own sign-in (0.10.0-alpha.80).
+        let google_chat = |source_id: &str| {
+            use autoreply::TeamsUnavailable;
+            use mimic_core::sources::google_chat::{ChatApi, NOT_SIGNED_IN, NO_CLIENT};
+            let token = chat_access.token(source_id).map_err(|why| {
+                if why == NOT_SIGNED_IN || why == NO_CLIENT {
+                    TeamsUnavailable::NotSignedIn
+                } else {
+                    TeamsUnavailable::Failed(why)
+                }
+            })?;
+            ChatApi::new(&token).map_err(|e| TeamsUnavailable::Failed(e.to_string()))
+        };
+        let through =
+            autoreply::Through { slack: &slack, teams: &teams, telegram: &telegram, google_chat: &google_chat };
+        autoreply::tick_everywhere_now(&db, &credentials, &through)
     })
     .await;
     state.replying.store(false, Ordering::SeqCst);
@@ -153,6 +169,7 @@ pub(crate) fn queue_check(state: &SharedState, source_id: &str) {
         Some(mimic_core::sources::slack::CONNECTOR) => mimic_core::sources::slack::JOB_KIND,
         Some(mimic_core::sources::teams::CONNECTOR) => mimic_core::sources::teams::JOB_KIND,
         Some(mimic_core::sources::telegram_account::CONNECTOR) => mimic_core::sources::telegram_account::JOB_KIND,
+        Some(mimic_core::sources::google_chat::CONNECTOR) => mimic_core::sources::google_chat::JOB_KIND,
         _ => mimic_core::sources::imap::JOB_KIND,
     };
     let queued = state.db.list_jobs(500, true).map(|jobs| {
