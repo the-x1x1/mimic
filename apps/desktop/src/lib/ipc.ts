@@ -310,6 +310,9 @@ export const ipc = {
   /** A connected workspace's token, given again for the same account. */
   setSlackToken: (sourceId: string, token: string) =>
     call("set_slack_token", Source, { sourceId, token }),
+  /** Read a workspace's channels for what is said to the user, or stop (0.10.0-alpha.99). */
+  setSlackChannels: (sourceId: string, on: boolean) =>
+    call("set_slack_channels", Source, { sourceId, on }),
   deleteSource: (sourceId: string) => call("delete_source", DeletionReport, { sourceId }),
   pickSourceFile: (title: string, extensions: string[]) =>
     call("pick_source_file", z_string.nullable(), { title, extensions }),

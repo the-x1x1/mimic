@@ -14,7 +14,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useDeleteSource, useSources, useStartImport } from "@/hooks/useSources";
 import { AddSourceDialog } from "./AddSourceDialog";
 import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
-import { ConnectSlackDialog, SlackToken } from "./ConnectSlackDialog";
+import { ConnectSlackDialog, SlackChannels, SlackToken } from "./ConnectSlackDialog";
 import { ConnectTeamsDialog, TeamsSignInAgain } from "./ConnectTeamsDialog";
 import {
   ConnectGoogleChatDialog,
@@ -146,6 +146,13 @@ export function SourcesPage() {
                         <MailboxFolders sourceId={s.id} name={s.name} />
                         <MailboxSending sourceId={s.id} name={s.name} />
                       </>
+                    ) : null}
+                    {s.connector === "slack" ? (
+                      <SlackChannels
+                        sourceId={s.id}
+                        on={slackWorkspace(s)?.channels ?? false}
+                        missing={slackWorkspace(s)?.channelsMissing ?? null}
+                      />
                     ) : null}
                     {s.connector === "google_chat" ? (
                       <GoogleChatSpaces

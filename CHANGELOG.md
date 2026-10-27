@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.99] — 2026-10-26
+
+What's said to you in Slack channels.
+
+### Added
+
+- **Slack channels, for what's said to you.** Under your workspace in Your mail, tick **Read the channels I'm in, for what's said to me**, and Mimic reads the threads you're in there — where you've written, or someone @mentioned you — whole, replies and all, each as a conversation of its own named for its channel. The rest of a busy channel is left alone. A reply you approve goes into that thread. Your Slack app needs four more scopes for it (channels:history, channels:read, groups:history, groups:read): the manifest now has them, and an app made before says which to add.
+
 ## [0.10.0-alpha.98] — 2026-10-26
 
 Other ways of saying it in Write, side by side.

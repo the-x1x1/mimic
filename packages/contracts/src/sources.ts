@@ -220,17 +220,26 @@ export function isSlackUserToken(token: string): boolean {
   return t.startsWith("xoxp-") && t.length > 20 && /^[\x21-\x7e]+$/.test(t);
 }
 
-/** A connected Slack workspace, from its stored settings (0.10.0-alpha.64). */
-export function slackWorkspace(source: {
-  connector: string;
-  config: Record<string, unknown>;
-}): { team: string; user: string; lastCheckedAt: string | null } | null {
+/**
+ * A connected Slack workspace, from its stored settings (0.10.0-alpha.64):
+ * whether its channels are read (0.10.0-alpha.99), and the scope Slack said
+ * that needs when the token hasn't it.
+ */
+export function slackWorkspace(source: { connector: string; config: Record<string, unknown> }): {
+  team: string;
+  user: string;
+  lastCheckedAt: string | null;
+  channels: boolean;
+  channelsMissing: string | null;
+} | null {
   if (source.connector !== "slack") return null;
   const parsed = z
     .object({
       team: z.string(),
       user: z.string(),
       lastCheckedAt: z.string().nullable().optional(),
+      channels: z.boolean().optional(),
+      channelsMissing: z.string().nullable().optional(),
     })
     .safeParse(source.config);
   return parsed.success
@@ -238,6 +247,8 @@ export function slackWorkspace(source: {
         team: parsed.data.team,
         user: parsed.data.user,
         lastCheckedAt: parsed.data.lastCheckedAt ?? null,
+        channels: parsed.data.channels ?? false,
+        channelsMissing: parsed.data.channelsMissing ?? null,
       }
     : null;
 }
@@ -338,8 +349,17 @@ export type TelegramStep = z.infer<typeof TelegramStep>;
  * What a Slack app made for Mimic asks for, as a manifest to paste into
  * "Create New App → From a manifest": user scopes only, no bot, and a token
  * that doesn't expire. `chat:write` is there for sending a reply the user
- * approves (0.10.0-alpha.65).
+ * approves (0.10.0-alpha.65); the channel scopes for reading the channels
+ * they're in, once they turn that on (`SLACK_CHANNEL_SCOPES`,
+ * 0.10.0-alpha.99).
  */
+export const SLACK_CHANNEL_SCOPES = [
+  "channels:history",
+  "channels:read",
+  "groups:history",
+  "groups:read",
+] as const;
+
 export const SLACK_USER_SCOPES = [
   "im:history",
   "im:read",
@@ -348,13 +368,15 @@ export const SLACK_USER_SCOPES = [
   "users:read",
   "users:read.email",
   "chat:write",
+  ...SLACK_CHANNEL_SCOPES,
 ] as const;
 
 export const SLACK_MANIFEST = JSON.stringify(
   {
     display_information: {
       name: "Mimic",
-      description: "Reads my direct messages so Mimic can draft replies in my voice.",
+      description:
+        "Reads my direct messages, and what's said to me in channels, so Mimic can draft replies in my voice.",
     },
     oauth_config: { scopes: { user: SLACK_USER_SCOPES } },
     settings: {

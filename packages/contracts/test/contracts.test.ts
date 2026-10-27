@@ -1082,13 +1082,30 @@ describe("connecting a mailbox", () => {
       team: "Acme",
       user: "c",
       lastCheckedAt: null,
+      channels: false,
+      channelsMissing: null,
     });
+    // Channels read (0.10.0-alpha.99), with a token that can't yet.
+    expect(
+      slackWorkspace({
+        connector: "slack",
+        config: { ...config, channels: true, channelsMissing: "channels:read" },
+      }),
+    ).toMatchObject({ channels: true, channelsMissing: "channels:read" });
     expect(slackWorkspace({ connector: "imap", config })).toBeNull();
     const manifest = JSON.parse(SLACK_MANIFEST) as {
       oauth_config: { scopes: { user: string[]; bot?: string[] } };
       settings: { token_rotation_enabled: boolean };
     };
     expect(manifest.oauth_config.scopes.user).toEqual([...SLACK_USER_SCOPES]);
+    expect(manifest.oauth_config.scopes.user).toEqual(
+      expect.arrayContaining([
+        "channels:history",
+        "channels:read",
+        "groups:history",
+        "groups:read",
+      ]),
+    );
     expect(manifest.oauth_config.scopes.bot).toBeUndefined();
     expect(manifest.settings.token_rotation_enabled).toBe(false);
   });
