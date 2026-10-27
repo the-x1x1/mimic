@@ -122,6 +122,10 @@ pub struct SendingMailbox {
     pub why_not: Option<String>,
     /// What goes under a reply sent through it (0.10.0-alpha.36).
     pub signature: Option<String>,
+    /// Whether a reply through it quotes what it answers, unless the user
+    /// says otherwise for that reply (0.10.0-alpha.96).
+    #[serde(default)]
+    pub quotes: bool,
 }
 
 /// Where a reply goes: out of a mailbox, or into Slack (0.10.0-alpha.65),
@@ -166,6 +170,11 @@ pub struct ReplyEnvelope {
     /// conversation, and there is no subject (`slack::envelope_for`).
     #[serde(default)]
     pub kind: ReplyKind,
+    /// The message it answers, quoted as it would go under the reply
+    /// (`quote_of`, 0.10.0-alpha.96): none for a chat, or a message without a
+    /// date or words.
+    #[serde(default)]
+    pub quoted: Option<String>,
 }
 
 /// What the user approved: sent exactly as given.
@@ -183,6 +192,10 @@ pub struct SendRequest {
     #[serde(default)]
     pub cc: Vec<String>,
     pub subject: String,
+    /// Quote the message it answers under it, or not; unset is as its
+    /// mailbox does (0.10.0-alpha.96).
+    #[serde(default)]
+    pub quote: Option<bool>,
 }
 
 /// Every connected mailbox, with whether a reply can go out through it.
@@ -192,6 +205,7 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
     for s in db.list_sources()?.into_iter().filter(|s| s.connector == imap::CONNECTOR) {
         let config = serde_json::from_value::<ImapSourceConfig>(s.config.clone()).ok();
         let signature = config.as_ref().and_then(|c| c.signature()).map(str::to_string);
+        let quotes = config.as_ref().is_none_or(|c| c.quotes());
         let through_graph = config.as_ref().is_some_and(|c| c.through_graph && c.account.auth == Auth::Microsoft);
         let account = config
             .ok_or(UNREADABLE)
@@ -207,6 +221,7 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
                 server: Some(if through_graph { THROUGH_GRAPH.to_string() } else { a.host }),
                 why_not: None,
                 signature,
+                quotes,
             },
             Err(why) => SendingMailbox {
                 source_id: s.id,
@@ -215,6 +230,7 @@ pub fn sending_mailboxes(db: &Db) -> Result<Vec<SendingMailbox>, DbError> {
                 server: None,
                 why_not: Some(why.to_string()),
                 signature,
+                quotes,
             },
         });
     }
@@ -274,6 +290,10 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
     } else {
         None
     };
+    let quoted = match (&incoming, draft.channel == "email") {
+        (Some(m), true) => quote_of(db, m, &chrono::Local)?,
+        _ => None,
+    };
     Ok(ReplyEnvelope {
         draft_id: draft.id,
         mailboxes,
@@ -285,7 +305,68 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
         why_not,
         held,
         kind: ReplyKind::Mail,
+        quoted,
     })
+}
+
+/// The most of a message quoted under a reply: its first lines up to this
+/// many characters, then "[…]".
+const QUOTE_MOST: usize = 20_000;
+
+/// The message a reply answers, quoted as mail programs quote it under a
+/// reply (0.10.0-alpha.96): "On <its date, on `tz`'s clock>, <name>
+/// <<address>> wrote:", then each line of its words — as kept: theirs, not
+/// the history under them — after "> ". Reading the reply back takes off
+/// everything from that line on (`normalize::clean_body`), so what is
+/// learned is still the user's words alone. None for a message without a
+/// date (the line wouldn't read as one) or without words.
+pub fn quote_of<Tz: chrono::TimeZone>(db: &Db, m: &Message, tz: &Tz) -> Result<Option<String>, DbError>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let Some(at) = m.sent_at.as_deref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) else {
+        return Ok(None);
+    };
+    if m.body.trim().is_empty() {
+        return Ok(None);
+    }
+    let name = match m.participant_id.as_deref() {
+        Some(id) => db.get_participant(id)?.map(|p| p.display_name).filter(|n| !n.trim().is_empty()),
+        None => None,
+    };
+    let address = m.metadata.get("from").and_then(Value::as_str).filter(|a| outgoing::is_address(a));
+    let who = match (name, address) {
+        (Some(n), Some(a)) => format!("{n} <{a}>"),
+        (None, Some(a)) => a.to_string(),
+        (Some(n), None) => n,
+        (None, None) => "they".to_string(),
+    };
+    let date = at.with_timezone(tz).format("%a, %-d %b %Y at %H:%M");
+    let mut out = format!("On {date}, {who} wrote:");
+    let mut used = 0usize;
+    for line in m.body.lines() {
+        used += line.chars().count() + 1;
+        if used > QUOTE_MOST {
+            out.push_str("\n> […]");
+            break;
+        }
+        out.push('\n');
+        out.push('>');
+        if !line.is_empty() {
+            out.push(' ');
+            out.push_str(line);
+        }
+    }
+    Ok(Some(out))
+}
+
+/// A reply's words, signed, with the message it answers quoted under them
+/// when it is to be (0.10.0-alpha.96).
+pub fn quoted_reply(signed: &str, quoted: Option<&str>) -> String {
+    match quoted {
+        Some(q) => format!("{}\n\n{q}", signed.trim_end()),
+        None => signed.to_string(),
+    }
 }
 
 /// The stored message a draft answers, when it answers one.
@@ -433,7 +514,12 @@ pub fn send_reply(db: &Db, credentials: &Credentials, req: &SendRequest) -> Resu
         return Err(SendError::Cannot(NOT_OFFERED.into()));
     }
     let cc = copied_in(db, incoming.as_ref(), &to, &req.cc)?;
-    let body = signed(&req.text, config.signature());
+    // Quoted as the panel showed it, unless the user said not to (0.10.0-alpha.96).
+    let quoted = match &incoming {
+        Some(m) if req.quote.unwrap_or_else(|| config.quotes()) => quote_of(db, m, &chrono::Local)?,
+        _ => None,
+    };
+    let body = quoted_reply(&signed(&req.text, config.signature()), quoted.as_deref());
     let (in_reply_to, references) = threading(incoming.as_ref());
     let subject = match req.subject.trim() {
         "" => outgoing::reply_subject(None),
@@ -791,6 +877,7 @@ mod tests {
             also_read: Vec::new(),
             passed_over: Vec::new(),
             through_graph: false,
+            quote: None,
         };
         let mailbox = db
             .create_source(&NewSource {
@@ -850,6 +937,7 @@ mod tests {
             to: envelope.to.clone(),
             cc: vec![],
             subject: envelope.subject.clone(),
+            quote: None,
         }
     }
 
@@ -971,6 +1059,49 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_quotes_what_it_answers_unless_told_not_to_and_reads_back_as_the_words_alone() {
+        let (port, seen) = serve(Behaviour::default());
+        let w = world(port);
+        let incoming = w.db.get_message(w.draft.incoming_message_id.as_deref().unwrap()).unwrap().unwrap();
+        // On UTC's clock, for the test; the app uses this computer's.
+        assert_eq!(
+            quote_of(&w.db, &incoming, &chrono::Utc).unwrap().as_deref(),
+            Some("On Mon, 2 Mar 2026 at 09:00, Ada Lovelace <ada@example.com> wrote:\n> can you make the offsite on friday?")
+        );
+        let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
+        assert!(envelope.mailboxes[0].quotes, "unless the user said not to");
+        let shown = envelope.quoted.clone().expect("shown before it goes");
+        assert!(
+            shown.ends_with("Ada Lovelace <ada@example.com> wrote:\n> can you make the offsite on friday?"),
+            "{shown}"
+        );
+
+        let sent = send_reply(&w.db, &credentials(), &approved(&w, &envelope, "Yes, I'll be there.")).unwrap();
+        assert_eq!(sent.body, format!("Yes, I'll be there.\n\n{shown}"));
+        let data = String::from_utf8(seen.recv().unwrap().data).unwrap();
+        assert!(data.contains("> can you make the offsite on friday?"), "{data}");
+        // Its copy in the conversation is the user's words alone.
+        let own: String =
+            w.db.conn()
+                .query_row(
+                    "SELECT body FROM messages WHERE conversation_id = ?1 AND direction = 'self'",
+                    [&w.conversation],
+                    |r| r.get(0),
+                )
+                .unwrap();
+        assert_eq!(own, "Yes, I'll be there.");
+
+        // Turned off for the mailbox, or for one reply.
+        let mut config: ImapSourceConfig =
+            serde_json::from_value(w.db.get_source(&w.mailbox).unwrap().unwrap().config).unwrap();
+        config.quote = Some(false);
+        w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
+        assert!(!sending_mailboxes(&w.db).unwrap()[0].quotes);
+        assert_eq!(quoted_reply("Hi.", None), "Hi.");
+        assert_eq!(quoted_reply("Hi.\n", Some("On x, y wrote:\n> z")), "Hi.\n\nOn x, y wrote:\n> z");
+    }
+
+    #[test]
     fn a_reply_goes_signed_as_its_mailbox_signs_and_its_draft_keeps_only_the_words() {
         let (port, seen) = serve(Behaviour::default());
         let w = world(port);
@@ -982,7 +1113,12 @@ mod tests {
         let envelope = envelope_for(&w.db, &w.draft.id).unwrap();
         assert_eq!(envelope.mailboxes[0].signature.as_deref(), Some("C Haynes\nFormicaria"), "shown before it goes");
         let sent = send_reply(&w.db, &credentials(), &approved(&w, &envelope, "Yes, I'll be there.")).unwrap();
-        assert_eq!(sent.body, "Yes, I'll be there.\n\n-- \nC Haynes\nFormicaria", "recorded as it went");
+        // Signed, then their message quoted under it (0.10.0-alpha.96).
+        assert!(
+            sent.body.starts_with("Yes, I'll be there.\n\n-- \nC Haynes\nFormicaria\n\nOn "),
+            "recorded as it went: {}",
+            sent.body
+        );
 
         let data = String::from_utf8(seen.recv().unwrap().data).unwrap();
         assert!(data.contains("Yes, I'll be there.\r\n\r\n--=20\r\nC Haynes\r\nFormicaria\r\n"), "{data}");

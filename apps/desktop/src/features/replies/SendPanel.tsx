@@ -22,6 +22,10 @@ import { toast } from "@/state/toast";
  * the one "mailbox", who it goes to is that conversation, and there is no
  * subject, signature or anyone to copy in.
  *
+ * Their message goes quoted under the reply, as mail programs quote it, when
+ * the mailbox does and the user leaves **Quote their message** ticked
+ * (0.10.0-alpha.96); what would go is shown.
+ *
  * **Send it** waits the seconds the user chose (`send.undoSeconds`, five
  * unless changed) before anything goes, with **Don't send it** to take it
  * back (0.10.0-alpha.40). Leaving the panel in that time sends nothing, and
@@ -84,6 +88,10 @@ export function SendPanel({
   const cc = others.filter((a) => ticked.has(a));
   const to = choices[choice] ?? [];
   const from = able.find((m) => m.sourceId === sourceId);
+  // Quoting as the mailbox does, until the user says otherwise for this reply.
+  const [quoteChoice, setQuoteChoice] = useState<boolean | null>(null);
+  const quoting =
+    service === null && envelope.quoted ? (quoteChoice ?? from?.quotes ?? true) : false;
   const code = (send.error as { code?: string } | null)?.code;
   const unsure = sendMayHaveGone(code);
 
@@ -124,6 +132,7 @@ export function SendPanel({
       to,
       cc,
       subject,
+      ...(envelope.quoted && service === null ? { quote: quoting } : {}),
     });
     const changed = text !== draft.generatedText;
     if (service) {
@@ -235,6 +244,23 @@ export function SendPanel({
         <div className="thread__send-row thread__send-row--top">
           <span className="muted small">Signed</span>
           <p className="letter signature-preview">{from.signature}</p>
+        </div>
+      ) : null}
+      {envelope.quoted && service === null ? (
+        <div className="thread__send-row thread__send-row--top">
+          <span className="muted small">Under it</span>
+          <div className="stack gap-1">
+            <label className="row gap-1">
+              <input
+                type="checkbox"
+                checked={quoting}
+                disabled={left !== null}
+                onChange={(e) => setQuoteChoice(e.target.checked)}
+              />
+              <span>Quote their message</span>
+            </label>
+            {quoting ? <p className="letter quote-preview">{envelope.quoted}</p> : null}
+          </div>
         </div>
       ) : null}
       {service ? null : (

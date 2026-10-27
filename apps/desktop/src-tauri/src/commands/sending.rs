@@ -128,6 +128,8 @@ pub struct MailboxSending {
     /// Its organisation turned off sending from apps by SMTP, so replies go
     /// through Microsoft 365 itself (0.10.0-alpha.94).
     pub through_graph: bool,
+    /// Replies from it quote the message they answer (0.10.0-alpha.96).
+    pub quotes: bool,
 }
 
 impl MailboxSending {
@@ -141,6 +143,7 @@ impl MailboxSending {
             keeps_sent,
             signature: config.signature().map(str::to_string),
             through_graph: config.through_graph && config.account.auth == imap::Auth::Microsoft,
+            quotes: config.quotes(),
         }
     }
 }
@@ -231,6 +234,20 @@ pub async fn set_mailbox_signature(
     config.signature = (!signature.is_empty()).then_some(signature);
     state.db.set_source_config(&source_id, &serde_json::to_value(&config)?)?;
     Ok(MailboxSending::of(&config))
+}
+
+/// Whether replies from a mailbox quote the message they answer
+/// (0.10.0-alpha.96): one key of its settings, so a check writing back its
+/// marks meanwhile keeps it.
+#[tauri::command]
+pub fn set_mailbox_quoting(
+    state: State<'_, SharedState>,
+    source_id: String,
+    on: bool,
+) -> CommandResult<MailboxSending> {
+    mailbox_config(&state, &source_id)?;
+    state.db.set_source_config_key(&source_id, "quote", &serde_json::Value::Bool(on))?;
+    Ok(MailboxSending::of(&mailbox_config(&state, &source_id)?))
 }
 
 /// Sign in to the server a mailbox's replies go out through — its provider's

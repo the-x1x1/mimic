@@ -36,6 +36,8 @@ export const MailboxSending = z.object({
    * through Microsoft 365 itself (0.10.0-alpha.94).
    */
   throughGraph: z.boolean().optional(),
+  /** Replies from it quote the message they answer (0.10.0-alpha.96). */
+  quotes: z.boolean().optional(),
 });
 export type MailboxSending = z.infer<typeof MailboxSending>;
 
@@ -48,6 +50,8 @@ export const SendingMailbox = z.object({
   whyNot: z.string().nullable(),
   /** What goes under a reply sent through it, after a `-- ` line (0.10.0-alpha.36). */
   signature: z.string().nullable().optional(),
+  /** Whether a reply through it quotes what it answers, unless changed for that reply (0.10.0-alpha.96). */
+  quotes: z.boolean().optional(),
 });
 export type SendingMailbox = z.infer<typeof SendingMailbox>;
 
@@ -109,6 +113,8 @@ export const ReplyEnvelope = z.object({
    * conversation, and there is no subject. Absent is mail.
    */
   kind: z.enum(["mail", "slack", "teams", "telegram", "googleChat"]).optional(),
+  /** The message it answers, quoted as it would go under the reply (0.10.0-alpha.96). */
+  quoted: z.string().nullable().optional(),
 });
 export type ReplyEnvelope = z.infer<typeof ReplyEnvelope>;
 
@@ -121,6 +127,8 @@ export interface SendRequest {
   /** The others on the message the user ticked; only ever from `ReplyEnvelope.othersOnIt`. */
   cc: string[];
   subject: string;
+  /** Quote the message it answers under it, or not; unset is as its mailbox does (0.10.0-alpha.96). */
+  quote?: boolean;
 }
 
 /** The address list as one would write it on an envelope. */

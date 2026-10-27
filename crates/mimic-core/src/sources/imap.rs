@@ -278,10 +278,20 @@ pub struct ImapSourceConfig {
     /// in again then asks for Graph's `Mail.Send` too.
     #[serde(default)]
     pub through_graph: bool,
+    /// Whether a reply quotes the message it answers under it, as mail
+    /// programs do (0.10.0-alpha.96); unset is yes.
+    #[serde(default)]
+    pub quote: Option<bool>,
 }
 
 impl ImapSourceConfig {
     /// The signature as it goes under a reply: trimmed, and none when blank.
+    /// Whether replies from it quote what they answer: unless the user said
+    /// not to (0.10.0-alpha.96).
+    pub fn quotes(&self) -> bool {
+        self.quote.unwrap_or(true)
+    }
+
     pub fn signature(&self) -> Option<&str> {
         self.signature.as_deref().map(str::trim).filter(|s| !s.is_empty())
     }
@@ -1462,6 +1472,7 @@ pub fn sync(
         config.signature = latest.signature;
         config.also_read = latest.also_read;
         config.through_graph = latest.through_graph;
+        config.quote = latest.quote;
     }
     db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
     match &result {
@@ -2401,6 +2412,7 @@ mod tests {
             also_read: Vec::new(),
             passed_over: Vec::new(),
             through_graph: false,
+            quote: None,
         };
         let source = db
             .create_source(&crate::db::NewSource {
@@ -3575,6 +3587,7 @@ mod tests {
             also_read: Vec::new(),
             passed_over: Vec::new(),
             through_graph: false,
+            quote: None,
         };
         let second = db
             .create_source(&crate::db::NewSource {
@@ -3690,6 +3703,7 @@ mod tests {
             also_read: Vec::new(),
             passed_over: Vec::new(),
             through_graph: false,
+            quote: None,
         };
         let reply = b"From: c@example.com\r\nTo: ada@example.com\r\nSubject: Re: Lunch\r\n\r\nsee you there\r\n";
         copy_to_sent(&config, &pw("pw"), reply).unwrap();

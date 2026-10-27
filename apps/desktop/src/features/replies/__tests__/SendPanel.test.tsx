@@ -139,6 +139,46 @@ describe("sending a reply from Mimic", () => {
     expect(native.resolveDraft).not.toHaveBeenCalled();
   });
 
+  it("shows their message quoted under it, and sends it without when unticked", async () => {
+    const quoted =
+      "On Mon, 2 Mar 2026 at 09:00, Ada <ada@example.com> wrote:\n> can you confirm Friday?";
+    native.replyEnvelope.mockResolvedValue(envelope({ quoted }));
+    native.sendReply.mockImplementation(async (r: { to: string[] }) => sent(r.to));
+    const onDone = renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    const box = within(panel).getByRole("checkbox", { name: "Quote their message" });
+    expect(box).toBeChecked();
+    expect(within(panel).getByText(/> can you confirm Friday\?/)).toBeInTheDocument();
+    fireEvent.click(box);
+    expect(within(panel).queryByText(/> can you confirm Friday\?/)).toBeNull();
+    await sendIt(panel);
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(native.sendReply).toHaveBeenCalledWith(expect.objectContaining({ quote: false }));
+  });
+
+  it("starts from the mailbox's own choice not to quote", async () => {
+    native.replyEnvelope.mockResolvedValue(
+      envelope({
+        quoted: "On Mon, 2 Mar 2026 at 09:00, Ada wrote:\n> hi",
+        mailboxes: [
+          {
+            sourceId: "s1",
+            name: "c@example.com",
+            fromAddress: "c@example.com",
+            server: "smtp.gmail.com",
+            whyNot: null,
+            quotes: false,
+          },
+        ],
+      }),
+    );
+    renderReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    const panel = screen.getByRole("group", { name: "Send it" });
+    expect(within(panel).getByRole("checkbox", { name: "Quote their message" })).not.toBeChecked();
+  });
+
   it("sends a reply to a Slack message into that conversation, as the user, with no subject", async () => {
     native.replyEnvelope.mockResolvedValue(
       envelope({

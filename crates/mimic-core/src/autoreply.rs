@@ -680,9 +680,11 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
             if !goes_to_them(db, draft.participant_id.as_deref(), &envelope.to)? {
                 continue;
             }
+            // Quoting what it answers, as the mailbox does (0.10.0-alpha.96).
+            let quoted = if config.quotes() { sending::quote_of(db, &incoming, &chrono::Local)? } else { None };
             (
                 account.from_address.clone(),
-                sending::signed(&draft.generated_text, config.signature()),
+                sending::quoted_reply(&sending::signed(&draft.generated_text, config.signature()), quoted.as_deref()),
                 // Marked, so Mimic on another computer knows it (alpha.56).
                 outgoing::new_own_message_id(&account.from_address),
             )
@@ -1639,6 +1641,7 @@ mod tests {
             also_read: Vec::new(),
             passed_over: Vec::new(),
             through_graph: false,
+            quote: None,
         };
         let mailbox = db
             .create_source(&NewSource {
@@ -1901,6 +1904,7 @@ mod tests {
             to: vec!["ada@example.com".into()],
             cc: vec![],
             subject: "Re: Lunch".into(),
+            quote: None,
         };
         let e = sending::send_reply(&w.db, &credentials(), &req).unwrap_err();
         assert!(matches!(e, SendError::Db(DbError::Invalid(ref m)) if m == sending::HELD), "{e}");
@@ -2375,7 +2379,12 @@ mod tests {
         w.db.set_source_config(&w.mailbox, &serde_json::to_value(&config).unwrap()).unwrap();
         tick(&w.db, &credentials(), at(0)).unwrap();
         let held = only_entry(&w.db);
-        assert_eq!(held.body, "yes, the river place. 12:30?\n\n-- \nC", "held as it will go");
+        // Signed, then what it answers quoted under it (0.10.0-alpha.96).
+        assert!(
+            held.body.starts_with("yes, the river place. 12:30?\n\n-- \nC\n\nOn "),
+            "held as it will go: {}",
+            held.body
+        );
         checked(&w);
         w.db.send_held_now(&held.id, &fmt_rfc3339(at(1))).unwrap();
         assert_eq!(tick(&w.db, &credentials(), at(1)).unwrap().sent, 1);
