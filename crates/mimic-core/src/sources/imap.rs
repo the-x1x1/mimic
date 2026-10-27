@@ -1056,6 +1056,19 @@ macro_rules! with_session {
 
 impl Connection {
     pub fn open(account: &ImapAccount, credential: &Credential) -> Result<Connection, ImapError> {
+        let mut conn = Self::connect(account)?;
+        match credential {
+            Credential::Password(password) => with_session!(&mut conn, s => s.login(&account.username, password))?,
+            Credential::AccessToken(token) => {
+                with_session!(&mut conn, s => s.authenticate_xoauth2(&account.username, token))?
+            }
+        }
+        Ok(conn)
+    }
+
+    /// Connect, encrypt as the account says, and read the greeting:
+    /// everything before signing in.
+    fn connect(account: &ImapAccount) -> Result<Connection, ImapError> {
         // Refuse before connecting: a password or a token must never be
         // offered in the clear to anything but this computer.
         if account.security == Security::Plain && !is_loopback_host(&account.host) {
@@ -1069,7 +1082,7 @@ impl Connection {
         let tcp = TcpStream::connect(&addr).map_err(|_| ImapError::Connect(addr.clone()))?;
         tcp.set_read_timeout(Some(TIMEOUT))?;
         tcp.set_write_timeout(Some(TIMEOUT))?;
-        let mut conn = match account.security {
+        Ok(match account.security {
             Security::Plain => Connection::Plain(Box::new(Session::start(tcp)?)),
             Security::Tls => {
                 let mut roots = rustls::RootCertStore::empty();
@@ -1090,14 +1103,7 @@ impl Connection {
                     other => other,
                 })?))
             }
-        };
-        match credential {
-            Credential::Password(password) => with_session!(&mut conn, s => s.login(&account.username, password))?,
-            Credential::AccessToken(token) => {
-                with_session!(&mut conn, s => s.authenticate_xoauth2(&account.username, token))?
-            }
-        }
-        Ok(conn)
+        })
     }
 
     pub fn list(&mut self) -> Result<Vec<(Vec<String>, String)>, ImapError> {
@@ -1339,6 +1345,17 @@ pub fn reply_in_folder(
     let found = conn.answering(message_id, since)?;
     conn.logout();
     Ok(found)
+}
+
+/// Reach the mailbox's server as a check would — connect, encrypt as the
+/// account says, read its greeting — and ask what it can do, then leave
+/// without signing in (0.10.0-alpha.88): no password or token is needed or
+/// offered. What it says it can do, in capitals (`IMAP4REV1`, `IDLE`, …).
+pub fn reach(account: &ImapAccount) -> Result<Vec<String>, ImapError> {
+    let mut conn = Connection::connect(account)?;
+    let can = conn.capabilities()?;
+    conn.logout();
+    Ok(can)
 }
 
 pub fn probe(account: &ImapAccount, credential: &Credential) -> Result<ImapProbe, ImapError> {
@@ -2261,6 +2278,9 @@ mod tests {
                     } else if upper.starts_with("LOGOUT") {
                         w.write_all(format!("* BYE\r\n{tag} OK bye\r\n").as_bytes()).unwrap();
                         break;
+                    } else if upper == "CAPABILITY" {
+                        w.write_all(format!("* CAPABILITY IMAP4rev1 IDLE AUTH=PLAIN\r\n{tag} OK done\r\n").as_bytes())
+                            .unwrap();
                     } else {
                         w.write_all(format!("{tag} BAD unknown\r\n").as_bytes()).unwrap();
                     }
@@ -3506,6 +3526,30 @@ mod tests {
         db.set_source_status(&source, "importing", None).unwrap();
         assert_eq!(recover(&db).unwrap(), 1);
         assert_eq!(db.get_source(&source).unwrap().unwrap().status, "ready");
+    }
+
+    #[test]
+    fn reaching_a_server_signs_in_to_nothing_and_says_what_it_can_do() {
+        let (port, seen) = serve(vec![Mailbox { name: "INBOX", validity: 1, messages: vec![] }], "pw");
+        let account = ImapAccount {
+            host: "localhost".into(),
+            port,
+            username: "c".into(),
+            security: Security::Plain,
+            auth: Auth::Password,
+        };
+        let can = reach(&account).unwrap();
+        assert_eq!(can, vec!["IMAP4REV1".to_string(), "IDLE".to_string(), "AUTH=PLAIN".to_string()]);
+        let said = seen.recv().unwrap();
+        assert!(said.iter().all(|l| !l.to_ascii_uppercase().contains("LOGIN")), "no sign-in: {said:?}");
+        assert!(
+            said.iter().any(|l| l.ends_with("CAPABILITY")) && said.iter().any(|l| l.ends_with("LOGOUT")),
+            "{said:?}"
+        );
+
+        // Plain to anywhere else is refused before connecting, as a check is.
+        let far = ImapAccount { host: "imap.example.com".into(), ..account };
+        assert!(matches!(reach(&far), Err(ImapError::PlainRefused(_))));
     }
 
     #[test]

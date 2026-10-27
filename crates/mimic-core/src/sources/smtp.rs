@@ -502,6 +502,34 @@ fn encrypt(host: &str, tcp: TcpStream) -> Result<Stream, SmtpError> {
 /// Connect, encrypt as the account says, and sign in. Returns the session
 /// and what the server said it can do.
 fn open(account: &SmtpAccount, credential: &Credential) -> Result<(Session<Stream>, Extensions), SmtpError> {
+    let (mut session, ext) = connect(account)?;
+    session.authenticate(&ext, &account.username, credential)?;
+    Ok((session, ext))
+}
+
+/// What a sending server says it can do, reached without signing in
+/// (0.10.0-alpha.88): whether the connection is encrypted, the ways it
+/// offers to sign in once it is, and the largest message it takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmtpReach {
+    pub encrypted: bool,
+    pub sign_in: Vec<String>,
+    pub largest: Option<u64>,
+}
+
+/// Reach the sending server as a send would — connect, encrypt as the
+/// account says, say hello — and leave without signing in or sending: no
+/// password or token is needed or offered.
+pub fn reach(account: &SmtpAccount) -> Result<SmtpReach, SmtpError> {
+    let (mut session, ext) = connect(account)?;
+    session.quit();
+    Ok(SmtpReach { encrypted: account.security != SmtpSecurity::Plain, sign_in: ext.auth, largest: ext.size })
+}
+
+/// Connect, encrypt as the account says, and say hello: everything before
+/// signing in.
+fn connect(account: &SmtpAccount) -> Result<(Session<Stream>, Extensions), SmtpError> {
     let host = account.host.trim();
     // Refused before connecting: a password or a token is never offered in
     // the clear to anything but this computer.
@@ -562,7 +590,6 @@ fn open(account: &SmtpAccount, credential: &Credential) -> Result<(Session<Strea
         // What was said before encryption is forgotten; ask again.
         ext = session.hello().map_err(over_tls)?;
     }
-    session.authenticate(&ext, &account.username, credential)?;
     Ok((session, ext))
 }
 
@@ -862,6 +889,21 @@ mod tests {
         let secret = base64_standard(b"app-pass");
         assert!(!all.contains("app-pass") && !all.contains(&secret), "{all}");
         assert!(!all.contains("Offsite") && !all.contains("be there"), "nothing of the message: {all}");
+    }
+
+    #[test]
+    fn reaching_a_server_signs_in_to_nothing_and_says_what_it_offers() {
+        let (port, seen) = serve(Behaviour { size: Some(1000), ..Behaviour::default() });
+        let reached = reach(&account(port, SmtpSecurity::Plain)).unwrap();
+        assert_eq!(reached.sign_in, vec!["PLAIN".to_string(), "LOGIN".to_string(), "XOAUTH2".to_string()]);
+        assert_eq!(reached.largest, Some(1000));
+        assert!(!reached.encrypted, "plain, on this computer");
+        let t = seen.recv().unwrap();
+        assert_eq!(t.commands, vec!["EHLO [127.0.0.1]".to_string(), "QUIT".to_string()], "nothing else said");
+
+        // Plain to anywhere else is refused before connecting, as a send is.
+        let far = SmtpAccount { host: "smtp.example.com".into(), ..account(port, SmtpSecurity::Plain) };
+        assert!(matches!(reach(&far), Err(SmtpError::PlainRefused(_))));
     }
 
     #[test]
