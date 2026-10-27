@@ -149,10 +149,48 @@ pub fn describe(provider: &dyn ModelProvider, layer: &str, m: &VoiceMetrics) -> 
     if flat.is_empty() {
         return Err(ProviderError::Malformed("an empty reading".into()));
     }
+    if let Some(why) = contradiction(&flat, m) {
+        return Err(ProviderError::Malformed(format!("a reading that {why}, so it wasn't kept")));
+    }
     Ok(match flat.char_indices().nth(MAX_CHARS) {
         Some((cut, _)) => format!("{}…", &flat[..cut]),
         None => flat,
     })
+}
+
+/// What a reading says that its own numbers rule out, if anything
+/// (0.10.0-alpha.90). Run for real, llama3.2:3b read a writer who starts most
+/// messages in lowercase and contracts freely as "formal and highly polished"
+/// and as avoiding contractions (job 312). Only what the numbers can settle
+/// is checked, a sentence at a time, and a sentence that turns it round
+/// ("not formal", "never formally", "more casual than formal") is left alone.
+pub fn contradiction(text: &str, m: &VoiceMetrics) -> Option<String> {
+    const TURNED: [&str; 12] =
+        ["not", "never", "hardly", "less", "neither", "nor", "isn't", "aren't", "doesn't", "don't", "than", "far"];
+    let lowercase = m.lowercase_start_rate.is_some_and(|r| r >= 0.6);
+    let contracting = m.contractions_per_100_words.is_some_and(|r| r >= 4.0);
+    for sentence in text.split(['.', '!', '?', ';']) {
+        let s = sentence.to_lowercase().replace('\u{2019}', "'");
+        let words: Vec<&str> = s.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|w| !w.is_empty()).collect();
+        if words.iter().any(|w| TURNED.contains(w)) || s.contains("rather") || s.contains("instead") {
+            continue;
+        }
+        if words.iter().any(|w| matches!(*w, "formal" | "formally" | "polished")) {
+            if lowercase {
+                return Some("called them formal, but most of their messages start in lowercase".into());
+            }
+            if contracting {
+                return Some("called them formal, but they use contractions freely".into());
+            }
+        }
+        if contracting
+            && words.iter().any(|w| w.starts_with("contraction"))
+            && words.iter().any(|w| matches!(*w, "avoid" | "avoids" | "avoiding" | "no" | "without" | "rarely" | "few"))
+        {
+            return Some("said they avoid contractions, but they use them freely".into());
+        }
+    }
+    None
 }
 
 /// What a run did.
@@ -338,6 +376,64 @@ mod tests {
         assert!(describe(&MockProvider::answering("   "), "global", &measured()).is_err());
         let long = MockProvider::answering(&"word ".repeat(400));
         assert!(describe(&long, "global", &measured()).unwrap().chars().count() <= MAX_CHARS + 1);
+    }
+
+    fn casual() -> VoiceMetrics {
+        VoiceMetrics {
+            measurable: true,
+            lowercase_start_rate: Some(0.95),
+            contractions_per_100_words: Some(6.0),
+            ..Default::default()
+        }
+    }
+
+    // What llama3.2:3b and qwen3:14b wrote for the same layer (job 312).
+    const LLAMA: &str = "The writer's register is formal and highly polished, with a focus on concise and precise language. They consistently use lowercase letters and avoid contractions, punctuation, and emotive elements, creating a tone that is professional and reserved.";
+    const QWEN: &str = "They write in a very casual, concise register, using short messages with few words and no punctuation at the end. Their messages start in lowercase and are entirely in lowercase, with a moderate use of contractions.";
+
+    #[test]
+    fn a_reading_its_numbers_rule_out_is_not_kept() {
+        let why = contradiction(LLAMA, &casual()).expect("formal, of a lowercase writer");
+        assert_eq!(why, "called them formal, but most of their messages start in lowercase");
+        assert_eq!(contradiction(QWEN, &casual()), None);
+
+        let err = describe(&MockProvider::answering(LLAMA), "global", &casual()).unwrap_err();
+        assert!(err.to_string().contains("called them formal") && err.to_string().contains("wasn't kept"), "{err}");
+        assert!(describe(&MockProvider::answering(QWEN), "global", &casual()).is_ok());
+
+        // Contractions, on their own.
+        let only_contracting = VoiceMetrics { lowercase_start_rate: Some(0.1), ..casual() };
+        assert_eq!(
+            contradiction("They avoid contractions.", &only_contracting).as_deref(),
+            Some("said they avoid contractions, but they use them freely")
+        );
+        assert_eq!(
+            contradiction("Fairly formal.", &only_contracting).as_deref(),
+            Some("called them formal, but they use contractions freely")
+        );
+    }
+
+    #[test]
+    fn a_reading_the_numbers_allow_is_kept_however_it_is_put() {
+        for fine in [
+            "They write casually, never formally.",
+            "More casual than formal, and short.",
+            "Not at all formal: lowercase, short, contracted.",
+            "Rather relaxed instead of formal.",
+            "They don\u{2019}t sound formal.",
+        ] {
+            assert_eq!(contradiction(fine, &casual()), None, "{fine}");
+        }
+        // A writer the numbers say is formal may be called it.
+        let formal = VoiceMetrics {
+            measurable: true,
+            lowercase_start_rate: Some(0.02),
+            contractions_per_100_words: Some(0.2),
+            ..Default::default()
+        };
+        assert_eq!(contradiction(LLAMA, &formal), None);
+        // And with nothing measured about it, nothing is ruled out.
+        assert_eq!(contradiction(LLAMA, &VoiceMetrics::default()), None);
     }
 
     #[test]

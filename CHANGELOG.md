@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.90] — 2026-10-26
+
+A reading in words has to agree with its numbers.
+
+### Changed
+
+- **A reading of how you write that your own numbers rule out isn't kept.** Run for real, a small model read someone who starts nearly every message in lowercase and uses contractions freely as "formal and highly polished" and as avoiding contractions. Mimic now checks what it can settle from the numbers — formal or not, contractions or not — and doesn't keep a reading that says otherwise; How you write says why, and asking again, or another model, can do better. A sentence that turns it round ("not formal", "more casual than formal") is fine.
+
 ## [0.10.0-alpha.89] — 2026-10-26
 
 Check the server before the password.
