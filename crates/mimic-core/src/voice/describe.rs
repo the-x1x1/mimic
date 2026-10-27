@@ -159,27 +159,31 @@ pub fn describe(provider: &dyn ModelProvider, layer: &str, m: &VoiceMetrics) -> 
 }
 
 /// What a reading says that its own numbers rule out, if anything
-/// (0.10.0-alpha.90, .93). Run for real, llama3.2:3b read a writer who starts
-/// most messages in lowercase and contracts freely as "formal and highly
-/// polished" and as avoiding contractions (job 312). Only what the numbers
-/// can settle is checked — formal or not, contractions or not — a sentence
-/// at a time, and only what the sentence says of them: a claim is turned
-/// round by a word just before it in the same clause ("not formal", "never
-/// formally", "more casual than formal", "no formal greetings"), not by one
-/// anywhere in the sentence; "formal rather than chatty" still calls them
-/// formal; and "avoid" has to be about contractions ("avoids slang and
-/// contractions", not "no emoji and plenty of contractions") and not turned
-/// round itself ("doesn't avoid contractions").
+/// (0.10.0-alpha.90, .93, .95). Run for real, llama3.2:3b read a writer who
+/// starts most messages in lowercase and contracts freely as "formal and
+/// highly polished" and as avoiding contractions (job 312). Only what the
+/// numbers can settle is checked — formal or not, contractions or not — a
+/// sentence at a time, and only what the sentence says of them: a claim is
+/// turned round by a word just before it in the same clause ("not formal",
+/// "never formally", "more casual than formal", "no formal greetings", "low
+/// formality"), not by one anywhere in the sentence, so "formal rather than
+/// chatty" still calls them formal; formal greetings or sign-offs are about
+/// greetings, not register; and "avoid" has to be about contractions
+/// ("avoids slang and contractions", not "rarely capitalizes, uses
+/// contractions" or "no emoji, and plenty of contractions") and not turned
+/// round itself ("doesn't avoid contractions"). A comma ends a clause.
 pub fn contradiction(text: &str, m: &VoiceMetrics) -> Option<String> {
     let lowercase = m.lowercase_start_rate.is_some_and(|r| r >= 0.6);
     let contracting = m.contractions_per_100_words.is_some_and(|r| r >= 4.0);
     for sentence in text.split(['.', '!', '?', ';', ':']) {
-        let s = sentence.to_lowercase().replace('\u{2019}', "'");
-        let words: Vec<&str> = s.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|w| !w.is_empty()).collect();
-        let called_formal = words
-            .iter()
-            .enumerate()
-            .any(|(i, w)| matches!(*w, "formal" | "formally" | "formality") && !turned(&words, i));
+        let s = sentence.to_lowercase().replace('\u{2019}', "'").replace(',', " , ");
+        let words: Vec<&str> =
+            s.split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == ',')).filter(|w| !w.is_empty()).collect();
+        let called_formal = words.iter().enumerate().any(|(i, w)| {
+            matches!(*w, "formal" | "formally" | "formality")
+                && !turned(&words, i)
+                && !words.get(i + 1).is_some_and(|next| PARTS.contains(next))
+        });
         if called_formal {
             if lowercase {
                 return Some("called them formal, but most of their messages start in lowercase".into());
@@ -196,15 +200,35 @@ pub fn contradiction(text: &str, m: &VoiceMetrics) -> Option<String> {
 }
 
 /// Words that turn round what follows them closely: "not formal", "less
-/// formal", "casual than formal", "instead of formal", "no formal …".
-const TURNING: [&str; 21] = [
+/// formal", "casual than formal", "instead of formal", "no formal …",
+/// "avoids formal …", "low formality".
+const TURNING: [&str; 33] = [
     "not", "never", "hardly", "barely", "rarely", "seldom", "less", "neither", "nor", "isn't", "aren't", "doesn't",
-    "don't", "wasn't", "than", "instead", "no", "without", "lack", "lacks", "lacking",
+    "don't", "wasn't", "than", "instead", "no", "without", "lack", "lacks", "lacking", "avoid", "avoids", "avoiding",
+    "skip", "skips", "skipping", "drop", "drops", "dropping", "low", "little", "minimal",
 ];
 
 /// Where a clause ends, looking back: a claim after one of these isn't turned
-/// round by a word before it ("not chatty but formal").
-const CLAUSE: [&str; 9] = ["but", "yet", "and", "or", "while", "whereas", "though", "although", "however"];
+/// round by a word before it ("not chatty, but formal").
+const CLAUSE: [&str; 8] = ["but", "yet", ",", "while", "whereas", "though", "although", "however"];
+
+/// What "formal" says of when it is about greetings and the like, not how
+/// they write: "formal greetings", "formal sign-offs".
+const PARTS: [&str; 13] = [
+    "greeting",
+    "greetings",
+    "sign",
+    "signoff",
+    "signoffs",
+    "salutation",
+    "salutations",
+    "closing",
+    "closings",
+    "opening",
+    "openings",
+    "title",
+    "titles",
+];
 
 /// Whether the claim at `at` is turned round by one of the three words
 /// before it in its clause ("far from formal" too).
@@ -229,9 +253,10 @@ const AVOIDED: [&str; 7] = ["rare", "avoided", "absent", "scarce", "uncommon", "
 
 /// Where looking for what is said of contractions stops: another clause, or
 /// a word saying how much of something there is.
-const STOPS: [&str; 22] = [
+const STOPS: [&str; 27] = [
     "but",
     "yet",
+    ",",
     "while",
     "whereas",
     "though",
@@ -252,6 +277,10 @@ const STOPS: [&str; 22] = [
     "commonly",
     "liberal",
     "liberally",
+    "everywhere",
+    "throughout",
+    "constantly",
+    "always",
 ];
 
 /// Whether the words round `at` ("contractions") say they are avoided: an
@@ -507,6 +536,8 @@ mod tests {
             "They are not chatty but formal.",
             "They write formally and never use emoji.",
             "A formal register; no emoji.",
+            "Their tone is formal and measured.",
+            "A formal, professional voice.",
         ] {
             assert!(contradiction(ruled_out, &casual()).is_some(), "{ruled_out}");
         }
@@ -515,6 +546,7 @@ mod tests {
             "Short messages without contractions.",
             "They never use contractions.",
             "Contractions are rare.",
+            "Rarely if ever uses contractions.",
         ] {
             assert_eq!(
                 contradiction(avoiding, &only_contracting).as_deref(),
@@ -541,6 +573,16 @@ mod tests {
             "They don't avoid contractions.",
             "Contractions are not rare here.",
             "Never long; contractions throughout.",
+            // Greetings, not register; a comma ends a clause (0.10.0-alpha.95).
+            "They avoid formal greetings.",
+            "Low formality.",
+            "Formal sign-offs are rare.",
+            "Drops capitals and formal sign-offs.",
+            "Doesn't bother much with formal greetings.",
+            "Rarely capitalizes, uses contractions.",
+            "No greeting, contractions everywhere.",
+            "Never long, contractions throughout.",
+            "Short messages, few capitals, and contractions are everywhere.",
         ] {
             assert_eq!(contradiction(fine, &casual()), None, "{fine}");
         }

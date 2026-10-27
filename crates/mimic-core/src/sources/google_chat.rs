@@ -72,6 +72,9 @@ const FIRST_READ: usize = 300;
 const MOST_NEW: usize = 2000;
 /// Messages asked for a page at a time (the API's most is 1000).
 const PAGE: usize = 500;
+/// The most of a thread's earlier messages read when the user is first
+/// mentioned in it, or first writes there (0.10.0-alpha.95).
+const THREAD_BEFORE: usize = 100;
 const MAX_PAGES: usize = 40;
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// An access token is used until this long before it lapses.
@@ -300,6 +303,31 @@ impl ChatApi {
                 Some((name, shown.to_string()))
             })
             .collect())
+    }
+
+    /// A thread's messages posted before `before`, its newest `most` of them,
+    /// oldest first (0.10.0-alpha.95): what was said in a thread before the
+    /// user was mentioned in it.
+    pub fn earlier_in_thread(
+        &self,
+        space: &str,
+        thread: &str,
+        before: &str,
+        most: usize,
+    ) -> Result<Vec<Value>, GoogleChatError> {
+        let filter = encode(&format!(r#"createTime < "{before}" AND thread.name = {thread}"#));
+        let url = format!(
+            "{}/{}/messages?pageSize={}&orderBy={}&filter={filter}",
+            self.base,
+            path(space),
+            most.clamp(1, 1000),
+            encode("createTime DESC")
+        );
+        let v = self.get(&url)?;
+        let mut out: Vec<Value> = v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+        out.truncate(most);
+        out.reverse();
+        Ok(out)
     }
 
     /// A space's messages posted after `after`, oldest first, at most `most`,
@@ -668,16 +696,12 @@ pub fn sync(
     let began = crate::ids::now_rfc3339();
     let result = sync_inner(db, source_id, &mut config, api, should_stop);
     config.last_checked_at = Some(crate::ids::now_rfc3339());
-    // Spaces turned on or off while this ran: the user's choice is kept.
-    if let Some(now) =
-        db.get_source(source_id)?.and_then(|s| serde_json::from_value::<GoogleChatSourceConfig>(s.config).ok())
-    {
-        config.spaces = now.spaces;
-    }
     if matches!(&result, Ok(s) if !s.partial) {
         config.last_read_at = Some(began);
     }
-    db.set_source_config(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null))?;
+    // Spaces turned on or off while this ran: the user's choice is kept, in
+    // the same statement (0.10.0-alpha.95).
+    db.set_source_config_keeping_flag(source_id, &serde_json::to_value(&config).unwrap_or(Value::Null), "spaces")?;
     match &result {
         Ok(_) => db.set_source_status(source_id, "imported", None)?,
         Err(GoogleChatError::Canceled) => db.set_source_status(source_id, "ready", None)?,
@@ -732,9 +756,16 @@ fn thread_name(m: &Value) -> Option<&str> {
 /// The threads among a named space's messages that the user is in, as
 /// Google Chat itself follows a thread for them: one with a message of
 /// theirs or one mentioning them among `raw`, or one the source already
-/// holds — read before, so they were in it then (0.10.0-alpha.92).
-fn followed_threads(db: &Db, source_id: &str, raw: &[Value], user: &str) -> Result<HashSet<String>, DbError> {
-    let mut followed: HashSet<String> = raw
+/// holds — read before, so they were in it then (0.10.0-alpha.92). And of
+/// those, the ones followed only now (0.10.0-alpha.95), whose earlier
+/// messages haven't been read.
+fn followed_threads(
+    db: &Db,
+    source_id: &str,
+    raw: &[Value],
+    user: &str,
+) -> Result<(HashSet<String>, BTreeSet<String>), DbError> {
+    let theirs: HashSet<&str> = raw
         .iter()
         .filter(|m| {
             by_a_person(m)
@@ -742,15 +773,24 @@ fn followed_threads(db: &Db, source_id: &str, raw: &[Value], user: &str) -> Resu
                     || mentions(m, user))
         })
         .filter_map(thread_name)
-        .map(str::to_string)
         .collect();
-    let rest: BTreeSet<&str> = raw.iter().filter_map(thread_name).filter(|t| !followed.contains(*t)).collect();
-    if !rest.is_empty() {
-        let ids: Vec<String> = rest.iter().map(|t| account_id(t)).collect();
-        let known = db.conversations_in_source(source_id, &ids)?;
-        followed.extend(rest.into_iter().filter(|t| known.contains(&account_id(t))).map(str::to_string));
-    }
-    Ok(followed)
+    let all: BTreeSet<&str> = raw.iter().filter_map(thread_name).collect();
+    let ids: Vec<String> = all.iter().map(|t| account_id(t)).collect();
+    let known = db.conversations_in_source(source_id, &ids)?;
+    let held = |t: &str| known.contains(&account_id(t));
+    let followed = all.iter().filter(|t| theirs.contains(**t) || held(t)).map(|t| t.to_string()).collect();
+    let newly = theirs.into_iter().filter(|t| !held(t)).map(str::to_string).collect();
+    Ok((followed, newly))
+}
+
+/// Whether the user reads named spaces now: they may have turned it off
+/// while a check ran (0.10.0-alpha.95).
+fn reading_spaces(db: &Db, source_id: &str) -> bool {
+    db.get_source(source_id)
+        .ok()
+        .flatten()
+        .and_then(|s| s.config.get("spaces").and_then(Value::as_bool))
+        .unwrap_or(false)
 }
 
 /// A message's time, as stored: UTC to the second.
@@ -787,7 +827,7 @@ fn sync_inner(
             summary.rooms += 1;
             continue;
         }
-        if named && !config.spaces {
+        if named && !reading_spaces(db, source_id) {
             summary.spaces_off += 1;
             continue;
         }
@@ -801,7 +841,7 @@ fn sync_inner(
         }
         let most = if mark.is_some() { MOST_NEW } else { FIRST_READ };
         tried += 1;
-        let raw = match api.messages(&space.name, mark.as_deref(), most) {
+        let mut raw = match api.messages(&space.name, mark.as_deref(), most) {
             Ok((raw, complete)) => {
                 if !complete {
                     summary.partial = true;
@@ -853,7 +893,7 @@ fn sync_inner(
         // In a named space, only the threads the user is in are read: the
         // rest of a busy space is not addressed to them (0.10.0-alpha.91,
         // .92).
-        let followed = if named {
+        let (followed, newly) = if named {
             match followed_threads(db, source_id, &raw, &config.user_id) {
                 Ok(f) => f,
                 Err(e) => {
@@ -862,8 +902,47 @@ fn sync_inner(
                 }
             }
         } else {
-            HashSet::new()
+            (HashSet::new(), BTreeSet::new())
         };
+        // A thread followed only now — someone just mentioned them in it, or
+        // they just wrote there — is read from its start too, as far as
+        // `THREAD_BEFORE`, so a draft has what was asked (0.10.0-alpha.95).
+        for thread in &newly {
+            let Some(first) = raw
+                .iter()
+                .filter(|m| thread_name(m) == Some(thread.as_str()))
+                .filter_map(|m| m.get("createTime").and_then(Value::as_str))
+                .filter(|t| when(t).is_some())
+                .min_by_key(|t| when(t))
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            match api.earlier_in_thread(&space.name, thread, &first, THREAD_BEFORE) {
+                Ok(earlier) => {
+                    let have: HashSet<String> =
+                        raw.iter().filter_map(|m| m.get("name").and_then(Value::as_str)).map(str::to_string).collect();
+                    let earlier: Vec<Value> = earlier
+                        .into_iter()
+                        .filter(|m| thread_name(m) == Some(thread.as_str()))
+                        .filter(|m| m.get("name").and_then(Value::as_str).is_some_and(|n| !have.contains(n)))
+                        .collect();
+                    summary.fetched += earlier.len();
+                    raw.extend(earlier);
+                }
+                Err(e @ GoogleChatError::SignIn(_)) => {
+                    importer.abandon();
+                    return Err(e);
+                }
+                Err(GoogleChatError::RateLimited) => {
+                    summary.partial = true;
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!(target: "google_chat", error = %e, "a thread's earlier messages couldn't be read")
+                }
+            }
+        }
         let read = |m: &Value| kept(m) && (!named || thread_name(m).is_some_and(|t| followed.contains(t)));
         // Who wrote, by name: as each message read says, else as the space's
         // members say.
@@ -1510,6 +1589,56 @@ mod tests {
             serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
         assert!(!config.spaces, "turned off while the check ran, and kept so");
         assert_eq!(config.marks["spaces/ROOM"], "2026-10-26T09:31:00.123456Z");
+    }
+
+    #[test]
+    fn a_thread_the_user_is_first_mentioned_in_is_read_from_its_start() {
+        let db = Db::open_in_memory().unwrap();
+        let source = account(&db);
+        let round = Arc::new(StdMutex::new(0u32));
+        let on = round.clone();
+        let (api, seen) = chat_api(Box::new(move |path, query| {
+            let round = *on.lock().unwrap();
+            match path {
+                "/userinfo" => (200, USERINFO_BODY.into()),
+                "/spaces" => {
+                    let last = if round == 0 { "2026-10-26T09:10:00Z" } else { "2026-10-26T09:20:00Z" };
+                    (200, json!({ "spaces": [{ "name": "spaces/ROOM", "spaceType": "SPACE", "displayName": "Budget", "lastActiveTime": last }] }).to_string())
+                }
+                // What was asked before C was mentioned, in the thread alone.
+                "/spaces/ROOM/messages" if query.contains("thread.name") => {
+                    assert!(query.contains("createTime%20%3C%20"), "before the mention: {query}");
+                    assert!(query.contains("spaces%2FROOM%2Fthreads%2Ft1"), "{query}");
+                    (200, json!({ "messages": [said("spaces/ROOM", 1, "users/44", "Alan Turing", 10, "who owns the Q3 budget?")] }).to_string())
+                }
+                "/spaces/ROOM/messages" if round == 0 => {
+                    (200, json!({ "messages": [said("spaces/ROOM", 1, "users/44", "Alan Turing", 10, "who owns the Q3 budget?")] }).to_string())
+                }
+                "/spaces/ROOM/messages" => {
+                    let mut asked = said("spaces/ROOM", 2, "users/45", "Grace Hopper", 20, "@C Haynes can you answer the above?");
+                    asked["annotations"] = json!([{ "type": "USER_MENTION", "userMention": { "user": { "name": "users/7" } } }]);
+                    (200, json!({ "messages": [asked] }).to_string())
+                }
+                other => panic!("not asked for: {other}"),
+            }
+        }));
+        let summary = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((summary.inserted, summary.not_for_you), (0, 1), "no one asked C yet: {summary:?}");
+        *round.lock().unwrap() = 1;
+        let summary = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((summary.inserted, summary.mentions), (2, 1), "{summary:?}");
+        let thread: Vec<String> = {
+            let conn = db.conn();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT m.body FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                     WHERE c.external_id = 'google_chat:spaces/ROOM/threads/t1' ORDER BY m.sequence_index",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+        };
+        assert_eq!(thread, vec!["who owns the Q3 budget?".to_string(), "@C Haynes can you answer the above?".into()]);
+        assert_eq!(seen.lock().unwrap().iter().filter(|r| r.contains("thread.name")).count(), 1, "once");
     }
 
     #[test]
