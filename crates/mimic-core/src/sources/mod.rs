@@ -30,6 +30,7 @@ pub mod sms;
 pub mod smtp;
 pub mod teams;
 pub mod telegram;
+pub mod telegram_account;
 pub mod transcript;
 pub mod whatsapp;
 

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/mimic-core", "crates/keychain", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.10.0-alpha.73"
+version = "0.10.0-alpha.74"
 edition = "2021"
 # 1.89: std::fs::File::try_lock, for the one-Mimic-at-a-time lock (instance.rs).
 rust-version = "1.89"
@@ -34,6 +34,11 @@ webpki-roots = "1"
 # flate2's Rust backend.
 zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 flate2 = "1"
+# Telegram as the user (0.10.0-alpha.74): grammers' MTProto client, and its
+# session types with serde, so a session can be kept in the secret store.
+# grammers-session's own default is a SQLite store (libsql): not wanted.
+grammers-client = "0.11"
+grammers-session = { version = "0.11", default-features = false, features = ["serde"] }
 tempfile = "3"
 mimic-core = { path = "crates/mimic-core" }
 mimic-keychain = { path = "crates/keychain" }

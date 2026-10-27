@@ -231,11 +231,12 @@ fn joins_by_message_id(connector: &str) -> bool {
 }
 
 /// Connectors whose message ids are the same in every source of theirs —
-/// one Telegram chat exported, then the whole account; two of Meta's
-/// downloads (0.10.0-alpha.61); this month's phone backup after last
-/// month's (0.10.0-alpha.62) — so a conversation is joined, and a message
-/// kept once, across them, as mail is by its Message-ID.
-pub const SAME_IDS_CONNECTORS: [&str; 3] = ["telegram", "meta", "sms"];
+/// one Telegram chat exported, then the whole account, then the account
+/// connected (0.10.0-alpha.74); two of Meta's downloads (0.10.0-alpha.61);
+/// this month's phone backup after last month's (0.10.0-alpha.62) — so a
+/// conversation is joined, and a message kept once, across them, as mail is
+/// by its Message-ID. Each family shares its ids.
+pub const SAME_IDS_FAMILIES: [&[&str]; 3] = [&["telegram", "telegram_account"], &["meta"], &["sms"]];
 
 /// Whether a message read back is the reply in doubt: the same words, sent
 /// no earlier than the message it answers (both by the service's clock).
@@ -248,8 +249,8 @@ fn own_words(doubt: &crate::db::InDoubt, raw: &sources::RawMessage) -> bool {
     after && doubt.body.split_whitespace().eq(raw.body.split_whitespace())
 }
 
-fn same_ids(connector: &str) -> Option<String> {
-    SAME_IDS_CONNECTORS.contains(&connector).then(|| connector.to_string())
+fn same_ids(connector: &str) -> Option<&'static [&'static str]> {
+    SAME_IDS_FAMILIES.iter().copied().find(|family| family.contains(&connector))
 }
 
 /// Connectors besides mail whose messages Mimic sends, under the id the
@@ -262,8 +263,9 @@ struct ImportState<'a> {
     source_id: String,
     default_channel: String,
     joins_by_message_id: bool,
-    /// The connector, when its ids are the same across its sources.
-    same_ids: Option<String>,
+    /// The connectors whose ids this one's are, when they are the same
+    /// across sources.
+    same_ids: Option<&'static [&'static str]>,
     /// Mimic sends through it, so what it sent on its own is looked for.
     sends: bool,
     user_ids: HashSet<String>,
@@ -300,8 +302,15 @@ impl ImportState<'_> {
                 }
             }
             self.db.email_conversation_holding(&wanted)?
-        } else if let Some(connector) = &self.same_ids {
-            self.db.conversation_holding_in(connector, &ids)?
+        } else if let Some(family) = self.same_ids {
+            match self.db.conversation_holding_in(family, &ids)? {
+                Some(found) => Some(found),
+                // None of these was read through another of them, but the
+                // chat itself may have been: it has the same id there (a
+                // later check of a chat first read from an export,
+                // 0.10.0-alpha.74).
+                None => self.db.family_conversation(family, &convo.external_id)?,
+            }
         } else {
             None
         };
@@ -316,8 +325,8 @@ impl ImportState<'_> {
         // copies would count the user's own writing twice.
         let elsewhere = if is_email {
             self.db.email_ids_in_other_sources(&self.source_id, &ids)?
-        } else if let Some(connector) = &self.same_ids {
-            self.db.ids_in_other_sources_of(connector, &self.source_id, &ids)?
+        } else if let Some(family) = self.same_ids {
+            self.db.ids_in_other_sources_of(family, &self.source_id, &ids)?
         } else {
             HashSet::new()
         };

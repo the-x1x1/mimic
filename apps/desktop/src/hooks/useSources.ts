@@ -222,3 +222,43 @@ export function useSetMailboxFolders(sourceId: string) {
     },
   });
 }
+
+/** Whether the Telegram app registration is kept (0.10.0-alpha.74). */
+export function useTelegramApp(enabled: boolean) {
+  return useQuery({ queryKey: qk.telegramApp, queryFn: ipc.telegramApp, enabled });
+}
+
+/**
+ * The steps of a Telegram sign-in: ask for a code, give it, give the
+ * password. When one ends in `done`, a check has started.
+ */
+export function useTelegramSignIn() {
+  const qc = useQueryClient();
+  const settled = (step: { step: string }) => {
+    if (step.step !== "done") return;
+    for (const key of [
+      qk.sources,
+      qk.jobs,
+      qk.onboarding,
+      qk.dashboard,
+      qk.settings,
+      qk.telegramApp,
+    ]) {
+      void qc.invalidateQueries({ queryKey: key });
+    }
+  };
+  const start = useMutation({
+    mutationFn: (v: { phone: string; apiId: string | null; apiHash: string | null }) =>
+      ipc.startTelegramSignIn(v.phone, v.apiId, v.apiHash),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.telegramApp }),
+  });
+  const code = useMutation({
+    mutationFn: (code: string) => ipc.telegramSignInCode(code),
+    onSuccess: settled,
+  });
+  const password = useMutation({
+    mutationFn: (password: string) => ipc.telegramSignInPassword(password),
+    onSuccess: settled,
+  });
+  return { start, code, password };
+}
