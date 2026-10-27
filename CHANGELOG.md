@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.78] — 2026-10-26
+
+Telegram, tightened again.
+
+### Fixed
+
+- **A chat with something new is never passed over.** Where I stop looking down your chat list is now judged by Telegram's own clock — the newest message the last full read saw — not this computer's, so a clock that runs fast can't make me miss messages. And when Telegram itself fails to give a chat ("try again later"), I read it again next time instead of passing it over for good.
+- **One chat Telegram refuses isn't the account.** A group you were removed from, alone at the top of your list, no longer makes the whole check fail.
+- **Large chats join up fast.** Joining a chat read live to an exported one checks each conversation once, not once per message — minutes become a moment for a long chat.
+- **Stopping a sign-in, to the last moment.** Cancelling while Telegram finishes letting you in now keeps nothing and signs that session out; a code or password whose answer never came signs out what Telegram may have let in.
+- **A Telegram session is kept again only when it changed.** Sending, a test or a reply by itself no longer rewrites it each time, so a check running meanwhile keeps what it learned.
+
 ## [0.10.0-alpha.77] — 2026-10-26
 
 Telegram, tightened.

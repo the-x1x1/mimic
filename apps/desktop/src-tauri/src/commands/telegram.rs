@@ -120,7 +120,12 @@ fn keep_session(state: &crate::AppState, source_id: &str, session: &KeptSession,
     if state.secrets.get(&key).as_deref() != Some(read) {
         return;
     }
+    // Written out the same way each time: kept again only when something
+    // in it changed (0.10.0-alpha.78).
     if let Ok(kept) = session.to_kept() {
+        if kept == read {
+            return;
+        }
         if let Err(e) = state.secrets.set(&key, &kept) {
             tracing::warn!(target: "telegram", error = %e, "couldn't keep the session");
         }
@@ -201,8 +206,28 @@ fn take_pending(state: &crate::AppState) -> Option<PendingTelegram> {
     held.take().filter(|p| p.started.elapsed() < PENDING_FOR)
 }
 
-fn put_back(state: &crate::AppState, pending: PendingTelegram) {
-    *state.telegram.lock().unwrap_or_else(|p| p.into_inner()) = Some(pending);
+/// Hand a sign-in back to wait for its next step — unless the user stopped
+/// it, or started another, while Telegram was being asked: then it is
+/// closed and says so (0.10.0-alpha.78). Decided under the lock a stop
+/// takes it out by, so a stop lands either before (and this closes it) or
+/// after (and the stop closes it).
+async fn wait_for_next(state: &crate::AppState, pending: PendingTelegram) -> CommandResult<()> {
+    let stopped = {
+        let mut held = state.telegram.lock().unwrap_or_else(|p| p.into_inner());
+        if SIGN_IN.load(Ordering::SeqCst) == pending.number {
+            *held = Some(pending);
+            None
+        } else {
+            Some(pending)
+        }
+    };
+    match stopped {
+        Some(pending) => {
+            pending.live.close().await;
+            Err(CommandError::new("ended", STOPPED))
+        }
+        None => Ok(()),
+    }
 }
 
 const START_AGAIN: &str = "That sign-in has ended. Start again: I'll ask Telegram for a new code.";
@@ -262,7 +287,8 @@ pub async fn start_telegram_sign_in(
                     .set(telegram::APP_KEY, &raw)
                     .map_err(|e| CommandError::new("secrets", format!("I couldn't keep the app's id and hash: {e}")))?;
             }
-            put_back(&state, PendingTelegram { live, login, password: None, started: Instant::now(), number });
+            wait_for_next(&state, PendingTelegram { live, login, password: None, started: Instant::now(), number })
+                .await?;
             Ok(TelegramStep::code())
         }
         Err(e) => {
@@ -283,18 +309,15 @@ pub async fn telegram_sign_in_code(state: State<'_, SharedState>, code: String) 
     match step {
         Ok(Step::Done(me)) => finish(state.inner(), pending, me).await,
         Ok(Step::Password { token, hint, wrong }) => {
-            put_back(&state, PendingTelegram { password: Some(token), ..pending });
+            wait_for_next(&state, PendingTelegram { password: Some(token), ..pending }).await?;
             Ok(TelegramStep::password(hint, wrong))
         }
         // Another try at the code, with the same sign-in.
         Err(TelegramError::BadCode) => {
-            put_back(&state, pending);
+            wait_for_next(&state, pending).await?;
             Err(telegram_error(TelegramError::BadCode))
         }
-        Err(e) => {
-            pending.live.close().await;
-            Err(telegram_error(e))
-        }
+        Err(e) => Err(given_up(pending, e).await),
     }
 }
 
@@ -304,7 +327,7 @@ pub async fn telegram_sign_in_code(state: State<'_, SharedState>, code: String) 
 pub async fn telegram_sign_in_password(state: State<'_, SharedState>, password: String) -> CommandResult<TelegramStep> {
     let mut pending = take_pending(&state).ok_or_else(|| CommandError::new("ended", START_AGAIN))?;
     let Some(token) = pending.password.take() else {
-        put_back(&state, pending);
+        wait_for_next(&state, pending).await?;
         return Err(CommandError::new("ended", "Telegram hasn't asked for a password. Give it the code first."));
     };
     let step = pending.live.check_password(token, &password).await;
@@ -315,13 +338,10 @@ pub async fn telegram_sign_in_password(state: State<'_, SharedState>, password: 
     match step {
         Ok(Step::Done(me)) => finish(state.inner(), pending, me).await,
         Ok(Step::Password { token, hint, .. }) => {
-            put_back(&state, PendingTelegram { password: Some(token), ..pending });
+            wait_for_next(&state, PendingTelegram { password: Some(token), ..pending }).await?;
             Ok(TelegramStep::password(hint, true))
         }
-        Err(e) => {
-            pending.live.close().await;
-            Err(telegram_error(e))
-        }
+        Err(e) => Err(given_up(pending, e).await),
     }
 }
 
@@ -367,6 +387,17 @@ pub async fn cancel_telegram_sign_in(state: State<'_, SharedState>) -> CommandRe
     Ok(())
 }
 
+/// A sign-in whose code or password went unanswered or failed: closed —
+/// and, when Telegram's answer never came, signed out, in case it had let
+/// it in (0.10.0-alpha.78).
+async fn given_up(pending: PendingTelegram, e: TelegramError) -> CommandError {
+    if matches!(e, TelegramError::Network(_)) {
+        pending.live.sign_out().await;
+    }
+    pending.live.close().await;
+    telegram_error(e)
+}
+
 /// A sign-in the user stopped while Telegram was checking its code or
 /// password: closed, and if Telegram had already let it in, signed out
 /// again, so it isn't left among the account's sessions.
@@ -390,15 +421,24 @@ fn check_soon(state: &crate::AppState, source_id: &str) -> CommandResult<()> {
 
 /// Signed in as `me`: keep the session — for the account already connected
 /// as them (signing in again), or a new one, which becomes the user's — and
-/// start a check.
+/// start a check. Stopped since Telegram let it in, nothing is kept and the
+/// session is signed out: asked just before anything is written, with
+/// nothing waited on between (0.10.0-alpha.78).
 async fn finish(state: &SharedState, pending: PendingTelegram, me: Me) -> CommandResult<TelegramStep> {
     let kept = pending.live.session().to_kept().map_err(|e| CommandError::new("internal", e.to_string()));
+    if SIGN_IN.load(Ordering::SeqCst) != pending.number {
+        return Err(stopped(pending, true).await);
+    }
+    let done = kept.and_then(|kept| keep_sign_in(state, &kept, &me));
     pending.live.close().await;
-    let kept = kept?;
+    done
+}
+
+fn keep_sign_in(state: &crate::AppState, kept: &str, me: &Me) -> CommandResult<TelegramStep> {
     if let Some(source_id) = telegram::connected_as(&state.db, me.id)? {
         state
             .secrets
-            .set(&telegram::secret_key(&source_id), &kept)
+            .set(&telegram::secret_key(&source_id), kept)
             .map_err(|e| CommandError::new("secrets", format!("I couldn't keep the sign-in: {e}")))?;
         state.db.set_source_status(&source_id, "ready", None)?;
         check_soon(state, &source_id)?;
@@ -411,9 +451,9 @@ async fn finish(state: &SharedState, pending: PendingTelegram, me: Me) -> Comman
     // Signed in as them, so whoever it is, is them.
     state.db.add_user_identifier(IdentifierKind::AccountId, &telegram::account_id(me.id))?;
     crate::commands::people::reconcile_identity(&state.db, &state.jobs, "connect_telegram");
-    let new = telegram::new_source(&me).map_err(|e| CommandError::new("internal", e.to_string()))?;
+    let new = telegram::new_source(me).map_err(|e| CommandError::new("internal", e.to_string()))?;
     let source = state.db.create_source(&new)?;
-    if let Err(e) = state.secrets.set(&telegram::secret_key(&source.id), &kept) {
+    if let Err(e) = state.secrets.set(&telegram::secret_key(&source.id), kept) {
         // Without it the account can never be read; nothing is left behind
         // that looks connected and isn't.
         let _ = state.db.delete_source_and_contents(&source.id);
