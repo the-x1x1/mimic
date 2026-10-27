@@ -78,6 +78,10 @@ const APPS: Readonly<Record<string, Channel>> = {
   mailbird: "email",
   "zoho mail": "email",
   spark: "email",
+  // Classic Outlook's window for one message: "Subject - Message (HTML)".
+  "message (html)": "email",
+  "message (plain text)": "email",
+  "message (rich text)": "email",
 };
 
 /**
