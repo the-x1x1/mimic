@@ -264,6 +264,28 @@ export function teamsAccount(source: {
     : null;
 }
 
+/** A connected Google Chat account, from its stored settings (0.10.0-alpha.79). */
+export function googleChatAccount(source: {
+  connector: string;
+  config: Record<string, unknown>;
+}): { user: string; email: string | null; lastCheckedAt: string | null } | null {
+  if (source.connector !== "google_chat") return null;
+  const parsed = z
+    .object({
+      user: z.string(),
+      email: z.string().nullable().optional(),
+      lastCheckedAt: z.string().nullable().optional(),
+    })
+    .safeParse(source.config);
+  return parsed.success
+    ? {
+        user: parsed.data.user,
+        email: parsed.data.email ?? null,
+        lastCheckedAt: parsed.data.lastCheckedAt ?? null,
+      }
+    : null;
+}
+
 /** A connected Telegram account, from its stored settings (0.10.0-alpha.74). */
 export function telegramAccount(source: {
   connector: string;

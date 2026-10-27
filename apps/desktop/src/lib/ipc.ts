@@ -280,6 +280,17 @@ export const ipc = {
   telegramSignInPassword: (password: string) =>
     call("telegram_sign_in_password", TelegramStep, { password }),
   cancelTelegramSignIn: () => call("cancel_telegram_sign_in", z_void),
+  /**
+   * Sign in with Google in the browser for Google Chat, and connect the
+   * account signed in as (0.10.0-alpha.79). Resolves once the browser has
+   * come back; stopped with `cancelMailSignIn`.
+   */
+  connectGoogleChat: () => call("connect_google_chat", Source),
+  /** Sign a connected Google Chat account in again, as the same account. */
+  signInGoogleChatAgain: (sourceId: string) =>
+    call("sign_in_google_chat_again", Source, { sourceId }),
+  /** Try a Google Chat account as a check would, sending nothing: what was found. */
+  testGoogleChat: (sourceId: string) => call("test_google_chat", z_string, { sourceId }),
   /** Sign a connected Teams account in again, as the same account. */
   signInTeamsAgain: (sourceId: string) => call("sign_in_teams_again", Source, { sourceId }),
   /** Try a Slack workspace as a check would, sending nothing: what was found. */

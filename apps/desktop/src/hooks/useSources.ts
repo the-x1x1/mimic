@@ -106,6 +106,32 @@ export function useSignInTeamsAgain() {
   });
 }
 
+/** Sign in for Google Chat and connect it; a check follows by itself (0.10.0-alpha.79). */
+export function useConnectGoogleChat() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => ipc.connectGoogleChat(),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.onboarding, qk.dashboard, qk.settings]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
+/** Sign a connected Google Chat account in again; a check follows by itself. */
+export function useSignInGoogleChatAgain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceId: string) => ipc.signInGoogleChatAgain(sourceId),
+    onSuccess: () => {
+      for (const key of [qk.sources, qk.jobs, qk.dashboard]) {
+        void qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
 /** A connected workspace's new token; a check follows by itself. */
 export function useSetSlackToken() {
   const qc = useQueryClient();

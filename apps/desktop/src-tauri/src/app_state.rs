@@ -35,6 +35,9 @@ pub struct AppState {
     /// Access tokens for connected Teams accounts (0.10.0-alpha.67), shared
     /// with their check, and used to send (0.10.0-alpha.68).
     pub teams_access: Arc<mimic_core::sources::teams::Access>,
+    /// Access tokens for connected Google Chat accounts (0.10.0-alpha.79),
+    /// likewise.
+    pub google_chat_access: Arc<mimic_core::sources::google_chat::Access>,
     /// A mailbox sign-in waiting on the browser.
     pub sign_in: MailSignIn,
     /// A Telegram sign-in waiting on the code, or the password

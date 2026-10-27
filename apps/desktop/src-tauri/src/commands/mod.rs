@@ -5,6 +5,7 @@ pub mod compose;
 pub mod dashboard;
 pub mod diagnostics;
 pub mod encoder;
+pub mod google_chat;
 pub mod jobs;
 pub mod localmodel;
 pub mod mail_folders;

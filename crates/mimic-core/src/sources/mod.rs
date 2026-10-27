@@ -17,6 +17,7 @@ use crate::db::repo_people::IdentifierInput;
 
 pub mod automated;
 pub mod discord;
+pub mod google_chat;
 pub mod imap;
 pub mod mbox;
 pub mod meta;

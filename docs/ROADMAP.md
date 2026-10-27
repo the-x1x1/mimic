@@ -82,7 +82,11 @@ Done in 0.10.0-alpha.67: Microsoft Teams — a work or school account's one-to-o
 
 Done in 0.10.0-alpha.68: replying in Teams — the reply the user approves, and by itself under the same rules as Slack.
 
-Next: other places messages arrive, where a service lets a person's own app read them.
+Done in 0.10.0-alpha.74–78: Telegram — the account read as the user (`sources::telegram_account`, through grammers), a reply the user approves sent into the chat it answers, and replying by itself in one-to-one chats; tightened after two reviews. Not done: never run against Telegram.
+
+Done in 0.10.0-alpha.79: Google Chat — a Google Workspace account's direct messages and group chats, read through the Chat API (`sources::google_chat`). Not done: never run against Google; named spaces; a personal Gmail's Chat, which has no API.
+
+Next: replying in Google Chat, the reply the user approves and then by itself. Then other places messages arrive, where a service lets a person's own app read them.
 
 ## Phase 8 — Advanced personalization
 

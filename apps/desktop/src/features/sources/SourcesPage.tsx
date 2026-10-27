@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Badge, Button, Card, EmptyState } from "@mimic/ui";
 import {
   CHANNEL_LABELS,
+  googleChatAccount,
   mailboxAuth,
   slackWorkspace,
   teamsAccount,
@@ -15,6 +16,7 @@ import { AddSourceDialog } from "./AddSourceDialog";
 import { ConnectMailboxDialog } from "./ConnectMailboxDialog";
 import { ConnectSlackDialog, SlackToken } from "./ConnectSlackDialog";
 import { ConnectTeamsDialog, TeamsSignInAgain } from "./ConnectTeamsDialog";
+import { ConnectGoogleChatDialog, GoogleChatSignInAgain } from "./ConnectGoogleChatDialog";
 import { ConnectTelegramDialog } from "./ConnectTelegramDialog";
 import { MailboxPassword, MailboxSignInAgain } from "./MailboxPassword";
 import { MailboxFolders } from "./MailboxFolders";
@@ -42,6 +44,10 @@ function whereFrom(s: Source): string {
   if (slack) return `Slack, as ${slack.user} · checked ${formatRelative(slack.lastCheckedAt)}`;
   const teams = teamsAccount(s);
   if (teams) return `Teams, as ${teams.user} · checked ${formatRelative(teams.lastCheckedAt)}`;
+  const chat = googleChatAccount(s);
+  if (chat) {
+    return `Google Chat, as ${chat.email ?? chat.user} · checked ${formatRelative(chat.lastCheckedAt)}`;
+  }
   const telegram = telegramAccount(s);
   if (telegram) {
     const who = telegram.username ? `@${telegram.username}` : telegram.name;
@@ -58,6 +64,7 @@ export function SourcesPage() {
   const [connecting, setConnecting] = useState(false);
   const [connectingSlack, setConnectingSlack] = useState(false);
   const [connectingTeams, setConnectingTeams] = useState(false);
+  const [connectingChat, setConnectingChat] = useState(false);
   const [connectingTelegram, setConnectingTelegram] = useState(false);
   const hasMailbox = (sources.data ?? []).some((s) => s.connector === "imap");
 
@@ -75,6 +82,7 @@ export function SourcesPage() {
             <Button onClick={() => setConnecting(true)}>Connect a mailbox</Button>
             <Button onClick={() => setConnectingSlack(true)}>Connect Slack</Button>
             <Button onClick={() => setConnectingTeams(true)}>Connect Teams</Button>
+            <Button onClick={() => setConnectingChat(true)}>Connect Google Chat</Button>
             <Button onClick={() => setConnectingTelegram(true)}>Connect Telegram</Button>
             <Button variant="primary" onClick={() => setAdding(true)}>
               Add a file
@@ -95,6 +103,9 @@ export function SourcesPage() {
               <Button onClick={() => setConnecting(true)}>Connect a mailbox (optional)</Button>
               <Button onClick={() => setConnectingSlack(true)}>Connect Slack (optional)</Button>
               <Button onClick={() => setConnectingTeams(true)}>Connect Teams (optional)</Button>
+              <Button onClick={() => setConnectingChat(true)}>
+                Connect Google Chat (optional)
+              </Button>
               <Button onClick={() => setConnectingTelegram(true)}>
                 Connect Telegram (optional)
               </Button>
@@ -149,6 +160,7 @@ export function SourcesPage() {
                         {s.connector === "imap" ||
                         s.connector === "slack" ||
                         s.connector === "teams" ||
+                        s.connector === "google_chat" ||
                         s.connector === "telegram_account"
                           ? "Check now"
                           : s.messageCount > 0
@@ -171,6 +183,8 @@ export function SourcesPage() {
                       <SlackToken sourceId={s.id} name={s.name} />
                     ) : s.connector === "teams" ? (
                       <TeamsSignInAgain sourceId={s.id} name={s.name} />
+                    ) : s.connector === "google_chat" ? (
+                      <GoogleChatSignInAgain sourceId={s.id} name={s.name} />
                     ) : s.connector === "telegram_account" ? (
                       <Button size="sm" variant="ghost" onClick={() => setConnectingTelegram(true)}>
                         Sign in again
@@ -196,6 +210,7 @@ export function SourcesPage() {
       {connecting ? <ConnectMailboxDialog onClose={() => setConnecting(false)} /> : null}
       {connectingSlack ? <ConnectSlackDialog onClose={() => setConnectingSlack(false)} /> : null}
       {connectingTeams ? <ConnectTeamsDialog onClose={() => setConnectingTeams(false)} /> : null}
+      {connectingChat ? <ConnectGoogleChatDialog onClose={() => setConnectingChat(false)} /> : null}
       {connectingTelegram ? (
         <ConnectTelegramDialog onClose={() => setConnectingTelegram(false)} />
       ) : null}
