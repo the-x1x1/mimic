@@ -29,35 +29,54 @@ pub struct MailServers {
     pub sending: Option<ServerReached>,
 }
 
-/// What a reading server's capabilities say, for a person. Microsoft's says
-/// `LOGINDISABLED` and offers only `XOAUTH2`: no password will do there
-/// (seen on outlook.office365.com, job 317). iCloud's doesn't offer `IDLE`.
-fn reading_said(can: &[String]) -> String {
+/// What a reading server's capabilities say, for a person. Mimic gives a
+/// password by `LOGIN`, so a server saying `LOGINDISABLED` takes none from
+/// it, whatever else it offers (0.10.0-alpha.93); Microsoft's says so and
+/// offers only `XOAUTH2` (seen on outlook.office365.com, job 317). Before
+/// signing in a server may leave `IDLE` out — iCloud's did — so not naming
+/// it then is no answer either way.
+fn reading_said(host: &str, can: &[String]) -> String {
     let imap = can.iter().any(|c| c.starts_with("IMAP4REV"));
     let idle = can.iter().any(|c| c == "IDLE");
-    let no_password =
-        can.iter().any(|c| c == "LOGINDISABLED") && !can.iter().any(|c| c == "AUTH=PLAIN" || c == "AUTH=LOGIN");
+    let no_password = can.iter().any(|c| c == "LOGINDISABLED");
     if !imap {
         return "It answered, encrypted, but didn't say it speaks IMAP, which I read mail with.".into();
     }
     let arrives = if idle {
         "and tells me as mail arrives (IDLE)"
     } else {
-        "but doesn't say when mail arrives, so I'll look on a schedule"
+        "but doesn't say before signing in whether it tells me as mail arrives: I'll know once signed in, and look on a schedule if it doesn't"
     };
-    if no_password {
-        format!("It answered, encrypted, {arrives}. It takes no password: sign in with Microsoft or Google instead.")
-    } else {
-        format!("It answered, encrypted, {arrives}.")
+    if !no_password {
+        return format!("It answered, encrypted, {arrives}.");
+    }
+    match signs_in_with(host) {
+        Some(who) => format!("It answered, encrypted, {arrives}. It takes no password: sign in with {who} instead."),
+        None => format!(
+            "It answered, encrypted, {arrives}. It won't take a password the way I give one (it says LOGINDISABLED), so a password won't connect it."
+        ),
     }
 }
 
-/// What a sending server says, for a person.
-fn sending_said(r: &SmtpReach) -> String {
-    if r.sign_in.is_empty() {
-        return "It answered, encrypted, but offered no way to sign in, so I couldn't send through it.".into();
+/// Whose sign-in a reading server takes instead of a password: Microsoft's
+/// and Google's own servers only.
+fn signs_in_with(host: &str) -> Option<&'static str> {
+    match host.trim().trim_end_matches('.').to_ascii_lowercase().as_str() {
+        "outlook.office365.com" | "imap-mail.outlook.com" | "imap.outlook.com" => Some("Microsoft"),
+        "imap.gmail.com" | "imap.googlemail.com" => Some("Google"),
+        _ => None,
     }
-    format!("It answered, encrypted, and takes a sign-in ({}).", r.sign_in.join(", "))
+}
+
+/// What a sending server says, for a person. Only one on this computer is
+/// reached unencrypted (a bridge's), and it says so.
+fn sending_said(r: &SmtpReach) -> String {
+    let answered =
+        if r.encrypted { "It answered, encrypted," } else { "It answered, on this computer and unencrypted," };
+    if r.sign_in.is_empty() {
+        return format!("{answered} but offered no way to sign in, so I couldn't send through it.");
+    }
+    format!("{answered} and takes a sign-in ({}).", r.sign_in.join(", "))
 }
 
 fn reached(host: &str, port: u16, outcome: Result<String, String>) -> ServerReached {
@@ -85,7 +104,8 @@ pub async fn reach_mail_servers(host: String, port: u16, address: String) -> Com
             security: Security::Tls,
             auth: Auth::Password,
         };
-        let reading = reached(&host, port, imap::reach(&account).map(|c| reading_said(&c)).map_err(|e| e.to_string()));
+        let reading =
+            reached(&host, port, imap::reach(&account).map(|c| reading_said(&host, &c)).map_err(|e| e.to_string()));
         let sending = smtp::known_for(&host, &account.username)
             .map(|s| reached(&s.host, s.port, smtp::reach(&s).map(|r| sending_said(&r)).map_err(|e| e.to_string())));
         MailServers { reading, sending }
@@ -102,20 +122,33 @@ mod tests {
     fn what_reaching_found_is_said_plainly() {
         let can = |c: &[&str]| c.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            reading_said(&can(&["IMAP4REV1", "IDLE", "AUTH=PLAIN"])),
+            reading_said("imap.example.org", &can(&["IMAP4REV1", "IDLE", "AUTH=PLAIN"])),
             "It answered, encrypted, and tells me as mail arrives (IDLE)."
         );
-        // iCloud's, as it answered (job 317).
-        assert!(
-            reading_said(&can(&["XAPPLEPUSHSERVICE", "IMAP4", "IMAP4REV1", "AUTH=PLAIN"])).contains("on a schedule")
-        );
-        assert!(reading_said(&can(&["POP3"])).contains("didn't say it speaks IMAP"));
-        // Microsoft's, as it answered (job 317).
+        // iCloud's, as it answered (job 317): no IDLE before signing in is no
+        // answer yet (0.10.0-alpha.93).
+        let icloud = reading_said("imap.mail.me.com", &can(&["XAPPLEPUSHSERVICE", "IMAP4", "IMAP4REV1", "AUTH=PLAIN"]));
+        assert!(icloud.contains("I'll know once signed in"), "{icloud}");
+        assert!(reading_said("imap.example.org", &can(&["POP3"])).contains("didn't say it speaks IMAP"));
+        // Microsoft's, as it answered (job 317), named for Microsoft's server
+        // only.
         let microsoft = can(&["IMAP4", "IMAP4REV1", "AUTH=XOAUTH2", "LOGINDISABLED", "IDLE"]);
-        assert!(reading_said(&microsoft).ends_with("It takes no password: sign in with Microsoft or Google instead."));
+        assert!(reading_said("outlook.office365.com", &microsoft)
+            .ends_with("It takes no password: sign in with Microsoft instead."));
+        // A password is given by LOGIN, so LOGINDISABLED rules it out even
+        // beside AUTH=PLAIN; and another server isn't told to sign in with
+        // Microsoft or Google.
+        let other = reading_said("mail.example.org", &can(&["IMAP4REV1", "LOGINDISABLED", "AUTH=PLAIN", "IDLE"]));
+        assert!(other.ends_with("so a password won't connect it."), "{other}");
+        assert!(!other.contains("Microsoft") && !other.contains("Google"), "{other}");
         let r = SmtpReach { encrypted: true, sign_in: vec!["PLAIN".into(), "XOAUTH2".into()], largest: None };
         assert_eq!(sending_said(&r), "It answered, encrypted, and takes a sign-in (PLAIN, XOAUTH2).");
-        assert!(sending_said(&SmtpReach { sign_in: vec![], ..r }).contains("no way to sign in"));
+        assert!(sending_said(&SmtpReach { sign_in: vec![], ..r.clone() }).contains("no way to sign in"));
+        // A bridge on this computer, reached as it is sent through.
+        assert_eq!(
+            sending_said(&SmtpReach { encrypted: false, ..r }),
+            "It answered, on this computer and unencrypted, and takes a sign-in (PLAIN, XOAUTH2)."
+        );
     }
 
     #[test]
@@ -128,7 +161,11 @@ mod tests {
     #[test]
     fn what_the_check_shows_matches_its_fixture() {
         let shown = MailServers {
-            reading: reached("imap.example.org", 993, Ok(reading_said(&["IMAP4REV1".into(), "IDLE".into()]))),
+            reading: reached(
+                "imap.example.org",
+                993,
+                Ok(reading_said("imap.example.org", &["IMAP4REV1".into(), "IDLE".into()])),
+            ),
             sending: Some(reached(
                 "smtp.example.org",
                 465,

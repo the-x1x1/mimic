@@ -60,8 +60,11 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"checking" | "connecting" | "signing-in" | null>(null);
   const [isMine, setIsMine] = useState(true);
-  // What reaching the servers found, signed in to neither (0.10.0-alpha.89).
-  const [servers, setServers] = useState<MailServers | null>(null);
+  // What reaching the servers found, signed in to neither (0.10.0-alpha.89),
+  // and for which server, port and address: shown only while they are still
+  // the ones in the form, so an edit — or an answer that comes back after
+  // one — never leaves another server's answer showing (0.10.0-alpha.93).
+  const [reachedFor, setReachedFor] = useState<{ key: string; found: MailServers } | null>(null);
   const [reaching, setReaching] = useState(false);
   // Said only when the store reports it: until then, and on a build that
   // does not seal, the note claims nothing it cannot back.
@@ -95,6 +98,8 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
     security: "tls",
   };
   const ready = account.host !== "" && account.username !== "" && password !== "";
+  const serversKey = `${account.host}\n${account.port}\n${account.username}`;
+  const servers = reachedFor?.key === serversKey ? reachedFor.found : null;
   const locked =
     protection === "account"
       ? ", locked to your Windows account"
@@ -142,10 +147,12 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   /** Reach the servers as connecting would, sending no password; say what each said. */
   async function checkServers() {
     setError(null);
-    setServers(null);
+    setReachedFor(null);
     setReaching(true);
+    const key = serversKey;
     try {
-      setServers(await ipc.reachMailServers(account.host, account.port, account.username));
+      const found = await ipc.reachMailServers(account.host, account.port, account.username);
+      setReachedFor({ key, found });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -339,7 +346,6 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                           onChange={(e) => {
                             setHost(e.target.value);
                             setProbe(null);
-                            setServers(null);
                           }}
                         />
                       </Field>
@@ -350,7 +356,6 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                           value={port}
                           onChange={(e) => {
                             setPort(Number(e.target.value) || 993);
-                            setServers(null);
                           }}
                         />
                       </Field>

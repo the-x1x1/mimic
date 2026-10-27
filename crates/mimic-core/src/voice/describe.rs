@@ -159,23 +159,28 @@ pub fn describe(provider: &dyn ModelProvider, layer: &str, m: &VoiceMetrics) -> 
 }
 
 /// What a reading says that its own numbers rule out, if anything
-/// (0.10.0-alpha.90). Run for real, llama3.2:3b read a writer who starts most
-/// messages in lowercase and contracts freely as "formal and highly polished"
-/// and as avoiding contractions (job 312). Only what the numbers can settle
-/// is checked, a sentence at a time, and a sentence that turns it round
-/// ("not formal", "never formally", "more casual than formal") is left alone.
+/// (0.10.0-alpha.90, .93). Run for real, llama3.2:3b read a writer who starts
+/// most messages in lowercase and contracts freely as "formal and highly
+/// polished" and as avoiding contractions (job 312). Only what the numbers
+/// can settle is checked — formal or not, contractions or not — a sentence
+/// at a time, and only what the sentence says of them: a claim is turned
+/// round by a word just before it in the same clause ("not formal", "never
+/// formally", "more casual than formal", "no formal greetings"), not by one
+/// anywhere in the sentence; "formal rather than chatty" still calls them
+/// formal; and "avoid" has to be about contractions ("avoids slang and
+/// contractions", not "no emoji and plenty of contractions") and not turned
+/// round itself ("doesn't avoid contractions").
 pub fn contradiction(text: &str, m: &VoiceMetrics) -> Option<String> {
-    const TURNED: [&str; 12] =
-        ["not", "never", "hardly", "less", "neither", "nor", "isn't", "aren't", "doesn't", "don't", "than", "far"];
     let lowercase = m.lowercase_start_rate.is_some_and(|r| r >= 0.6);
     let contracting = m.contractions_per_100_words.is_some_and(|r| r >= 4.0);
-    for sentence in text.split(['.', '!', '?', ';']) {
+    for sentence in text.split(['.', '!', '?', ';', ':']) {
         let s = sentence.to_lowercase().replace('\u{2019}', "'");
         let words: Vec<&str> = s.split(|c: char| !c.is_alphanumeric() && c != '\'').filter(|w| !w.is_empty()).collect();
-        if words.iter().any(|w| TURNED.contains(w)) || s.contains("rather") || s.contains("instead") {
-            continue;
-        }
-        if words.iter().any(|w| matches!(*w, "formal" | "formally" | "polished")) {
+        let called_formal = words
+            .iter()
+            .enumerate()
+            .any(|(i, w)| matches!(*w, "formal" | "formally" | "formality") && !turned(&words, i));
+        if called_formal {
             if lowercase {
                 return Some("called them formal, but most of their messages start in lowercase".into());
             }
@@ -183,14 +188,97 @@ pub fn contradiction(text: &str, m: &VoiceMetrics) -> Option<String> {
                 return Some("called them formal, but they use contractions freely".into());
             }
         }
-        if contracting
-            && words.iter().any(|w| w.starts_with("contraction"))
-            && words.iter().any(|w| matches!(*w, "avoid" | "avoids" | "avoiding" | "no" | "without" | "rarely" | "few"))
-        {
+        if contracting && words.iter().enumerate().any(|(i, w)| w.starts_with("contraction") && avoided(&words, i)) {
             return Some("said they avoid contractions, but they use them freely".into());
         }
     }
     None
+}
+
+/// Words that turn round what follows them closely: "not formal", "less
+/// formal", "casual than formal", "instead of formal", "no formal …".
+const TURNING: [&str; 21] = [
+    "not", "never", "hardly", "barely", "rarely", "seldom", "less", "neither", "nor", "isn't", "aren't", "doesn't",
+    "don't", "wasn't", "than", "instead", "no", "without", "lack", "lacks", "lacking",
+];
+
+/// Where a clause ends, looking back: a claim after one of these isn't turned
+/// round by a word before it ("not chatty but formal").
+const CLAUSE: [&str; 9] = ["but", "yet", "and", "or", "while", "whereas", "though", "although", "however"];
+
+/// Whether the claim at `at` is turned round by one of the three words
+/// before it in its clause ("far from formal" too).
+fn turned(words: &[&str], at: usize) -> bool {
+    for k in (at.saturating_sub(3)..at).rev() {
+        let w = words[k];
+        if CLAUSE.contains(&w) {
+            return false;
+        }
+        if TURNING.contains(&w) || (w == "far" && words.get(k + 1) == Some(&"from")) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Words that say something is avoided, before it ("avoids …", "no …",
+/// "never uses …") or after ("… are rare").
+const AVOIDING: [&str; 12] =
+    ["avoid", "avoids", "avoiding", "avoided", "no", "without", "rarely", "seldom", "never", "few", "hardly", "barely"];
+const AVOIDED: [&str; 7] = ["rare", "avoided", "absent", "scarce", "uncommon", "infrequent", "missing"];
+
+/// Where looking for what is said of contractions stops: another clause, or
+/// a word saying how much of something there is.
+const STOPS: [&str; 22] = [
+    "but",
+    "yet",
+    "while",
+    "whereas",
+    "though",
+    "although",
+    "however",
+    "with",
+    "plenty",
+    "lots",
+    "many",
+    "much",
+    "frequent",
+    "frequently",
+    "often",
+    "freely",
+    "regular",
+    "regularly",
+    "common",
+    "commonly",
+    "liberal",
+    "liberally",
+];
+
+/// Whether the words round `at` ("contractions") say they are avoided: an
+/// avoiding word in the four before, itself not turned round ("doesn't
+/// avoid"), or an avoided one in the three after, with nothing turning it
+/// ("are not rare").
+fn avoided(words: &[&str], at: usize) -> bool {
+    for k in (at.saturating_sub(4)..at).rev() {
+        let w = words[k];
+        if STOPS.contains(&w) {
+            break;
+        }
+        if AVOIDING.contains(&w) {
+            return !words[k.saturating_sub(2)..k].iter().any(|n| {
+                matches!(*n, "not" | "never" | "isn't" | "aren't" | "doesn't" | "don't" | "didn't" | "won't")
+            });
+        }
+    }
+    for w in words.iter().skip(at + 1).take(3) {
+        if STOPS.contains(w) || TURNING.contains(w) {
+            return false;
+        }
+        if AVOIDED.contains(w) {
+            return true;
+        }
+    }
+    false
 }
 
 /// What a run did.
@@ -411,6 +499,29 @@ mod tests {
             contradiction("Fairly formal.", &only_contracting).as_deref(),
             Some("called them formal, but they use contractions freely")
         );
+
+        // A word that turns something round elsewhere in the sentence, or one
+        // that turns round something else, doesn't save it (0.10.0-alpha.93).
+        for ruled_out in [
+            "Formal rather than chatty, and brief.",
+            "They are not chatty but formal.",
+            "They write formally and never use emoji.",
+            "A formal register; no emoji.",
+        ] {
+            assert!(contradiction(ruled_out, &casual()).is_some(), "{ruled_out}");
+        }
+        for avoiding in [
+            "They avoid slang and contractions.",
+            "Short messages without contractions.",
+            "They never use contractions.",
+            "Contractions are rare.",
+        ] {
+            assert_eq!(
+                contradiction(avoiding, &only_contracting).as_deref(),
+                Some("said they avoid contractions, but they use them freely"),
+                "{avoiding}"
+            );
+        }
     }
 
     #[test]
@@ -421,6 +532,15 @@ mod tests {
             "Not at all formal: lowercase, short, contracted.",
             "Rather relaxed instead of formal.",
             "They don\u{2019}t sound formal.",
+            "No formal greetings or sign-offs.",
+            "Far from formal.",
+            // Polished isn't formal: lowercase writing can be careful.
+            "Polished but relaxed, in lowercase.",
+            // "No" and "never" about something else.
+            "No emoji, and plenty of contractions.",
+            "They don't avoid contractions.",
+            "Contractions are not rare here.",
+            "Never long; contractions throughout.",
         ] {
             assert_eq!(contradiction(fine, &casual()), None, "{fine}");
         }
