@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.91] — 2026-10-26
+
+Mentioned in a Google Chat space.
+
+### Added
+
+- **When someone @mentions you in a Google Chat space, it waits for your reply.** Spaces were left out before; now each check also reads the spaces you're in, keeps the messages that mention you by name and your own, and leaves the rest of a busy space alone (counted, not kept; an @all isn't a mention of you). Each thread is its own conversation, named after its space, and your approved reply goes into the thread you were asked in. Replying by itself still answers only one-to-one chats.
+
 ## [0.10.0-alpha.90] — 2026-10-26
 
 A reading in words has to agree with its numbers.

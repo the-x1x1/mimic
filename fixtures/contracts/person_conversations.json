@@ -1,13 +1,13 @@
 {
   "conversations": [
     {
-      "conversationId": "d8b5ab50-ecbf-4602-a3f6-f4724a085c6e",
+      "conversationId": "f7ed2d19-7b09-4fc3-ac30-1140951fe834",
       "subject": "Pub",
       "channel": "sms",
       "isGroup": false,
       "messageCount": 5,
       "lastMessageAt": "2026-01-25T18:40:00Z",
-      "decidingMessageId": "f0a52b84-5ad1-45ca-b1b6-cddd0e54a06f",
+      "decidingMessageId": "7954f9c7-369c-4639-81ae-4c40f7ae00f7",
       "standing": "waiting",
       "mark": null
     }
