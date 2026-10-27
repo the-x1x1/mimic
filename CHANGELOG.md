@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.93] — 2026-10-26
+
+The server check and the reading check, said more exactly.
+
+### Fixed
+
+- **Check the server says what's so.** A server that refuses passwords the way Mimic gives one says so, whatever else it lists, and only Microsoft's and Google's own servers are told to sign in with Microsoft or Google; another is told a password won't connect it. A server that doesn't mention telling Mimic as mail arrives before you sign in is no longer said to be checked on a schedule — that's known once signed in. A sending server on this computer (a bridge) is said to be unencrypted, as it is. And what a check found disappears when you change the address, as when you change the server, and an answer that comes back after a change isn't shown.
+- **A reading of how you write is held to what each sentence says.** "Formal rather than chatty" calls you formal, and a "never" about emoji elsewhere in the sentence no longer hides it; "polished" alone isn't taken for formal; and "no emoji, and plenty of contractions" or "doesn't avoid contractions" are no longer read as saying you avoid them.
+
 ## [0.10.0-alpha.92] — 2026-10-26
 
 Google Chat spaces, when you say so.

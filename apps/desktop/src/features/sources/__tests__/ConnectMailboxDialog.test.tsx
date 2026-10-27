@@ -316,10 +316,52 @@ describe("an address at a domain of its own", () => {
       993,
       "c@formicaria.us",
     );
+    // Changing the address forgets it too: the sending server it pairs with
+    // is the address's (0.10.0-alpha.93).
+    fireEvent.change(screen.getByLabelText("Your email address"), {
+      target: { value: "d@formicaria.us" },
+    });
+    expect(screen.queryByText(/It answered/)).toBeNull();
     // Changing the server forgets what the last one said.
     fireEvent.change(screen.getByLabelText("IMAP server"), {
       target: { value: "mail.formicaria.us" },
     });
+    expect(screen.queryByText(/It answered/)).toBeNull();
+  });
+
+  it("doesn't show an answer that comes back after the server was changed", async () => {
+    native.mailExchangers.mockResolvedValue([]);
+    let answer: (v: unknown) => void = () => undefined;
+    native.reachMailServers.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    renderDialog();
+    leaveAddress("c@formicaria.us");
+    fireEvent.click(await screen.findByText("Server settings"));
+    fireEvent.change(screen.getByLabelText("IMAP server"), {
+      target: { value: "imap.formicaria.us" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check the server (no password sent)" }));
+    fireEvent.change(screen.getByLabelText("IMAP server"), {
+      target: { value: "mail.formicaria.us" },
+    });
+    answer({
+      reading: {
+        host: "imap.formicaria.us",
+        port: 993,
+        reached: true,
+        said: "It answered, encrypted.",
+      },
+      sending: null,
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Check the server (no password sent)" }),
+      ).toBeEnabled(),
+    );
     expect(screen.queryByText(/It answered/)).toBeNull();
   });
 
