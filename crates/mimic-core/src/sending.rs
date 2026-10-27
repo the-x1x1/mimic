@@ -52,6 +52,7 @@ use crate::sources::smtp::{self, SmtpAccount, SmtpError};
 
 pub mod slack;
 pub mod teams;
+pub mod telegram;
 
 /// Why a reply can't be sent from here.
 pub const NO_MAILBOX: &str =
@@ -121,8 +122,8 @@ pub struct SendingMailbox {
     pub signature: Option<String>,
 }
 
-/// Where a reply goes: out of a mailbox, or into Slack (0.10.0-alpha.65)
-/// or Teams (0.10.0-alpha.68).
+/// Where a reply goes: out of a mailbox, or into Slack (0.10.0-alpha.65),
+/// Teams (0.10.0-alpha.68) or Telegram (0.10.0-alpha.75).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReplyKind {
@@ -130,6 +131,7 @@ pub enum ReplyKind {
     Mail,
     Slack,
     Teams,
+    Telegram,
 }
 
 /// Everything the Send panel shows before anything goes.
@@ -229,6 +231,9 @@ pub fn envelope_for(db: &Db, draft_id: &str) -> Result<ReplyEnvelope, SendError>
             return Ok(envelope);
         }
         if let Some(envelope) = teams::envelope_for(db, &draft, m)? {
+            return Ok(envelope);
+        }
+        if let Some(envelope) = telegram::envelope_for(db, &draft, m)? {
             return Ok(envelope);
         }
     }

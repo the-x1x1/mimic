@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.75] — 2026-10-26
+
+Replying in Telegram.
+
+### Added
+
+- **Send it, in Telegram.** A reply to a Telegram message goes into that chat, as you, exactly as the Send panel shows it, once you press Send. If Telegram's answer is lost as it goes, I say it may have gone and don't send it again until you've looked.
+
 ## [0.10.0-alpha.74] — 2026-10-26
 
 Telegram, as it happens.

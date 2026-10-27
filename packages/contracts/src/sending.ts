@@ -97,7 +97,7 @@ export const ReplyEnvelope = z.object({
    * those the one "mailbox" is the workspace or account, `to` is the
    * conversation, and there is no subject. Absent is mail.
    */
-  kind: z.enum(["mail", "slack", "teams"]).optional(),
+  kind: z.enum(["mail", "slack", "teams", "telegram"]).optional(),
 });
 export type ReplyEnvelope = z.infer<typeof ReplyEnvelope>;
 
@@ -148,7 +148,9 @@ export function describeOutboxEntry(e: OutboxEntry): string {
         ? `May have gone to ${to} — I couldn't tell. Look in the conversation in Slack.`
         : e.fromAddress.startsWith("teams:")
           ? `May have gone to ${to} — I couldn't tell. Look in the chat in Teams.`
-          : `May have gone to ${to} — I couldn't tell. Look in your Sent folder.`;
+          : e.fromAddress.startsWith("telegram:")
+            ? `May have gone to ${to} — I couldn't tell. Look in the chat in Telegram.`
+            : `May have gone to ${to} — I couldn't tell. Look in your Sent folder.`;
     case "failed":
       return e.error ? `Didn't go to ${to}: ${e.error}` : `Didn't go to ${to}.`;
   }
