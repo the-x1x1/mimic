@@ -86,7 +86,9 @@ Done in 0.10.0-alpha.74–78: Telegram — the account read as the user (`source
 
 Done in 0.10.0-alpha.79: Google Chat — a Google Workspace account's direct messages and group chats, read through the Chat API (`sources::google_chat`). Not done: never run against Google; named spaces; a personal Gmail's Chat, which has no API.
 
-Next: replying in Google Chat, the reply the user approves and then by itself. Then other places messages arrive, where a service lets a person's own app read them.
+Done in 0.10.0-alpha.80: replying in Google Chat — the reply the user approves, and by itself in direct messages under the same rules.
+
+Next: other places messages arrive, where a service lets a person's own app read them.
 
 ## Phase 8 — Advanced personalization
 

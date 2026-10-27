@@ -25,10 +25,13 @@ export function AutoReplySection() {
   const [filter, setFilter] = useState("");
   const rules = state.data?.rules ?? null;
   const people = usePeople(false, rules !== null);
-  // Mailboxes, Slack workspaces (0.10.0-alpha.66), Teams accounts (.68)
-  // and Telegram accounts (.76).
+  // Mailboxes, Slack workspaces (0.10.0-alpha.66), Teams accounts (.68),
+  // Telegram accounts (.76) and Google Chat accounts (.80).
   const isChat = (connector: string) =>
-    connector === "slack" || connector === "teams" || connector === "telegram_account";
+    connector === "slack" ||
+    connector === "teams" ||
+    connector === "telegram_account" ||
+    connector === "google_chat";
   const mailboxes = (sources.data ?? []).filter(
     (s) => s.connector === "imap" || isChat(s.connector),
   );

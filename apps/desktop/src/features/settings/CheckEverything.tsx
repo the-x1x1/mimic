@@ -25,7 +25,11 @@ export function CheckEverything({
 }: {
   mailboxes: { id: string; name: string }[];
   /** Slack workspaces, Teams accounts and Telegram accounts. */
-  chats?: { id: string; name: string; connector: "slack" | "teams" | "telegram_account" }[];
+  chats?: {
+    id: string;
+    name: string;
+    connector: "slack" | "teams" | "telegram_account" | "google_chat";
+  }[];
   /** Whether the mailboxes are known yet: until then, a check would leave them out. */
   ready: boolean;
 }) {
@@ -68,7 +72,9 @@ export function CheckEverything({
             ? await ipc.testSlack(c.id)
             : c.connector === "teams"
               ? await ipc.testTeams(c.id)
-              : await ipc.testTelegram(c.id);
+              : c.connector === "google_chat"
+                ? await ipc.testGoogleChat(c.id)
+                : await ipc.testTelegram(c.id);
         note({ what: `Reading ${c.name}`, ok: true, said });
       } catch (e) {
         note({ what: `Reading ${c.name}`, ok: false, said: (e as Error).message });

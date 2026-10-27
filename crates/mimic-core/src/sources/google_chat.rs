@@ -324,6 +324,56 @@ impl ChatApi {
     }
 }
 
+impl ChatApi {
+    /// Post `text` into a space as the user (0.10.0-alpha.80), as plain
+    /// text, under `request`: the same request asked again makes no second
+    /// message. The new message's name and when Google Chat says it was
+    /// made, or why not — and whether it may have gone anyway.
+    pub fn post(&self, space: &str, text: &str, request: &str) -> Result<(String, Option<String>), PostError> {
+        let url = format!("{}/{}/messages?requestId={}", self.base, path(space), encode(request));
+        let response = self.client.post(url).bearer_auth(&self.token).json(&json!({ "text": text })).send();
+        let response = match response {
+            Ok(r) => r,
+            Err(e) if e.is_connect() || e.is_builder() => {
+                return Err(PostError::NotSent(GoogleChatError::Network(one_line(&e.to_string()))))
+            }
+            Err(e) => return Err(PostError::Unsure(one_line(&e.to_string()))),
+        };
+        let status = response.status().as_u16();
+        if status == 429 {
+            return Err(PostError::NotSent(GoogleChatError::RateLimited));
+        }
+        let value: Value = match response.json() {
+            Ok(v) => v,
+            Err(e) if (200..300).contains(&status) => {
+                return Err(PostError::Unsure(format!("Google Chat answered {status}: {}", one_line(&e.to_string()))))
+            }
+            Err(_) => Value::Null,
+        };
+        if (200..300).contains(&status) {
+            let created = value.get("createTime").and_then(Value::as_str).map(str::to_string);
+            return value.get("name").and_then(Value::as_str).map(|name| (name.to_string(), created)).ok_or_else(
+                || PostError::Unsure("Google Chat said it went, without saying which message it was".into()),
+            );
+        }
+        // A server's failure may have come after it took the message.
+        if status >= 500 {
+            return Err(PostError::Unsure(format!("Google Chat answered {status}")));
+        }
+        Err(PostError::NotSent(refusal(status, &value)))
+    }
+}
+
+/// Why a post didn't go — or might have.
+#[derive(Debug, thiserror::Error)]
+pub enum PostError {
+    #[error(transparent)]
+    NotSent(GoogleChatError),
+    /// Asked, and no clear answer came back: it may have gone.
+    #[error("I lost Google Chat's answer as it was being sent ({0}), so it may or may not have gone.")]
+    Unsure(String),
+}
+
 /// A Chat API time (RFC 3339, to the nanosecond) as a moment, for order.
 fn when(t: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     chrono::DateTime::parse_from_rfc3339(t).ok()
@@ -538,7 +588,7 @@ pub fn record_failure(db: &Db, source_id: &str, message: &str) -> Result<(), DbE
 
 /// Whether a message is one a check keeps: a person's, not deleted, with
 /// words.
-fn kept(m: &Value) -> bool {
+pub(crate) fn kept(m: &Value) -> bool {
     let sender = m.get("sender");
     sender.and_then(|s| s.get("name")).and_then(Value::as_str).is_some()
         && sender.and_then(|s| s.get("type")).and_then(Value::as_str).is_none_or(|t| t == "HUMAN")
@@ -852,6 +902,106 @@ impl crate::jobs::JobExecutor for CheckGoogleChatExecutor {
                     Err(crate::jobs::JobError::Failed(e.to_string()))
                 }
             }
+        })
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod live {
+    //! A Chat API that keeps what it is told: spaces with their messages,
+    //! oldest first; who signed in; a post added as the user's, a second
+    //! after the space's last message, once per request id.
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::{json, Value};
+
+    pub(crate) struct Space {
+        pub name: String,
+        /// The other person, for a direct message.
+        pub other: Option<(String, String)>,
+        pub messages: Vec<Value>,
+    }
+
+    pub(crate) type Spaces = Arc<Mutex<Vec<Space>>>;
+
+    pub(crate) fn said(space: &str, n: &str, user: &str, name: &str, created: &str, text: &str) -> Value {
+        json!({
+            "name": format!("{space}/messages/{n}"),
+            "sender": { "name": user, "displayName": name, "type": "HUMAN" },
+            "createTime": created,
+            "text": text,
+        })
+    }
+
+    /// The query's `createTime > "…"`, if it has one.
+    fn after(query: &str) -> Option<String> {
+        let filter = query.split('&').find_map(|p| p.strip_prefix("filter="))?;
+        let decoded = percent(filter);
+        let start = decoded.find('"')? + 1;
+        let end = decoded[start..].find('"')? + start;
+        Some(decoded[start..end].to_string())
+    }
+
+    fn percent(s: &str) -> String {
+        let bytes = s.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                    out.push(b);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    pub(crate) fn chat(spaces: Spaces, requests: Arc<Mutex<Vec<String>>>) -> crate::sources::teams::fake::Answer {
+        Box::new(move |path, body| {
+            let mut spaces = spaces.lock().unwrap();
+            let answer = if path == "/userinfo" {
+                json!({ "sub": "7", "name": "C Haynes", "email": "c@formicaria.example" })
+            } else if path == "/spaces" {
+                json!({ "spaces": spaces.iter().map(|s| {
+                    let kind = if s.other.is_some() { "DIRECT_MESSAGE" } else { "GROUP_CHAT" };
+                    let last = s.messages.last().and_then(|m| m["createTime"].as_str()).unwrap_or("2026-01-01T00:00:00Z");
+                    json!({ "name": s.name, "spaceType": kind, "lastActiveTime": last })
+                }).collect::<Vec<_>>() })
+            } else if let Some(name) = path.strip_prefix('/').and_then(|p| p.strip_suffix("/messages")) {
+                let Some(space) = spaces.iter_mut().find(|s| s.name == name) else {
+                    return (404, r#"{"error":{"code":404,"status":"NOT_FOUND","message":"no space"}}"#.into());
+                };
+                if body.starts_with('{') {
+                    // A post: `body` is what was sent, the request id kept.
+                    let sent: Value = serde_json::from_str(body).unwrap();
+                    let last =
+                        space.messages.last().and_then(|m| m["createTime"].as_str()).unwrap_or("2026-01-01T00:00:00Z");
+                    let at = chrono::DateTime::parse_from_rfc3339(last).unwrap() + chrono::Duration::seconds(1);
+                    let created = at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+                    let n = format!("p{}", space.messages.len());
+                    let message =
+                        said(&space.name, &n, "users/7", "C Haynes", &created, sent["text"].as_str().unwrap());
+                    space.messages.push(message.clone());
+                    requests.lock().unwrap().push(n);
+                    message
+                } else {
+                    let since = after(body);
+                    let found: Vec<Value> = space
+                        .messages
+                        .iter()
+                        .filter(|m| since.as_deref().is_none_or(|s| m["createTime"].as_str().unwrap_or("") > s))
+                        .cloned()
+                        .collect();
+                    json!({ "messages": found })
+                }
+            } else {
+                return (404, r#"{"error":{"code":404,"status":"NOT_FOUND","message":"no"}}"#.into());
+            };
+            (200, answer.to_string())
         })
     }
 }

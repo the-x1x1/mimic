@@ -43,7 +43,8 @@ export function SendPanel({
 }) {
   const send = useSendReply();
   const id = useId();
-  // Into a chat service: Slack (0.10.0-alpha.65), Teams (.68) or Telegram (.75).
+  // Into a chat service: Slack (0.10.0-alpha.65), Teams (.68), Telegram (.75)
+  // or Google Chat (.80).
   const service =
     envelope.kind === "slack"
       ? "Slack"
@@ -51,7 +52,9 @@ export function SendPanel({
         ? "Teams"
         : envelope.kind === "telegram"
           ? "Telegram"
-          : null;
+          : envelope.kind === "googleChat"
+            ? "Google Chat"
+            : null;
   const settings = useSettings();
   const wait = settings.data?.["send.undoSeconds"] ?? 5;
   // The countdown before it goes: seconds left, or null when not counting.

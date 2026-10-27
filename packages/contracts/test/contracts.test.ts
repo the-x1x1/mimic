@@ -1547,6 +1547,11 @@ describe("what was sent says where it went and whether it got there", () => {
     expect(
       describeOutboxEntry(entry({ status: "unsure", fromAddress: "telegram:user7", to: ["Ada"] })),
     ).toBe("May have gone to Ada — I couldn't tell. Look in the chat in Telegram.");
+    expect(
+      describeOutboxEntry(
+        entry({ status: "unsure", fromAddress: "google_chat:users/7", to: ["Ada"] }),
+      ),
+    ).toBe("May have gone to Ada — I couldn't tell. Look in the chat in Google Chat.");
   });
 
   it("names who else a reply was copied to", () => {
