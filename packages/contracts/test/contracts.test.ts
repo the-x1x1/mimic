@@ -1030,6 +1030,22 @@ describe("connecting a mailbox", () => {
     expect(teamsAccount({ connector: "slack", config })).toBeNull();
   });
 
+  it("reads a connected Google Chat account", async () => {
+    const { googleChatAccount } = await import("../src");
+    const config = {
+      userId: "users/7",
+      user: "C Haynes",
+      email: "c@formicaria.example",
+      marks: {},
+    };
+    expect(googleChatAccount({ connector: "google_chat", config })).toEqual({
+      user: "C Haynes",
+      email: "c@formicaria.example",
+      lastCheckedAt: null,
+    });
+    expect(googleChatAccount({ connector: "teams", config })).toBeNull();
+  });
+
   it("knows a Slack user token and reads a connected workspace", async () => {
     const { isSlackUserToken, slackWorkspace, SLACK_MANIFEST, SLACK_USER_SCOPES } =
       await import("../src");

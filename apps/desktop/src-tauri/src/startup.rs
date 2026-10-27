@@ -139,6 +139,26 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
             std::sync::Arc::new(move |key: &str, value: &str| secrets.set(key, value).map_err(|e| e.to_string()))
         },
     ));
+    // Google Chat accounts' access tokens (0.10.0-alpha.79): traded for each
+    // one's sign-in in the secret store, through the Google registration
+    // mailboxes sign in with — its client id and its secret.
+    let google_chat_access = std::sync::Arc::new(mimic_core::sources::google_chat::Access::new(
+        {
+            let credentials = mail_credentials.clone();
+            std::sync::Arc::new(move || credentials.sign_in_with(mimic_core::sources::imap::Auth::Google))
+        },
+        {
+            let secrets = secrets.clone();
+            std::sync::Arc::new(move |key: &str| {
+                use mimic_core::providers::SecretStore;
+                secrets.get(key).filter(|t| !t.is_empty())
+            })
+        },
+        {
+            let secrets = secrets.clone();
+            std::sync::Arc::new(move |key: &str, value: &str| secrets.set(key, value).map_err(|e| e.to_string()))
+        },
+    ));
     // Reading what the user's messages are doing sends every one of them to
     // the model, so it is only ever handed one on this computer.
     let local_registry = providers.clone();
@@ -166,6 +186,8 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         // Teams chats, through Graph, with the sign-in kept for each
         // (0.10.0-alpha.67), as the Microsoft registration mailboxes use.
         mimic_core::sources::teams::CheckTeamsExecutor::shared(teams_access.clone()),
+        // Google Chat, through the Chat API, likewise (0.10.0-alpha.79).
+        mimic_core::sources::google_chat::CheckGoogleChatExecutor::shared(google_chat_access.clone()),
         mimic_core::sources::slack::CheckSlackExecutor::shared({
             let secrets = secrets.clone();
             std::sync::Arc::new(move |key: &str| {
@@ -220,6 +242,9 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
     if let Err(e) = mimic_core::sources::telegram_account::recover(&db) {
         tracing::warn!(target: "mail", error = %e, "could not reset interrupted Telegram checks");
     }
+    if let Err(e) = mimic_core::sources::google_chat::recover(&db) {
+        tracing::warn!(target: "mail", error = %e, "could not reset interrupted Google Chat checks");
+    }
     if interrupted > 0 {
         tracing::warn!(target: "jobs", interrupted, requeued, "recovered interrupted jobs");
     }
@@ -252,6 +277,7 @@ pub async fn boot(resource_dir: Option<PathBuf>) -> anyhow::Result<AppState> {
         instance,
         mail_credentials,
         teams_access,
+        google_chat_access,
         sign_in: Default::default(),
         telegram: Default::default(),
         replying: AtomicBool::new(false),
@@ -433,7 +459,8 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                                 || ev.kind == mimic_core::sources::imap::JOB_KIND
                                 || ev.kind == mimic_core::sources::slack::JOB_KIND
                                 || ev.kind == mimic_core::sources::teams::JOB_KIND
-                                || ev.kind == mimic_core::sources::telegram_account::JOB_KIND);
+                                || ev.kind == mimic_core::sources::telegram_account::JOB_KIND
+                                || ev.kind == mimic_core::sources::google_chat::JOB_KIND);
                         let measuring = new_messages && crate::commands::voice::measure_what_changed(&st.db, &st.jobs);
                         // So does a model's reading of what they are doing,
                         // however it ended: what it read is kept.
@@ -561,6 +588,21 @@ pub fn spawn_background(app: AppHandle, state: crate::SharedState) {
                     }
                     Err(e) => {
                         tracing::warn!(target: "mail", error = %e, "could not work out which Teams accounts are due")
+                    }
+                }
+                // Google Chat accounts, on the same interval (0.10.0-alpha.79).
+                match mimic_core::sources::google_chat::due_now(&st.db) {
+                    Ok(ids) => {
+                        for id in ids {
+                            if let Err(e) =
+                                st.jobs.enqueue(mimic_core::sources::google_chat::JOB_KIND, json!({ "sourceId": id }))
+                            {
+                                tracing::warn!(target: "mail", error = %e, "could not queue a Google Chat check");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(target: "mail", error = %e, "could not work out which Google Chat accounts are due")
                     }
                 }
             }

@@ -107,6 +107,9 @@ pub async fn start_source_import(
     if source.connector == mimic_core::sources::teams::CONNECTOR {
         return Ok(state.jobs.enqueue(mimic_core::sources::teams::JOB_KIND, json!({ "sourceId": source_id }))?);
     }
+    if source.connector == mimic_core::sources::google_chat::CONNECTOR {
+        return Ok(state.jobs.enqueue(mimic_core::sources::google_chat::JOB_KIND, json!({ "sourceId": source_id }))?);
+    }
     if source.connector == mimic_core::sources::telegram_account::CONNECTOR {
         return Ok(state
             .jobs
@@ -547,6 +550,9 @@ pub async fn delete_source(
     let key = match connector.as_deref() {
         Some(mimic_core::sources::slack::CONNECTOR) => Some(mimic_core::sources::slack::secret_key(&source_id)),
         Some(mimic_core::sources::teams::CONNECTOR) => Some(mimic_core::sources::teams::secret_key(&source_id)),
+        Some(mimic_core::sources::google_chat::CONNECTOR) => {
+            Some(mimic_core::sources::google_chat::secret_key(&source_id))
+        }
         Some(mimic_core::sources::telegram_account::CONNECTOR) => {
             Some(mimic_core::sources::telegram_account::secret_key(&source_id))
         }

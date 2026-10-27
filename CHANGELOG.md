@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.79] — 2026-10-26
+
+Google Chat.
+
+### Added
+
+- **Connect Google Chat.** Under Your mail, sign in with Google in your browser — a Google Workspace account (a work or school address on Google) — and I read your Google Chat direct messages and group chats, both sides, and check for new ones as often as I check your mail. Named spaces and chats with apps aren't read, and reading changes nothing in Google Chat. It goes through the Google registration your mailboxes sign in with; once, in that Google Cloud project, turn on the Google Chat API and give it an app name on its Configuration page. A personal Gmail has no Chat API, and the dialog says so.
+
 ## [0.10.0-alpha.78] — 2026-10-26
 
 Telegram, tightened again.
