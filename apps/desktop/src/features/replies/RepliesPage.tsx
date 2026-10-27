@@ -857,7 +857,8 @@ export function DraftReview({
       {error ? <InlineError>{error.message}</InlineError> : null}
       {draft.channel === "email" ||
       envelope.data?.kind === "slack" ||
-      envelope.data?.kind === "teams" ? (
+      envelope.data?.kind === "teams" ||
+      envelope.data?.kind === "telegram" ? (
         <ByMyself draftId={draft.id} participantId={draft.participantId} />
       ) : null}
       <div className="thread__actions">

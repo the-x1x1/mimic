@@ -136,6 +136,7 @@ pub fn run() {
             commands::telegram::telegram_sign_in_code,
             commands::telegram::telegram_sign_in_password,
             commands::telegram::cancel_telegram_sign_in,
+            commands::telegram::test_telegram,
             commands::teams::sign_in_teams_again,
             commands::sources::mail_sign_in_available,
             commands::sources::mail_exchangers,

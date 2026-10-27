@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.76] — 2026-10-26
+
+Replying by myself in Telegram.
+
+### Added
+
+- **Telegram, by itself.** Tick a Telegram account beside your mailboxes under Replying by myself, and I answer one-to-one chats there the way I do email, Slack and Teams: held first, checked again after I've read the account, and — just before it goes — I look at the chat: if you've answered there, or they've written again, it doesn't go. Never a group. **Check it all now** tries your Telegram sign-in too, sending nothing.
+
 ## [0.10.0-alpha.75] — 2026-10-26
 
 Replying in Telegram.
