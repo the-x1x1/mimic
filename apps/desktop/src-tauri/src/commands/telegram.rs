@@ -77,6 +77,32 @@ fn saved_app(state: &crate::AppState) -> Option<AppCredentials> {
     state.secrets.get(telegram::APP_KEY).and_then(|raw| serde_json::from_str(&raw).ok())
 }
 
+pub(crate) const NO_SESSION: &str =
+    "I don't have a Telegram sign-in I can use for this account. Sign in again under Your mail.";
+
+/// What sends into an account, or asks it before a reply goes by itself
+/// (0.10.0-alpha.75): the app's registration and the account's session, as
+/// kept.
+pub(crate) fn session_for(state: &crate::AppState, source_id: &str) -> Option<(AppCredentials, KeptSession)> {
+    let app = saved_app(state)?;
+    let session =
+        state.secrets.get(&telegram::secret_key(source_id)).and_then(|raw| KeptSession::from_kept(&raw).ok())?;
+    Some((app, session))
+}
+
+/// Keep what Telegram changed in a session after it was used — unless the
+/// account was removed meanwhile.
+pub(crate) fn keep_session(state: &crate::AppState, source_id: &str, session: &KeptSession) {
+    if state.db.get_source(source_id).ok().flatten().is_none() {
+        return;
+    }
+    if let Ok(kept) = session.to_kept() {
+        if let Err(e) = state.secrets.set(&telegram::secret_key(source_id), &kept) {
+            tracing::warn!(target: "telegram", error = %e, "couldn't keep the session");
+        }
+    }
+}
+
 /// The sign-in under way, taken out to be worked on, if there is one still
 /// young enough.
 fn take_pending(state: &crate::AppState) -> Option<PendingTelegram> {

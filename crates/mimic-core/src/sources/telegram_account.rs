@@ -644,6 +644,104 @@ impl Session for KeptSession {
     }
 }
 
+// --------------------------------------------------------------- sending
+
+/// A chat a reply goes into: Telegram's id for it, and what it is (`user`,
+/// `chat` or `channel`, as a check recorded it in `telegramKind`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRef {
+    pub id: i64,
+    pub kind: String,
+}
+
+impl ChatRef {
+    /// The chat a message read from Telegram came from.
+    pub fn of(metadata: &Value) -> Option<ChatRef> {
+        let id = metadata.get("telegramChat").and_then(Value::as_str)?.parse().ok()?;
+        let kind = match metadata.get("telegramKind").and_then(Value::as_str) {
+            Some(kind) => kind.to_string(),
+            // One-to-one is with a user; anything else is said by its kind.
+            None if metadata.get("telegramDirect").and_then(Value::as_bool) == Some(true) => "user".to_string(),
+            None => return None,
+        };
+        Some(ChatRef { id, kind })
+    }
+
+    fn peer_id(&self) -> Option<PeerId> {
+        match self.kind.as_str() {
+            "user" => PeerId::user(self.id),
+            "chat" => PeerId::chat(self.id),
+            "channel" => PeerId::channel(self.id),
+            _ => None,
+        }
+    }
+}
+
+/// Why a reply didn't go, or may have.
+#[derive(Debug, thiserror::Error)]
+pub enum PostError {
+    /// Telegram said no, or it was never asked: nothing went.
+    #[error(transparent)]
+    NotSent(TelegramError),
+    /// Asked, and the answer was lost, or didn't say what it made: it may
+    /// have gone.
+    #[error("Telegram may have taken it: {0}.")]
+    Unsure(String),
+}
+
+/// What sending a reply into Telegram, and checking before one goes by
+/// itself, asks of it — real (`LivePost`) or scripted in tests.
+pub trait TelegramPost {
+    /// Whose account the session is.
+    fn me(&self) -> Result<Me, TelegramError>;
+    /// Send `text` into `chat` as the account, as plain text: the message's
+    /// id and when it went (seconds since 1970, Telegram's clock).
+    fn post(&self, chat: &ChatRef, text: &str) -> Result<(i32, i64), PostError>;
+    /// What was said in `chat` after message `after`, oldest first (at most
+    /// fifty).
+    fn after(&self, chat: &ChatRef, after: i32) -> Result<Vec<Said>, TelegramError>;
+}
+
+/// `Live`, asked from a thread that may block (`spawn_blocking`), on the
+/// runtime it runs on.
+pub struct LivePost {
+    handle: tokio::runtime::Handle,
+    live: Live,
+}
+
+impl LivePost {
+    /// Connect as the session's account, on `handle`'s runtime.
+    pub fn start(handle: tokio::runtime::Handle, app: &AppCredentials, session: Arc<KeptSession>) -> LivePost {
+        let live = {
+            let _inside = handle.enter();
+            Live::start(app, session)
+        };
+        LivePost { handle, live }
+    }
+
+    pub fn session(&self) -> &Arc<KeptSession> {
+        self.live.session()
+    }
+
+    /// Disconnect, and wait for the connection to end.
+    pub fn close(self) {
+        let LivePost { handle, live } = self;
+        handle.block_on(live.close());
+    }
+}
+
+impl TelegramPost for LivePost {
+    fn me(&self) -> Result<Me, TelegramError> {
+        self.handle.block_on(self.live.me())
+    }
+    fn post(&self, chat: &ChatRef, text: &str) -> Result<(i32, i64), PostError> {
+        self.handle.block_on(self.live.post(chat, text))
+    }
+    fn after(&self, chat: &ChatRef, after: i32) -> Result<Vec<Said>, TelegramError> {
+        self.handle.block_on(self.live.after(chat, after))
+    }
+}
+
 // ------------------------------------------------------------------ live
 
 /// Where a sign-in stands after a step.
@@ -764,6 +862,59 @@ impl Live {
     pub async fn me(&self) -> Result<Me, TelegramError> {
         let user = asked(self.client.get_me()).await?;
         me_from(&user)
+    }
+
+    /// Where `chat` is, with the key Telegram wants for it: as the session
+    /// met it in a check, or else found among the account's chats.
+    async fn peer_ref(&self, chat: &ChatRef) -> Result<grammers_session::types::PeerRef, TelegramError> {
+        let id = chat.peer_id().ok_or_else(|| TelegramError::Refused("that isn't a chat I can send into".into()))?;
+        if let Ok(Some(known)) = self.session.peer_ref(id).await {
+            return Ok(known);
+        }
+        let mut dialogs = self.client.iter_dialogs().limit(MOST_CHATS);
+        while let Some(dialog) = asked(dialogs.next()).await? {
+            if dialog.peer_id() == id {
+                return Ok(dialog.peer_ref());
+            }
+        }
+        Err(TelegramError::Refused("that chat isn't among your Telegram chats any more".into()))
+    }
+
+    /// Send `text` into `chat` as plain text, without a link's preview.
+    /// Telegram drops a second copy of the same request (its `random_id`),
+    /// so the client asking again after a lost connection sends it once.
+    pub async fn post(&self, chat: &ChatRef, text: &str) -> Result<(i32, i64), PostError> {
+        use grammers_client::InvocationError as E;
+        let peer = self.peer_ref(chat).await.map_err(PostError::NotSent)?;
+        match tokio::time::timeout(TIMEOUT, self.client.send_message(peer, text)).await {
+            Err(_) => Err(PostError::Unsure("its answer didn't come in time".into())),
+            Ok(Ok(sent)) if sent.id() != 0 => Ok((sent.id(), sent.date().as_second())),
+            Ok(Ok(_)) => Err(PostError::Unsure("it answered without saying what it made".into())),
+            Ok(Err(e)) => {
+                // Telegram's own failure, or the connection's, may come after
+                // it took the message; a refusal means it didn't.
+                let unsure = match &e {
+                    E::Rpc(rpc) if rpc.code >= 500 => Some(rpc.name.clone()),
+                    E::Rpc(_) => None,
+                    _ => Some(e.to_string()),
+                };
+                match unsure {
+                    Some(why) => Err(PostError::Unsure(why)),
+                    None => Err(PostError::NotSent(read_error(e))),
+                }
+            }
+        }
+    }
+
+    /// What was said in `chat` after message `after`, oldest first.
+    pub async fn after(&self, chat: &ChatRef, after: i32) -> Result<Vec<Said>, TelegramError> {
+        let peer = self.peer_ref(chat).await?;
+        let mut messages = self.client.iter_messages(peer).offset_id(after).reverse(true).limit(50);
+        let mut got = Vec::new();
+        while let Some(m) = asked(messages.next()).await? {
+            got.push(said(&m));
+        }
+        Ok(got)
     }
 
     /// Look at the account's chats: the new messages in each one-to-one
