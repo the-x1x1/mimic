@@ -1,23 +1,23 @@
 [
   {
-    "id": "455cc510-aeda-45d9-a85f-5e07ab99275d",
-    "draftId": "55ad15f9-6a4f-4c74-a460-5d81bff361a2",
-    "sourceId": "15d8ccb8-27ad-4cdf-80eb-affa042db790",
-    "conversationId": "c5de24ad-52e9-4348-8f50-cd56fe6a6114",
-    "answersMessageId": "33a01c7c-8361-4abb-8378-16f00adfe963",
-    "participantId": "49faba3a-07bf-4d23-9291-79296d8baf6a",
+    "id": "560a23a0-a722-4dca-ba4b-3370ea4e463f",
+    "draftId": "b35840d0-316b-4ae8-a017-4a9a87252917",
+    "sourceId": "b5c611a7-36d6-4b10-9561-dacc48f5c0df",
+    "conversationId": "6b71d543-1fb2-40fa-9d1d-fbd0b959ffe6",
+    "answersMessageId": "691dd2c2-d8e8-4571-945d-f12ab9972c34",
+    "participantId": "5c7eb688-641a-4b45-8ca5-36aa5e59d68c",
     "fromAddress": "c@example.com",
     "to": ["ada.replies@example.com"],
     "cc": [],
     "subject": "Re: Lunch",
     "body": "perfect, see you there",
-    "messageId": "5bad1ebcc22b4a32a222873dd2977303@example.com",
+    "messageId": "7fc599d19d134cc7b5b3d4d048a2c8e4@example.com",
     "how": "approved",
     "status": "sent",
-    "sendAfter": "2026-10-26T22:10:53.949Z",
+    "sendAfter": "2026-10-26T22:28:49.057Z",
     "error": null,
-    "createdAt": "2026-10-26T22:10:53.949Z",
-    "updatedAt": "2026-10-26T22:10:53.951Z",
-    "sentAt": "2026-10-26T22:10:53.951Z"
+    "createdAt": "2026-10-26T22:28:49.057Z",
+    "updatedAt": "2026-10-26T22:28:49.060Z",
+    "sentAt": "2026-10-26T22:28:49.060Z"
   }
 ]

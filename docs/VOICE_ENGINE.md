@@ -103,7 +103,7 @@ Ranking is by wording, and by meaning once the user has downloaded the sentence 
 
 ## From measurements to a prompt
 
-`generation::describe` turns numbers into instructions, and only for metrics that were measured:
+`generation::describe_for` turns numbers into instructions, and only for metrics that were measured:
 
 - `terminalPeriodRate >= 0.8` → "They end messages with a full stop."
 - `terminalPeriodRate <= 0.2` → "They usually do not put a full stop at the end."
@@ -112,6 +112,8 @@ Ranking is by wording, and by meaning once the user has downloaded the sentence 
 - `greetingRate <= 0.1` → "They open straight into the message, with no greeting."
 
 Then, when there is one, a model's reading of those numbers in words (below), labelled as a reading. Then the user's manual preferences, labelled as overriding the measurements. Then up to five retrieved exchanges, marked as things to match in register and not to reuse in content. Then the recipient, their relationship and the channel. Then any adjustment the user asked for.
+
+**A chat is written as a chat** (0.10.0-alpha.83). Examples come from the person on this channel, then from this channel with anyone, then from anywhere; one sent another way than the reply goes is marked ("sent by email") and offered for how the user talks, not for how long a message runs or how it is laid out. A reply into a chat or a text while the user's own chat messages or texts are too few to measure (`generation::chat_unmeasured`: no measurable channel layer) is measured on their other writing — most often email — so the measurements' form is left out (`describe_for(.., false)`: no length, paragraphs, greeting or sign-off), the prompt says it is a chat message, not an email, to be a line or two with no greeting on a line of its own, no sign-off or signature and no paragraphs, the evidence says so, and a greeting or sign-off learned for everyone (below) is not added. Once the channel is measured, its own numbers decide.
 
 The output token budget is derived from `p90WordsPerMessage`, so a model cannot answer a two-word texter with four paragraphs.
 
@@ -156,7 +158,7 @@ Weights encode one rule: **what the user said explicitly outranks what Mimic inf
 
 A pattern **holds** when at least `MIN_AGREEING = 3` drafts moved the habit the same way **and** they carry more than half of the weight, counting the drafts that went the other way or left it alone. Binary habits weigh one per draft; length weighs by how much the draft changed (a draft cut by 40% weighs 0.4), and a draft sent at the same length weighs the dead band, 0.1. This is the discipline the previous product's corrections system earned: one deleted greeting is an anecdote, and three deletions against four greetings left in place is still an anecdote.
 
-Patterns are computed for everyone and per person. A person's pattern replaces the global one on the same habit, so learning that Ada gets no greeting does not stop Mimic greeting anyone else, and learning that Ada _does_ get one overrides a global habit of leaving them out.
+Patterns are computed for everyone and per person. A person's pattern replaces the global one on the same habit, so learning that Ada gets no greeting does not stop Mimic greeting anyone else, and learning that Ada _does_ get one overrides a global habit of leaving them out. Adding a greeting or a sign-off, learned for everyone, is not carried into a chat or a text whose own messages are too few to measure (0.10.0-alpha.83): it was learned mostly on email.
 
 A pattern that holds reaches the prompt as one instruction ("Do not open with a greeting.", "Write about 40% shorter than the measurements alone would suggest.") in its own section after the measurements, and the draft's evidence names it. Nothing is stored: the patterns are a pure function of the drafts table, so deleting a person takes their drafts' patterns with them.
 

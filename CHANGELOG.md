@@ -2,6 +2,16 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.83] — 2026-10-26
+
+A chat reads like a chat.
+
+### Changed
+
+- **Replies in a chat or a text read like one, even before Mimic has read many of yours.** Until enough of your own chat messages are in, how you write was measured mostly on email, and a reply into Slack, Teams, Telegram or Google Chat could open with "Hi Sam," and close with "Thanks, C". Now, until your chats can be measured, a chat reply is asked to be a line or two with no greeting line, sign-off or signature, and what is under the draft says so. A greeting or sign-off you taught Mimic on email isn't added to chats.
+- **Past replies come from the same kind of conversation first.** Writing to someone you've never written to in a chat, the examples are your chat messages to others before your email; any from another kind are marked as such, for how you talk rather than how long or how laid out.
+- **Write knows a chat from an email by the window you copied from.** Opened with the shortcut from WhatsApp, Discord, Messenger, Slack, Teams, Telegram and the like, Write answers a chat; from Phone Link or Messages for web, a text; from Outlook, Gmail or Thunderbird, an email — and says so under Channel. Only the app's own part of the title counts, so a mail whose subject says "WhatsApp" is still mail.
+
 ## [0.10.0-alpha.82] — 2026-10-26
 
 Setting up Google Chat.

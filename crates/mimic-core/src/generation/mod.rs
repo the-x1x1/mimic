@@ -233,7 +233,13 @@ pub fn build_context_holding_out(
         }
     }
     // With nothing written to this person on this channel, widen rather than
-    // hand the model nothing: the global voice is still the user's voice.
+    // hand the model nothing: to this channel with anyone first
+    // (0.10.0-alpha.83), so a chat is shown chats; then anywhere, since the
+    // global voice is still the user's voice.
+    if examples.is_empty() && req.participant_id.is_some() {
+        let on_channel = RetrievalFilter { channel: Some(channel.clone()), ..anywhere.clone() };
+        examples = retrieval::retrieve_by_meaning(db, incoming, meaning, &on_channel, EXAMPLES)?;
+    }
     if examples.is_empty() {
         examples = retrieval::retrieve_by_meaning(db, incoming, meaning, &anywhere, EXAMPLES)?;
     }
@@ -265,6 +271,14 @@ pub fn build_context_holding_out(
     match voice.layers.iter().find(|l| l.layer == "channel") {
         Some(l) if l.measurable => evidence.push(format!("{} of your {channel} messages", l.sample_size)),
         _ => {}
+    }
+    let unmeasured_chat = chat_unmeasured(&channel, &voice);
+    if unmeasured_chat {
+        let theirs = if channel == "sms" { "texts" } else { "chat messages" };
+        evidence.push(format!(
+            "Too few of your {theirs} to measure yet, so I asked for {} without a greeting line or sign-off, whatever your email does",
+            called(&channel)
+        ));
     }
     match voice.layers.iter().find(|l| l.layer == "global") {
         Some(l) if l.measurable => evidence.push(format!("{} of your messages overall", l.sample_size)),
@@ -298,10 +312,21 @@ pub fn build_context_holding_out(
     if let Some(r) = reading(&voice) {
         evidence.push(format!("Your numbers put in words by {} — a reading, not something you said", r.model));
     }
-    let learned = match held.voice {
+    let mut learned = match held.voice {
         Some(_) => Vec::new(),
         None => crate::learning::applicable(db, req.participant_id.as_deref())?,
     };
+    // Adding a greeting or a sign-off, learned from drafts to everyone, was
+    // learned mostly on email while their chats are too few to measure: not
+    // carried into a chat (0.10.0-alpha.83). One learned for this person is.
+    if unmeasured_chat {
+        use crate::learning::{Direction, Habit};
+        learned.retain(|p| {
+            !(p.participant_id.is_none()
+                && p.direction == Direction::More
+                && matches!(p.habit, Habit::Greeting | Habit::SignOff))
+        });
+    }
     if !learned.is_empty() {
         evidence.push(format!(
             "{} you've made to my drafts before: {}",
@@ -334,9 +359,10 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         "You are drafting a reply *as the user*, in their own voice. You are not an assistant writing on their behalf and you never mention being one. Write only the message body: no subject line, no preamble, no explanation, no quotation marks around it.\n\n",
     );
 
+    let unmeasured_chat = chat_unmeasured(&ctx.channel, &ctx.voice);
     if ctx.effective.measurable {
         system.push_str("How this person writes, measured from their own messages:\n");
-        for line in describe(&ctx.effective) {
+        for line in describe_for(&ctx.effective, !unmeasured_chat) {
             system.push_str("- ");
             system.push_str(&line);
             system.push('\n');
@@ -374,12 +400,23 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
     }
 
     if !ctx.examples.is_empty() {
-        system.push_str("\nMessages this person actually sent. Match their register, length and punctuation; do not reuse their content:\n");
+        // Examples sent another way than this reply goes are marked, and
+        // show how they talk rather than the form (0.10.0-alpha.83).
+        if ctx.examples.iter().any(|e| e.channel != ctx.channel) {
+            system.push_str(&format!(
+                "\nMessages this person actually sent. Match their register and punctuation; do not reuse their content. Those marked as sent another way show how they talk, not how long {} runs or how it is laid out:\n",
+                called(&ctx.channel)
+            ));
+        } else {
+            system.push_str("\nMessages this person actually sent. Match their register, length and punctuation; do not reuse their content:\n");
+        }
         for ex in &ctx.examples {
+            let how =
+                if ex.channel != ctx.channel { format!(" (sent {})", sent_how(&ex.channel)) } else { String::new() };
             if let Some(incoming) = &ex.incoming {
-                system.push_str(&format!("\n--- in reply to: {}\n", one_line(incoming, 200)));
+                system.push_str(&format!("\n---{how} in reply to: {}\n", one_line(incoming, 200)));
             } else {
-                system.push_str("\n---\n");
+                system.push_str(&format!("\n---{how}\n"));
             }
             system.push_str(&one_line(&ex.reply, 600));
             system.push('\n');
@@ -394,6 +431,12 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         system.push_str(&format!(". The channel is {}.\n", ctx.channel));
     } else {
         system.push_str(&format!("\nThe channel is {}.\n", ctx.channel));
+    }
+    if unmeasured_chat {
+        system.push_str(&format!(
+            "This is {}, not an email, and too few of theirs have been read to measure, so what is above comes from their other writing. Write it as they would there: a line or two unless what they want to say needs more, no greeting on a line of its own, no sign-off or signature, no paragraphs.\n",
+            called(&ctx.channel)
+        ));
     }
 
     if let Some((s, b)) = ctx.situation.as_ref().and_then(|s| crate::situations::builtin(&s.id).map(|b| (s, b))) {
@@ -459,9 +502,13 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
 /// Turn measured numbers into instructions a model can follow. Only metrics
 /// that were actually measured produce a line, and each line says what the
 /// number means rather than quoting it raw.
-fn describe(m: &VoiceMetrics) -> Vec<String> {
+///
+/// The form of a message — its length, paragraphs, greeting and sign-off — is
+/// described only when `form` (0.10.0-alpha.83): measured on email, it would
+/// be wrong for a chat.
+fn describe_for(m: &VoiceMetrics, form: bool) -> Vec<String> {
     let mut out = Vec::new();
-    if let (Some(median), Some(p90)) = (m.median_words_per_message, m.p90_words_per_message) {
+    if let (true, Some(median), Some(p90)) = (form, m.median_words_per_message, m.p90_words_per_message) {
         out.push(format!(
             "Their typical message is about {median:.0} words, and rarely goes past {p90:.0}. Aim for the typical length unless the intent needs more."
         ));
@@ -501,21 +548,21 @@ fn describe(m: &VoiceMetrics) -> Vec<String> {
             out.push("Exclamation marks are normal for them.".into());
         }
     }
-    if let Some(r) = m.multi_paragraph_rate {
+    if let Some(r) = m.multi_paragraph_rate.filter(|_| form) {
         if r <= 0.05 {
             out.push("They write in a single block, not multiple paragraphs.".into());
         } else if r >= 0.5 {
             out.push("They usually break a message into paragraphs.".into());
         }
     }
-    match m.greeting_rate {
+    match m.greeting_rate.filter(|_| form) {
         Some(r) if r <= 0.1 => out.push("They open straight into the message, with no greeting.".into()),
         Some(r) if r >= 0.5 && !m.top_greetings.is_empty() => {
             out.push(format!("They usually open with a greeting — most often \"{}\".", m.top_greetings[0].0))
         }
         _ => {}
     }
-    match m.sign_off_rate {
+    match m.sign_off_rate.filter(|_| form) {
         Some(r) if r <= 0.1 => out.push("They do not sign off.".into()),
         Some(r) if r >= 0.5 && !m.top_sign_offs.is_empty() => {
             out.push(format!("They usually close with \"{}\".", m.top_sign_offs[0].0))
@@ -549,6 +596,42 @@ fn max_tokens(m: &VoiceMetrics, adjustment: Option<Adjustment>) -> u32 {
         Some(Adjustment::Longer) => (base * 2).min(2000),
         Some(Adjustment::Shorter) => (base / 2).max(48),
         _ => base,
+    }
+}
+
+/// A conversation held in a chat or by text, where a reply is a line or two
+/// with no greeting line, sign-off or signature (0.10.0-alpha.83).
+pub fn is_chat_like(channel: &str) -> bool {
+    matches!(channel, "chat" | "sms")
+}
+
+/// A reply into a chat or a text while the user's own chat messages or texts
+/// are too few to measure: everything measured then comes from their other
+/// writing — most often email — whose greeting lines, sign-offs, paragraphs
+/// and length don't belong in a chat.
+pub fn chat_unmeasured(channel: &str, voice: &ResolvedVoice) -> bool {
+    is_chat_like(channel) && !voice.layers.iter().any(|l| l.layer == "channel" && l.measurable)
+}
+
+/// What a message on `channel` is called, for the prompt and the evidence.
+fn called(channel: &str) -> &'static str {
+    match channel {
+        "email" => "an email",
+        "chat" => "a chat message",
+        "sms" => "a text",
+        "forum" => "a forum post",
+        _ => "a message",
+    }
+}
+
+/// How a message on `channel` was sent, said of an example from another.
+fn sent_how(channel: &str) -> &'static str {
+    match channel {
+        "email" => "by email",
+        "chat" => "in a chat",
+        "sms" => "as a text",
+        "forum" => "on a forum",
+        _ => "another way",
     }
 }
 
@@ -809,7 +892,7 @@ mod tests {
             top_phrases: vec![("let me know".into(), 40)],
             ..Default::default()
         };
-        let lines = describe(&m).join("\n");
+        let lines = describe_for(&m, true).join("\n");
         assert!(lines.contains("about 6 words"));
         assert!(lines.contains("usually do not put a full stop"));
         assert!(lines.contains("start messages in lowercase"));
@@ -1156,5 +1239,176 @@ mod tests {
         // Someone else is not told about Ada.
         let other = ComposeRequest { participant_id: None, ..request(&ada) };
         assert!(!assemble(&build_context(&db, &other).unwrap(), &other).system.contains("Lovelace"));
+    }
+
+    /// Mail to Ada, measured, and `chats` short replies to Bob in a chat —
+    /// too few, under twenty, for the chat channel to be measured.
+    fn seeded_by_email(chats: usize) -> (Db, String, String) {
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C").unwrap();
+        db.add_user_identifier(IdentifierKind::Handle, "@c").unwrap();
+        let mut people = Vec::new();
+        for (channel, name, handle, n, theirs, mine) in [
+            (
+                "email",
+                "Ada",
+                "@ada",
+                25,
+                "can you look at the report",
+                "Hi Ada,\n\nThanks for this, I'll have a look tomorrow and come back to you.\n\nThanks, C",
+            ),
+            ("chat", "Bob", "@bob", chats, "you around later?", "yeah from 6"),
+        ] {
+            let source = db
+                .create_source(&NewSource {
+                    connector: "t".into(),
+                    name: channel.into(),
+                    channel: channel.into(),
+                    location: None,
+                    config: serde_json::Value::Null,
+                })
+                .unwrap();
+            let convo = db.upsert_conversation(&source.id, name, channel, None).unwrap();
+            let who =
+                db.resolve_participant(name, &[IdentifierInput::new(IdentifierKind::Handle, handle)], false).unwrap();
+            db.link_conversation_participant(&convo, &who).unwrap();
+            let mut batch = Vec::new();
+            for i in 0..n {
+                for (k, (direction, body)) in [("other", theirs), ("self", mine)].into_iter().enumerate() {
+                    batch.push(NewMessage {
+                        conversation_id: convo.clone(),
+                        source_id: source.id.clone(),
+                        participant_id: (direction == "other").then(|| who.clone()),
+                        external_id: format!("{name}{i}{direction}"),
+                        direction: direction.into(),
+                        channel: channel.into(),
+                        sent_at: Some(format!("2026-02-{:02}T09:0{k}:00Z", (i % 27) + 1)),
+                        sequence_index: (i * 2 + k) as i64,
+                        body: body.into(),
+                        reply_to_external_id: None,
+                        metadata: serde_json::Value::Null,
+                    });
+                }
+            }
+            if !batch.is_empty() {
+                db.insert_messages(&batch).unwrap();
+                db.link_replies(&convo).unwrap();
+                db.refresh_conversation_stats(&convo).unwrap();
+            }
+            people.push(who);
+        }
+        voice::analyze(&db, &mut |_, _| {}).unwrap();
+        (db, people[0].clone(), people[1].clone())
+    }
+
+    fn chat_to(who: &str, incoming: Option<&str>) -> ComposeRequest {
+        ComposeRequest {
+            participant_id: Some(who.to_string()),
+            channel: "chat".into(),
+            incoming_message: incoming.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_chat_whose_own_messages_are_too_few_is_written_as_a_chat_not_an_email() {
+        let (db, ada, bob) = seeded_by_email(3);
+        let chat = chat_to(&bob, Some("you around later?"));
+        let ctx = build_context(&db, &chat).unwrap();
+        assert!(ctx.effective.measurable, "measured, but on email");
+        assert!(chat_unmeasured(&ctx.channel, &ctx.voice));
+        let prompt = assemble(&ctx, &chat);
+        assert!(prompt.system.contains("This is a chat message, not an email"), "{}", prompt.system);
+        assert!(prompt.system.contains("no greeting on a line of its own, no sign-off or signature"));
+        // What email measured about the form of a message is left out.
+        for line in ["They usually open with a greeting", "They usually close with", "Their typical message is about"] {
+            assert!(!prompt.system.contains(line), "{line}: {}", prompt.system);
+        }
+        assert!(
+            ctx.evidence.iter().any(|e| e.starts_with("Too few of your chat messages to measure yet")),
+            "{:?}",
+            ctx.evidence
+        );
+
+        // The same voice, to Ada by email, keeps the form it was measured with.
+        let email = ComposeRequest {
+            participant_id: Some(ada),
+            channel: "email".into(),
+            incoming_message: Some("can you look at the report".into()),
+            ..Default::default()
+        };
+        let ctx = build_context(&db, &email).unwrap();
+        assert!(!chat_unmeasured(&ctx.channel, &ctx.voice));
+        let prompt = assemble(&ctx, &email);
+        assert!(prompt.system.contains("They usually open with a greeting"), "{}", prompt.system);
+        assert!(prompt.system.contains("They usually close with \"thanks\""), "{}", prompt.system);
+        assert!(!prompt.system.contains("not an email"));
+        assert!(!ctx.evidence.iter().any(|e| e.starts_with("Too few")));
+    }
+
+    #[test]
+    fn a_chat_whose_own_messages_are_measured_is_written_from_them() {
+        let (db, ada) = seeded(25, "yeah sending it over");
+        let ctx = build_context(&db, &request(&ada)).unwrap();
+        assert!(!chat_unmeasured(&ctx.channel, &ctx.voice));
+        assert!(!assemble(&ctx, &request(&ada)).system.contains("not an email"));
+        assert!(!ctx.evidence.iter().any(|e| e.starts_with("Too few")), "{:?}", ctx.evidence);
+    }
+
+    #[test]
+    fn someone_new_in_a_chat_is_shown_chats_before_email() {
+        let (db, _ada, _bob) = seeded_by_email(3);
+        let cy = db.resolve_participant("Cy", &[IdentifierInput::new(IdentifierKind::Handle, "@cy")], false).unwrap();
+        let req = chat_to(&cy, Some("you around later?"));
+        let ctx = build_context(&db, &req).unwrap();
+        assert!(!ctx.examples.is_empty());
+        assert!(ctx.examples.iter().all(|e| e.channel == "chat"), "{:?}", ctx.examples);
+        let prompt = assemble(&ctx, &req);
+        assert!(!prompt.system.contains("(sent by email)"), "{}", prompt.system);
+        assert!(prompt.system.contains("Match their register, length and punctuation"));
+    }
+
+    #[test]
+    fn examples_sent_another_way_are_marked_and_not_copied_for_their_form() {
+        // No chats at all: the only examples there are came by email.
+        let (db, _ada, bob) = seeded_by_email(0);
+        let req = chat_to(&bob, None);
+        let ctx = build_context(&db, &req).unwrap();
+        assert!(!ctx.examples.is_empty());
+        assert!(ctx.examples.iter().all(|e| e.channel == "email"), "{:?}", ctx.examples);
+        let prompt = assemble(&ctx, &req);
+        assert!(prompt.system.contains("\n--- (sent by email)"), "{}", prompt.system);
+        assert!(prompt.system.contains("not how long a chat message runs or how it is laid out"), "{}", prompt.system);
+        assert!(!prompt.system.contains("Match their register, length and punctuation"));
+    }
+
+    #[test]
+    fn a_sign_off_learned_for_everyone_is_not_carried_into_an_unmeasured_chat() {
+        use crate::learning::{Direction, Habit};
+        let (db, ada, _bob) = seeded_by_email(3);
+        let provider = MockProvider::answering("Hi Ada,\n\nI'll have a look tomorrow.");
+        let to_ada = ComposeRequest {
+            participant_id: Some(ada),
+            channel: "email".into(),
+            incoming_message: Some("can you look at the report".into()),
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            send(&db, &provider, &to_ada, "Hi Ada,\n\nI'll have a look tomorrow.\n\nThanks, C");
+        }
+        let cy = db.resolve_participant("Cy", &[IdentifierInput::new(IdentifierKind::Handle, "@cy")], false).unwrap();
+        let learned_sign_off = |ctx: &GenerationContext| {
+            ctx.learned.iter().any(|p| p.habit == Habit::SignOff && p.direction == Direction::More)
+        };
+
+        let chat = chat_to(&cy, Some("you around later?"));
+        let ctx = build_context(&db, &chat).unwrap();
+        assert!(!learned_sign_off(&ctx), "{:?}", ctx.learned);
+        assert!(!assemble(&ctx, &chat).system.contains("End with a short sign-off."));
+
+        let email = ComposeRequest { channel: "email".into(), ..chat_to(&cy, Some("can you look at the report")) };
+        let ctx = build_context(&db, &email).unwrap();
+        assert!(learned_sign_off(&ctx), "{:?}", ctx.learned);
+        assert!(assemble(&ctx, &email).system.contains("End with a short sign-off."));
     }
 }
