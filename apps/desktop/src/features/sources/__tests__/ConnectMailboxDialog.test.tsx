@@ -209,6 +209,10 @@ describe("a Gmail or Google Workspace mailbox can sign in with Google", () => {
     expect(screen.getByLabelText("App password")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Sign in with Google/ })).toBeNull();
     expect(screen.queryByLabelText(/This is a Google account/)).toBeNull();
+    // Where signing in with Google is set up, since it would take no app password.
+    expect(
+      screen.getByText(/Or sign in with Google instead, with no app password/),
+    ).toHaveTextContent("Settings, under Signing in with Microsoft and Google, says how.");
   });
 
   it("signs a Google Workspace address in with Google once it's said to be one", async () => {

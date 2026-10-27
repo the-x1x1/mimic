@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FoundMessage, SearchPage } from "@mimic/contracts";
+import { useFindWith } from "@/state/find";
 import { FindPage } from "../FindPage";
 
 // The real queries run; only the native calls are replaced.
@@ -163,6 +164,31 @@ describe("finding what was said", () => {
         "In conversations with Ada Lovelace: One message says that.",
       ),
     );
+  });
+
+  it("opens on the person asked for from People, even one not listed, and only that once", async () => {
+    native.searchMessages.mockResolvedValue({ ...second, total: 1 });
+    useFindWith.getState().ask({ id: "grace", name: "Grace Hopper" });
+    const { unmount } = renderIt();
+    const withWhom = screen.getByRole("combobox", { name: "In conversations with" });
+    expect(withWhom).toHaveValue("grace");
+    expect(within(withWhom).getByRole("option", { name: "Grace Hopper" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(withWhom).getByRole("option", { name: "Ada Lovelace" })).toBeInTheDocument(),
+    );
+    search("friday");
+    await waitFor(() =>
+      expect(native.searchMessages).toHaveBeenCalledWith("friday", "anyone", null, 20, "grace"),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "In conversations with Grace Hopper: One message says that.",
+      ),
+    );
+    expect(useFindWith.getState().pending).toBeNull();
+    unmount();
+    renderIt();
+    expect(screen.getByRole("combobox", { name: "In conversations with" })).toHaveValue("");
   });
 
   it("shows a message found in its conversation, reading the rest only when asked", async () => {

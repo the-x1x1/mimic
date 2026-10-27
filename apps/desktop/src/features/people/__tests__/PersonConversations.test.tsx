@@ -6,6 +6,7 @@ import type {
   PersonConversation,
   PersonConversations as Page,
 } from "@mimic/contracts";
+import { useFindWith } from "@/state/find";
 import { CONVERSATION_GONE, PersonConversations } from "../PersonConversations";
 
 // The real hooks and query client run; only the native calls are replaced.
@@ -46,11 +47,11 @@ const message = (id: string, body: string, direction: "self" | "other" = "other"
   filing: null,
 });
 
-function renderIt() {
+function renderIt(onClose: () => void = () => {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <PersonConversations participantId="ada" name="Ada" onClose={() => {}} />
+      <PersonConversations participantId="ada" name="Ada" onClose={onClose} />
     </QueryClientProvider>,
   );
 }
@@ -140,11 +141,26 @@ describe("every conversation with someone, not only what is waiting", () => {
     expect(await screen.findByText(CONVERSATION_GONE)).toBeInTheDocument();
   });
 
-  it("says when there is nothing to show", async () => {
+  it("says when there is nothing to show, and offers nothing to find in", async () => {
     native.personConversations.mockResolvedValue(page([]));
     renderIt();
     expect(
       await screen.findByText("I haven’t read a conversation with Ada in it."),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Find something said in them" })).toBeNull();
+  });
+
+  it("opens Find on just these conversations", async () => {
+    native.personConversations.mockResolvedValue(page([convo("lunch")]));
+    useFindWith.getState().ask(null);
+    window.location.hash = "#/people";
+    const onClose = vi.fn();
+    renderIt(onClose);
+    fireEvent.click(await screen.findByRole("button", { name: "Find something said in them" }));
+    expect(useFindWith.getState().pending).toEqual({ id: "ada", name: "Ada" });
+    expect(onClose).toHaveBeenCalled();
+    expect(window.location.hash).toBe("#/find");
+    useFindWith.getState().ask(null);
+    window.location.hash = "";
   });
 });

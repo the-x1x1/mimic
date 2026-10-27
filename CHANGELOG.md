@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.102] — 2026-10-26
+
+From someone in People to what was said with them.
+
+### Added
+
+- **Find what was said with someone, from People.** Their conversations end with **Find something said in them**, which opens Find already looking only in the conversations they're in.
+
+### Changed
+
+- **Connecting Gmail says where signing in with Google is set up.** When this copy can't sign in with Google yet, the app password note says that Settings, under Signing in with Microsoft and Google, says how — and then no app password is needed.
+
 ## [0.10.0-alpha.101] — 2026-10-26
 
 Find, in one person's conversations.
