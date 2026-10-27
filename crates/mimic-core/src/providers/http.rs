@@ -81,35 +81,41 @@ pub const THOUGHT_INSTEAD: &str =
     "the model spent its whole answer thinking and wrote no reply. A model that doesn't think first, such as llama3.2:3b, suits drafting better";
 
 /// An endpoint that refuses `reasoning_effort` — OpenAI's for a model that
-/// doesn't reason, or a server that knows no such field — says so in a 400.
+/// doesn't reason, or a server that knows no such field — says so in a 400
+/// or 422 that names it, in its message or, as FastAPI does, in where the
+/// error is (`loc`).
 fn turned_down_thinking(status: reqwest::StatusCode, value: &Value) -> bool {
-    (status.as_u16() == 400 || status.as_u16() == 422) && error_message(value).to_lowercase().contains("reasoning")
+    (status.as_u16() == 400 || status.as_u16() == 422) && value.to_string().to_lowercase().contains("reasoning")
 }
 
 /// A reply with any thinking written into it taken out: `<think>…</think>`
-/// and `<thinking>…</thinking>` wherever they are, and everything after one
-/// that is never closed.
+/// and `<thinking>…</thinking>` wherever they are, and — when the reply
+/// begins with one that is never closed — all of it. A tag never closed
+/// further in is left as written: it may be the reply's own words.
 pub fn without_thinking(text: &str) -> String {
     let mut rest = text;
     let mut out = String::new();
     loop {
-        let lower = rest.to_lowercase();
+        // The tags are ASCII, and ASCII lowercasing keeps every byte where
+        // it was, so offsets in it are offsets in the reply (0.10.0-alpha.87;
+        // full lowercasing moves them for "İ" and kept the thinking in).
+        let lower = rest.to_ascii_lowercase();
         let found = ["<think>", "<thinking>"].iter().filter_map(|t| lower.find(t).map(|at| (at, *t))).min();
         let Some((at, tag)) = found else {
             out.push_str(rest);
             break;
         };
-        // Lowercasing can change a string's length; cut on the original only
-        // where the two agree.
-        if lower.len() != rest.len() {
-            out.push_str(rest);
-            break;
-        }
-        out.push_str(&rest[..at]);
         let close = format!("</{}", &tag[1..]);
         match lower[at..].find(&close) {
-            Some(end) => rest = &rest[at + end + close.len()..],
-            None => break,
+            Some(end) => {
+                out.push_str(&rest[..at]);
+                rest = &rest[at + end + close.len()..];
+            }
+            None if out.trim().is_empty() && rest[..at].trim().is_empty() => break,
+            None => {
+                out.push_str(rest);
+                break;
+            }
         }
     }
     out.trim().to_string()
@@ -154,9 +160,12 @@ impl ModelProvider for LocalHttpProvider {
             return Err(ProviderError::Refused(format!("{} {}", status.as_u16(), error_message(&value))));
         }
         let message = &value["choices"][0]["message"];
-        let said = message["content"]
-            .as_str()
-            .ok_or_else(|| ProviderError::Malformed("no message content in the response".into()))?;
+        if !message.is_object() {
+            return Err(ProviderError::Malformed("no message content in the response".into()));
+        }
+        // A model that only thought may send `null` for its words
+        // (0.10.0-alpha.87): read as none, and said so below.
+        let said = message["content"].as_str().unwrap_or_default();
         let text = without_thinking(said);
         if text.is_empty() {
             let thought = ["reasoning", "reasoning_content"]
@@ -273,6 +282,8 @@ fn error_message(value: &Value) -> String {
         .as_str()
         .or_else(|| value["error"].as_str())
         .or_else(|| value["message"].as_str())
+        .or_else(|| value["detail"].as_str())
+        .or_else(|| value["detail"][0]["msg"].as_str())
         .unwrap_or("no reason given")
         .to_string()
 }
@@ -364,6 +375,13 @@ mod tests {
         assert!(again.get("reasoning_effort").is_none(), "{again}");
         assert_eq!(again["messages"][1]["content"], "you around later?");
 
+        // FastAPI names the field where the error is, not in its message.
+        let extra = json!({"detail": [{"type": "extra_forbidden", "loc": ["body", "reasoning_effort"], "msg": "Extra inputs are not permitted"}]});
+        let (p, bodies) = endpoint(vec![(422, extra), (200, said("yes from 6", json!({})))]);
+        assert_eq!(p.generate(&ask()).unwrap().text, "yes from 6");
+        bodies.recv().unwrap();
+        assert!(bodies.recv().unwrap().get("reasoning_effort").is_none());
+
         // Any other refusal is the endpoint's answer, and is not asked again.
         let (p, bodies) = endpoint(vec![(400, json!({"error": {"message": "model not found"}}))]);
         let err = p.generate(&ask()).unwrap_err();
@@ -382,6 +400,13 @@ mod tests {
         assert_eq!(without_thinking("<thinking>a</thinking>ok<think>b</think>!"), "ok!");
         assert_eq!(without_thinking("<think>never closed, all of it thinking"), "");
         assert_eq!(without_thinking("I think <b>so</b>"), "I think <b>so</b>");
+        // Letters whose lowercase is longer don't keep the thinking in.
+        assert_eq!(without_thinking("<think>\nhm\n</think>\n\nTamam, İstanbul'da 6'da"), "Tamam, İstanbul'da 6'da");
+        // A tag never closed, further in, is the reply's own.
+        assert_eq!(
+            without_thinking("it puts <think> in front of what it says"),
+            "it puts <think> in front of what it says"
+        );
     }
 
     #[test]
@@ -397,6 +422,12 @@ mod tests {
         let (p, _) = endpoint(vec![(200, said("   ", json!({})))]);
         let err = p.generate(&ask()).unwrap_err();
         assert!(err.to_string().contains("an empty reply"), "{err}");
+
+        // vLLM's shape: no words at all, and the thinking beside them.
+        let null = json!({"choices": [{"message": {"role": "assistant", "content": null, "reasoning_content": "hm"}, "finish_reason": "length"}]});
+        let (p, _) = endpoint(vec![(200, null)]);
+        let err = p.generate(&ask()).unwrap_err();
+        assert!(err.to_string().contains(THOUGHT_INSTEAD), "{err}");
     }
 
     #[test]
@@ -453,6 +484,14 @@ mod tests {
         assert_eq!(short("first line\nsecond line"), "first line");
         assert_eq!(error_message(&json!({"error": {"message": "overloaded"}})), "overloaded");
         assert_eq!(error_message(&json!({"message": "nope"})), "nope");
+        assert_eq!(
+            error_message(&json!({"detail": "reasoning_effort is not allowed"})),
+            "reasoning_effort is not allowed"
+        );
+        assert_eq!(
+            error_message(&json!({"detail": [{"msg": "extra inputs are not permitted"}]})),
+            "extra inputs are not permitted"
+        );
         assert_eq!(error_message(&json!({})), "no reason given");
     }
 }

@@ -47,6 +47,7 @@ describe("what kind of conversation a copied message is from, by its window's ti
   it("reads the app, not a word in the subject, and says nothing it doesn't know", () => {
     expect(channelFromTitle("Your WhatsApp code - ada@gmail.com - Gmail")).toBe("email");
     expect(channelFromTitle("WhatsApp - ada@gmail.com - Gmail")).toBe("email");
+    expect(channelFromTitle("Slack - Message (HTML)")).toBe("email");
     expect(channelFromTitle("Signal processing notes.docx - Word")).toBeNull();
     expect(channelFromTitle("Untitled - Notepad")).toBeNull();
     expect(channelFromTitle("")).toBeNull();

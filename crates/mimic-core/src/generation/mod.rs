@@ -158,6 +158,12 @@ pub struct GenerationContext {
     /// Plain-language statements of what this draft is based on. Shown in the
     /// Compose evidence panel verbatim, so they are written for a person.
     pub evidence: Vec<String>,
+    /// The reply goes into a chat or a text, and how the user writes there —
+    /// on this channel, or to this person on it — is too little to measure
+    /// (0.10.0-alpha.87): what was measured comes from their other writing,
+    /// so its form (length, paragraphs, greeting, sign-off) is left out.
+    #[serde(default)]
+    pub form_from_elsewhere: bool,
 }
 
 /// What a draft written to be measured must not see. Empty for every draft
@@ -272,13 +278,29 @@ pub fn build_context_holding_out(
         Some(l) if l.measurable => evidence.push(format!("{} of your {channel} messages", l.sample_size)),
         _ => {}
     }
-    let unmeasured_chat = chat_unmeasured(&channel, &voice);
-    if unmeasured_chat {
+    // The person's layer counts every channel: someone mostly emailed is
+    // measured on email even when chats in general are measured
+    // (0.10.0-alpha.87).
+    let to_them_elsewhere = match (&participant, voice.layers.iter().find(|l| l.layer == "relationship")) {
+        (Some(p), Some(l)) if l.measurable && is_chat_like(&channel) => {
+            (db.count_self_messages(Some(channel.as_str()), Some(p.id.as_str()))? as usize) < voice::metrics::MIN_SAMPLE
+        }
+        _ => false,
+    };
+    let form_from_elsewhere = chat_unmeasured(&channel, &voice) || to_them_elsewhere;
+    if form_from_elsewhere {
         let theirs = if channel == "sms" { "texts" } else { "chat messages" };
-        evidence.push(format!(
-            "Too few of your {theirs} to measure yet, so I asked for {} without a greeting line or sign-off, whatever your email does",
-            called(&channel)
-        ));
+        evidence.push(match (&participant, chat_unmeasured(&channel, &voice)) {
+            (Some(p), false) => format!(
+                "Most of what you've written to {} wasn't in {theirs}, so I asked for {} without a greeting line or sign-off",
+                p.display_name,
+                called(&channel)
+            ),
+            _ => format!(
+                "Too few of your {theirs} to measure yet, so I asked for {} without a greeting line or sign-off",
+                called(&channel)
+            ),
+        });
     }
     match voice.layers.iter().find(|l| l.layer == "global") {
         Some(l) if l.measurable => evidence.push(format!("{} of your messages overall", l.sample_size)),
@@ -309,22 +331,24 @@ pub fn build_context_holding_out(
         let by = if examples.iter().any(|e| e.by_meaning) { "meaning and wording" } else { "similarity of wording" };
         evidence.push(format!("{} past replies of yours, chosen by {by}", examples.len()));
     }
-    if let Some(r) = reading(&voice) {
+    // A reading of numbers measured elsewhere describes that writing's form
+    // too, so it isn't given to a chat that leaves the form out.
+    if let Some(r) = reading(&voice).filter(|_| !form_from_elsewhere) {
         evidence.push(format!("Your numbers put in words by {} — a reading, not something you said", r.model));
     }
     let mut learned = match held.voice {
         Some(_) => Vec::new(),
         None => crate::learning::applicable(db, req.participant_id.as_deref())?,
     };
-    // Adding a greeting or a sign-off, learned from drafts to everyone, was
-    // learned mostly on email while their chats are too few to measure: not
-    // carried into a chat (0.10.0-alpha.83). One learned for this person is.
-    if unmeasured_chat {
+    // Adding a greeting or a sign-off, and a length, were learned on drafts
+    // whatever their channel — mostly email while the chats are too few to
+    // measure — and say nothing about a chat (0.10.0-alpha.83; for this
+    // person too, and length, since 0.10.0-alpha.87).
+    if form_from_elsewhere {
         use crate::learning::{Direction, Habit};
         learned.retain(|p| {
-            !(p.participant_id.is_none()
-                && p.direction == Direction::More
-                && matches!(p.habit, Habit::Greeting | Habit::SignOff))
+            !(p.habit == Habit::Length
+                || (p.direction == Direction::More && matches!(p.habit, Habit::Greeting | Habit::SignOff)))
         });
     }
     if !learned.is_empty() {
@@ -348,7 +372,18 @@ pub fn build_context_holding_out(
         evidence.push("Your profile is out of date — messages have been imported since it was built".into());
     }
 
-    Ok(GenerationContext { participant, channel, voice, effective, examples, transcript, situation, learned, evidence })
+    Ok(GenerationContext {
+        participant,
+        channel,
+        voice,
+        effective,
+        examples,
+        transcript,
+        situation,
+        learned,
+        evidence,
+        form_from_elsewhere,
+    })
 }
 
 /// Build the prompt. Pure: the same context always produces the same request,
@@ -359,10 +394,10 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         "You are drafting a reply *as the user*, in their own voice. You are not an assistant writing on their behalf and you never mention being one. Write only the message body: no subject line, no preamble, no explanation, no quotation marks around it.\n\n",
     );
 
-    let unmeasured_chat = chat_unmeasured(&ctx.channel, &ctx.voice);
+    let form_elsewhere = ctx.form_from_elsewhere;
     if ctx.effective.measurable {
         system.push_str("How this person writes, measured from their own messages:\n");
-        for line in describe_for(&ctx.effective, !unmeasured_chat) {
+        for line in describe_for(&ctx.effective, !form_elsewhere) {
             system.push_str("- ");
             system.push_str(&line);
             system.push('\n');
@@ -373,10 +408,25 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         );
     }
 
-    if let Some(r) = reading(&ctx.voice).filter(|_| ctx.effective.measurable) {
+    if let Some(r) = reading(&ctx.voice).filter(|_| ctx.effective.measurable && !form_elsewhere) {
         system.push_str("In words (a reading of these measurements, not something they said): ");
         system.push_str(&r.text);
         system.push('\n');
+    }
+
+    // Before what they changed and what they said, which outrank it
+    // (0.10.0-alpha.87).
+    if form_elsewhere {
+        let plural = if ctx.channel == "sms" { "texts" } else { "chat messages" };
+        let measured = if ctx.effective.measurable {
+            format!("What is measured above comes from more than their {plural}. ")
+        } else {
+            String::new()
+        };
+        system.push_str(&format!(
+            "\nThis is {}, not an email. {measured}Write it as they would there: a line or two unless what they want to say needs more, no greeting on a line of its own, no sign-off or signature, no paragraphs.\n",
+            called(&ctx.channel)
+        ));
     }
 
     if !ctx.learned.is_empty() {
@@ -431,12 +481,6 @@ pub fn assemble(ctx: &GenerationContext, req: &ComposeRequest) -> GenerationRequ
         system.push_str(&format!(". The channel is {}.\n", ctx.channel));
     } else {
         system.push_str(&format!("\nThe channel is {}.\n", ctx.channel));
-    }
-    if unmeasured_chat {
-        system.push_str(&format!(
-            "This is {}, not an email, and too few of theirs have been read to measure, so what is above comes from their other writing. Write it as they would there: a line or two unless what they want to say needs more, no greeting on a line of its own, no sign-off or signature, no paragraphs.\n",
-            called(&ctx.channel)
-        ));
     }
 
     if let Some((s, b)) = ctx.situation.as_ref().and_then(|s| crate::situations::builtin(&s.id).map(|b| (s, b))) {
@@ -641,8 +685,23 @@ fn sent_how(channel: &str) -> &'static str {
 /// Only the outside is touched: nothing inside the reply changes, and a line
 /// that only might be one of these ("Here's what I think:") stays.
 pub fn tidy(text: &str) -> String {
+    // Each kind of wrapping can hide another ("Here's my reply:" around a
+    // quoted reply), so until nothing more comes off (0.10.0-alpha.87).
     let mut s = text.trim().to_string();
-    if let Some(inner) = s.strip_prefix("```").and_then(|t| t.strip_suffix("```")) {
+    loop {
+        let next = tidy_once(&s);
+        if next == s {
+            return s;
+        }
+        s = next;
+    }
+}
+
+fn tidy_once(s: &str) -> String {
+    let mut s = s.trim().to_string();
+    // A fence around the whole of it, and only then: a reply holding two
+    // blocks of code begins and ends with a fence too.
+    if let Some(inner) = s.strip_prefix("```").and_then(|t| t.strip_suffix("```")).filter(|i| !i.contains("```")) {
         // A fence's first line may name a language, never a reply's words.
         let inner = match inner.split_once('\n') {
             Some((tag, rest)) if !tag.trim().contains(' ') => rest,
@@ -651,7 +710,10 @@ pub fn tidy(text: &str) -> String {
         s = inner.trim().to_string();
     }
     while let Some((first, rest)) = s.split_once('\n') {
-        if rest.trim().is_empty() || !(introduces(first) || is_subject_line(first)) {
+        // A subject line only with a blank line after it, as a model writes
+        // one above an email; a line of the reply runs on.
+        let subject = is_subject_line(first) && (rest.starts_with('\n') || rest.starts_with("\r\n"));
+        if rest.trim().is_empty() || !(introduces(first) || subject) {
             break;
         }
         s = rest.trim().to_string();
@@ -667,21 +729,33 @@ pub fn tidy(text: &str) -> String {
 }
 
 /// A line that only introduces what follows: "Here's a draft reply:",
-/// "Sure! Here is a response in your voice:", "Reply:".
+/// "Sure! Here is a response in your voice:", "Here's my reply:", "Reply:".
+/// It opens like an introduction, ends with a colon, and names a reply of
+/// its own — "a"/"an"/"my" draft, reply, response, version or rewrite as its
+/// last word, or "your voice", "your style", "your tone" or "as you" — so "Here's the revised
+/// version:" and "Sure, here's the draft agenda:" stay (0.10.0-alpha.87).
 fn introduces(line: &str) -> bool {
     const OPENERS: [&str; 9] =
         ["here's", "here\u{2019}s", "here is", "sure", "certainly", "of course", "okay", "ok,", "absolutely"];
-    // Words that say it is about the reply, not something in it: "here's
-    // the email address:" begins a reply; "here's a draft:" begins none.
-    const OF_A_REPLY: [&str; 7] = ["reply", "draft", "response", "version", "rewrite", "your voice", "as you"];
+    const NOUNS: [&str; 5] = ["reply", "draft", "response", "version", "rewrite"];
+    const ITS_OWN: [&str; 3] = [" a ", " an ", " my "];
+    const IN_YOUR_VOICE: [&str; 4] = ["your voice", "your style", "your tone", "as you"];
     const ALONE: [&str; 7] =
         ["reply:", "draft:", "response:", "message:", "answer:", "draft reply:", "suggested reply:"];
     let l = line.trim().trim_matches('*').trim().to_lowercase();
     if !l.ends_with(':') || l.chars().count() > 120 {
         return false;
     }
-    ALONE.contains(&l.as_str())
-        || (OPENERS.iter().any(|o| l.starts_with(o)) && OF_A_REPLY.iter().any(|w| l.contains(w)))
+    if ALONE.contains(&l.as_str()) {
+        return true;
+    }
+    if !OPENERS.iter().any(|o| l.starts_with(o)) {
+        return false;
+    }
+    let body = l.trim_end_matches(':').trim_end_matches(['*', ' ']);
+    let last = body.split_whitespace().last().unwrap_or_default();
+    let spaced = format!(" {body} ");
+    (NOUNS.contains(&last) && ITS_OWN.iter().any(|d| spaced.contains(d))) || IN_YOUR_VOICE.iter().any(|v| l.contains(v))
 }
 
 /// "Subject: …" on a line of its own: the subject is chosen apart from the
@@ -1442,6 +1516,113 @@ mod tests {
         assert!(!prompt.system.contains("Match their register, length and punctuation"));
     }
 
+    /// Every measurable layer of `req`'s voice given a current reading.
+    fn read_in_words(db: &Db, req: &ComposeRequest, text: &str) {
+        let ctx = build_context(db, req).unwrap();
+        for l in ctx.voice.layers.iter().filter(|l| l.measurable) {
+            let d = voice::describe::Description {
+                text: text.into(),
+                provider: "p".into(),
+                model: "m".into(),
+                metrics_digest: voice::describe::metrics_digest(&l.metrics),
+                written_at: "t".into(),
+            };
+            let layer = VoiceLayer::parse(&l.layer).unwrap();
+            db.set_voice_description(layer, &l.scope_key, crate::version::ANALYSIS_VERSION, &d).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_reading_of_email_is_not_given_to_a_chat_that_leaves_emails_form_out() {
+        let (db, _ada, bob) = seeded_by_email(3);
+        let chat = chat_to(&bob, Some("you around later?"));
+        let email = ComposeRequest { channel: "email".into(), ..Default::default() };
+        let reading = "Opens with hi, signs off with thanks, in several paragraphs.";
+        read_in_words(&db, &chat, reading);
+        read_in_words(&db, &email, reading);
+
+        let ctx = build_context(&db, &chat).unwrap();
+        assert!(ctx.form_from_elsewhere);
+        assert!(!assemble(&ctx, &chat).system.contains("In words"));
+        assert!(!ctx.evidence.iter().any(|e| e.contains("put in words")), "{:?}", ctx.evidence);
+
+        // An email, from the same kind of numbers, keeps its reading.
+        let ctx = build_context(&db, &email).unwrap();
+        assert!(assemble(&ctx, &email).system.contains(reading));
+    }
+
+    #[test]
+    fn habits_learned_on_email_are_not_carried_into_a_chat_for_this_person_either() {
+        use crate::learning::{Direction, Habit};
+        let (db, ada, _bob) = seeded_by_email(3);
+        let provider = MockProvider::answering("Hi Ada,\n\nI'll have a look tomorrow.");
+        let to_ada = ComposeRequest {
+            participant_id: Some(ada.clone()),
+            channel: "email".into(),
+            incoming_message: Some("can you look at the report".into()),
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            send(
+                &db,
+                &provider,
+                &to_ada,
+                "Hi Ada,\n\nI'll have a look tomorrow, and come back to you with notes on all of it by the end of the week.\n\nThanks, C",
+            );
+        }
+        let theirs = build_context(&db, &to_ada).unwrap().learned;
+        assert!(
+            theirs.iter().any(|p| p.habit == Habit::SignOff && p.participant_id.as_deref() == Some(ada.as_str())),
+            "{theirs:?}"
+        );
+        assert!(theirs.iter().any(|p| p.habit == Habit::Length), "{theirs:?}");
+
+        let chat = chat_to(&ada, Some("deck?"));
+        let ctx = build_context(&db, &chat).unwrap();
+        assert!(ctx.form_from_elsewhere);
+        assert!(
+            !ctx.learned.iter().any(|p| p.habit == Habit::Length
+                || (p.direction == Direction::More && matches!(p.habit, Habit::Greeting | Habit::SignOff))),
+            "{:?}",
+            ctx.learned
+        );
+        let prompt = assemble(&ctx, &chat).system;
+        assert!(!prompt.contains("End with a short sign-off."), "{prompt}");
+        assert!(!prompt.contains("longer than the measurements"), "{prompt}");
+    }
+
+    #[test]
+    fn a_chat_to_someone_written_to_by_email_leaves_its_form_out_even_when_chats_are_measured() {
+        let (db, ada, bob) = seeded_by_email(25);
+        let chat = chat_to(&ada, Some("deck?"));
+        let ctx = build_context(&db, &chat).unwrap();
+        assert!(!chat_unmeasured(&ctx.channel, &ctx.voice), "chats are measured");
+        assert!(ctx.form_from_elsewhere, "but none of them to Ada");
+        let prompt = assemble(&ctx, &chat).system;
+        assert!(!prompt.contains("They usually open with a greeting"), "{prompt}");
+        assert!(prompt.contains("This is a chat message, not an email"), "{prompt}");
+        assert!(
+            ctx.evidence.iter().any(|e| e.starts_with("Most of what you've written to Ada wasn't in chat messages")),
+            "{:?}",
+            ctx.evidence
+        );
+
+        // To Bob, written to in chats, their own numbers decide.
+        let ctx = build_context(&db, &chat_to(&bob, Some("you around later?"))).unwrap();
+        assert!(!ctx.form_from_elsewhere);
+    }
+
+    #[test]
+    fn what_the_user_said_comes_after_the_chat_line_and_so_outranks_it() {
+        let (db, _ada, bob) = seeded_by_email(3);
+        crate::learning::remember_note(&db, None, "always sign off with cheers").unwrap();
+        let chat = chat_to(&bob, Some("you around later?"));
+        let prompt = assemble(&build_context(&db, &chat).unwrap(), &chat).system;
+        let chat_line = prompt.find("This is a chat message, not an email").expect("the chat line");
+        let note = prompt.find("always sign off with cheers").expect("the note");
+        assert!(chat_line < note, "{prompt}");
+    }
+
     #[test]
     fn what_a_model_wraps_around_a_reply_is_taken_off() {
         for (given, kept) in [
@@ -1455,6 +1636,9 @@ mod tests {
             ("```\nyeah from 6\n```", "yeah from 6"),
             ("```text\nyeah from 6\n```", "yeah from 6"),
             ("  yeah from 6  ", "yeah from 6"),
+            // One wrapping inside another comes off too.
+            ("Here's my reply:\n\"Here's a draft:\nyeah from 6\"", "yeah from 6"),
+            ("Certainly! Here's a suggested reply that matches your tone:\n\nyeah from 6", "yeah from 6"),
         ] {
             assert_eq!(tidy(given), kept, "{given:?}");
         }
@@ -1470,6 +1654,13 @@ mod tests {
             "\"yes\" she said, \"from 6\"",
             "He said \"no\"",
             "Reply: yes from 6",
+            // Real lines of a reply that only look like introductions.
+            "Sure, here's the draft agenda:\n1. Budget\n2. Hiring",
+            "Here's the revised version:\n\nThe meeting moves to Thursday.",
+            "Ok, here's my response to the three questions:\n1) yes",
+            "Subject: Autumn update\nThat's what I'd go with.",
+            // Two blocks of code are not one fence around everything.
+            "```\nfoo()\n```\nthat should fix it\n```\nbar()\n```",
         ] {
             assert_eq!(tidy(given), given, "{given:?}");
         }

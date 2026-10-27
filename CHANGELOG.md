@@ -2,6 +2,19 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.87] — 2026-10-26
+
+Chats and drafts, tightened (the fifteenth review).
+
+### Fixed
+
+- **A chat to someone you mostly email reads like a chat too.** How you write to a person counts every channel, so a Teams message to someone you've emailed for years still opened with "Hi" and closed with "Thanks" even once your chats were measured. Now, while too little of what you've written to them was in a chat, their email's form is left out as well, and what is under the draft says so.
+- **Nothing measured on email slips into a chat by another door.** While a chat is written from your other writing, the reading of your numbers in words isn't given to it, and neither is a greeting, sign-off or length learned from your edits — for this person too, not only for everyone. What you told Mimic yourself still comes last and still wins.
+- **Taking off what a model wraps around a reply takes off less.** "Sure, here's the draft agenda:" and "Here's the revised version:" are kept as the reply's own first lines; only an introduction to a reply of its own ("Here's a reply:", "Here's my reply:", "…in your voice:") comes off. A reply with two blocks of code keeps its fences, a subject line comes off only with a blank line after it, and wrapping inside wrapping comes off too.
+- **Thinking is taken out of a reply however it is written.** A reply with letters such as "İ" in it kept its thinking; and a "<think>" in the middle of a reply that never closes is now the reply's own words, not a reason to drop the rest.
+- **A model that only thought says so** when it sends no words at all, and an endpoint that turns the no-thinking request down with FastAPI's kind of error is asked again without it.
+- **A draft still being written when you copy in the next message** is put aside, not shown under the new message; the new one gets its own draft. A message window of classic Outlook ("… - Message (HTML)") is read as email.
+
 ## [0.10.0-alpha.86] — 2026-10-26
 
 The rest of what a model does, run for real.

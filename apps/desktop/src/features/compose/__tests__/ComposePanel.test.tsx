@@ -162,6 +162,54 @@ describe("writing something new", () => {
       expect(screen.queryByDisplayValue("yes, see you at 7")).not.toBeInTheDocument();
     });
 
+    it("doesn't put a draft for one message under the next one copied in while it was written", async () => {
+      native.settings.mockResolvedValue({
+        "anywhere.pressEnter": false,
+        "anywhere.draftAtOnce": true,
+      });
+      let finish: (d: Draft) => void = () => undefined;
+      native.generateDraft
+        .mockImplementationOnce(
+          () =>
+            new Promise<Draft>((done) => {
+              finish = done;
+            }),
+        )
+        .mockResolvedValueOnce(draft("d2", "8 works too"));
+      function CopyAnother() {
+        const navigate = useNavigate();
+        return (
+          <button type="button" onClick={() => navigate("/write", { state: { pasted: "or 8?" } })}>
+            Copy another
+          </button>
+        );
+      }
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter
+            initialEntries={[{ pathname: "/write", state: { pasted: "are we still on for 7?" } }]}
+          >
+            <ComposePanel />
+            <CopyAnother />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      // The first draft is still being written when the next message comes.
+      await waitFor(() => expect(native.generateDraft).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole("button", { name: "Copy another" }));
+      expect(await screen.findByDisplayValue("or 8?")).toBeInTheDocument();
+      finish(draft("d1", "yes, see you at 7"));
+
+      // It is put aside, and the next message gets a draft of its own.
+      await waitFor(() =>
+        expect(native.resolveDraft).toHaveBeenCalledWith("d1", "regenerated", null),
+      );
+      expect(await screen.findByDisplayValue("8 works too")).toBeInTheDocument();
+      expect(screen.queryByDisplayValue("yes, see you at 7")).not.toBeInTheDocument();
+      expect(native.generateDraft.mock.calls[1]![0]).toMatchObject({ incomingMessage: "or 8?" });
+    });
+
     async function draftFromAnywhere() {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       render(

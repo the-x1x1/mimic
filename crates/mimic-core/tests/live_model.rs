@@ -68,7 +68,7 @@ fn a_real_model_writes_drafts_that_are_only_the_reply() {
                 .unwrap_or_else(|e| panic!("{model}, {channel}: no draft: {e}"));
             println!(
                 "--- {model}, {channel}{} ({:.1}s)\n{}\n",
-                if generation::chat_unmeasured(&ctx.channel, &ctx.voice) { ", its own voice unmeasured" } else { "" },
+                if ctx.form_from_elsewhere { ", its own voice unmeasured" } else { "" },
                 started.elapsed().as_secs_f64(),
                 draft.generated_text
             );
@@ -76,6 +76,12 @@ fn a_real_model_writes_drafts_that_are_only_the_reply() {
             assert!(!text.trim().is_empty(), "{model}, {channel}: an empty draft was kept");
             assert!(!text.to_lowercase().contains("<think"), "{model}, {channel}: thinking in the draft");
             assert_eq!(generation::tidy(text), *text, "{model}, {channel}: kept with its wrapping");
+            // And by its look, apart from what tidy knows: no line above it
+            // ending in a colon, no subject, no fence.
+            let first = text.lines().next().unwrap_or_default().trim();
+            assert!(!first.ends_with(':'), "{model}, {channel}: begins with an introduction? {first:?}");
+            assert!(!first.to_lowercase().starts_with("subject:"), "{model}, {channel}: a subject line");
+            assert!(!text.contains("```"), "{model}, {channel}: a code fence");
             assert!(db.get_draft(&draft.id).unwrap().is_some(), "kept");
         }
     }

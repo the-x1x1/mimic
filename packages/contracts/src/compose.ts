@@ -111,6 +111,8 @@ export const GenerationContext = z.object({
   situation: SituationChoice.nullable(),
   learned: z.array(LearnedPattern),
   evidence: z.array(z.string()),
+  /** A chat or a text measured on other writing: its form was left out (0.10.0-alpha.87). */
+  formFromElsewhere: z.boolean().default(false),
 });
 export type GenerationContext = z.infer<typeof GenerationContext>;
 

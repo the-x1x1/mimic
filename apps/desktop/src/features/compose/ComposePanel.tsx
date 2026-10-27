@@ -179,8 +179,24 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   // habits: what is changed in it was changed from that request.
   const adjusted = draft ? adjustmentOf(draft) : null;
 
+  // Which message is on screen now: a draft finished after another was
+  // copied in belongs to the one before (0.10.0-alpha.87).
+  const showing = useRef(location.key);
+  useEffect(() => {
+    showing.current = location.key;
+  }, [location.key]);
+
   async function run(adjustment?: Adjustment) {
+    const writtenFor = showing.current;
     const result = await generate.mutateAsync({ ...request, adjustment: adjustment ?? null });
+    if (showing.current !== writtenFor) {
+      // Its message is gone from here: not shown under the next one, and
+      // not left waiting either.
+      await resolve
+        .mutateAsync({ draftId: result.id, outcome: "regenerated", finalText: null })
+        .catch(() => undefined);
+      return;
+    }
     // The draft it replaces was passed over for this one, not left pending
     // for ever: recorded as regenerated, which is neither sent nor turned down.
     if (draft && draft.outcome === null) {
