@@ -91,6 +91,7 @@ pub(super) fn envelope_for(db: &Db, draft: &Draft, incoming: &Message) -> Result
             server: Some("Google Chat".into()),
             why_not: config.is_none().then(|| UNREADABLE.to_string()),
             signature: None,
+            quotes: false,
         }],
         mailbox: Some(source.id),
         to: vec![chat_name(db, draft, incoming)?],
@@ -99,6 +100,7 @@ pub(super) fn envelope_for(db: &Db, draft: &Draft, incoming: &Message) -> Result
         subject: String::new(),
         why_not: why_not.map(str::to_string),
         held,
+        quoted: None,
         kind: ReplyKind::GoogleChat,
     }))
 }
@@ -393,6 +395,7 @@ mod tests {
             to: vec!["Ada Lovelace".into()],
             cc: Vec::new(),
             subject: String::new(),
+            quote: None,
             text: text.into(),
         }
     }
@@ -490,6 +493,7 @@ mod tests {
                 to: envelope.to.clone(),
                 cc: Vec::new(),
                 subject: String::new(),
+                quote: None,
                 text: "on it this afternoon".into(),
             },
         )

@@ -82,6 +82,19 @@ export function useSetMailboxSignature(sourceId: string) {
   });
 }
 
+/** Whether replies from a mailbox quote what they answer (0.10.0-alpha.96). */
+export function useSetMailboxQuoting(sourceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) => ipc.setMailboxQuoting(sourceId, on),
+    onSuccess: (data) => {
+      qc.setQueryData(qk.mailboxSending(sourceId), data);
+      // The Send panel starts from it, and replies held to go were written with it.
+      qc.invalidateQueries({ queryKey: qk.dashboard });
+    },
+  });
+}
+
 /** The rules for replies sent by themselves, whether they run, and the last day's count. */
 export function useAutoReply() {
   return useQuery({ queryKey: qk.autoReply, queryFn: ipc.autoReply });

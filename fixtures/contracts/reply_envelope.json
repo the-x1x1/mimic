@@ -1,21 +1,23 @@
 {
-  "draftId": "2934041b-90b2-48df-a681-0633168991c9",
+  "draftId": "a3582e38-0cbb-4d54-8251-418858e39d7c",
   "mailboxes": [
     {
-      "sourceId": "5b6f8e15-6efb-4189-abcc-0d75fdadfc92",
+      "sourceId": "469b5204-8901-4c20-9211-6de61fb9b340",
       "name": "c@example.com",
       "fromAddress": "c@example.com",
       "server": "127.0.0.1",
       "whyNot": null,
-      "signature": null
+      "signature": null,
+      "quotes": true
     }
   ],
-  "mailbox": "5b6f8e15-6efb-4189-abcc-0d75fdadfc92",
+  "mailbox": "469b5204-8901-4c20-9211-6de61fb9b340",
   "to": ["ada.replies@example.com"],
   "otherAddresses": ["ada@example.com"],
   "othersOnIt": [],
   "subject": "Re: Lunch",
   "whyNot": null,
   "held": null,
-  "kind": "mail"
+  "kind": "mail",
+  "quoted": "On Mon, 9 Mar 2026 at 00:05, Ada Lovelace <ada@example.com> wrote:\n> the place by the river, 12:30?"
 }

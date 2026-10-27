@@ -3,6 +3,7 @@ import { Button, InlineError } from "@mimic/ui";
 import { SmtpSecurity, type SmtpAccount } from "@mimic/contracts";
 import {
   useMailboxSending,
+  useSetMailboxQuoting,
   useSetMailboxSending,
   useSetMailboxSignature,
   useTestMailboxSending,
@@ -29,6 +30,7 @@ export function MailboxSending({ sourceId, name }: { sourceId: string; name: str
   const save = useSetMailboxSending(sourceId);
   const test = useTestMailboxSending(sourceId);
   const signing = useSetMailboxSignature(sourceId);
+  const quoting = useSetMailboxQuoting(sourceId);
   const [open, setOpen] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
   const [signatureText, setSignatureText] = useState("");
@@ -153,6 +155,16 @@ export function MailboxSending({ sourceId, name }: { sourceId: string; name: str
                 {signature ? "Change the signature" : "Add a signature"}
               </button>
             </p>
+            <label className="row gap-1 small">
+              <input
+                type="checkbox"
+                checked={current.data?.quotes ?? true}
+                disabled={quoting.isPending}
+                onChange={(e) => quoting.mutate(e.target.checked)}
+              />
+              <span>Quote their message under my replies, as mail programs do</span>
+            </label>
+            {quoting.error ? <InlineError>{quoting.error.message}</InlineError> : null}
           </div>
         )}
       </div>

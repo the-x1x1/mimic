@@ -431,6 +431,9 @@ export const ipc = {
   /** What goes under each reply sent from a mailbox; empty for nothing. */
   setMailboxSignature: (sourceId: string, signature: string) =>
     call("set_mailbox_signature", MailboxSending, { sourceId, signature }),
+  /** Whether replies from a mailbox quote the message they answer (0.10.0-alpha.96). */
+  setMailboxQuoting: (sourceId: string, on: boolean) =>
+    call("set_mailbox_quoting", MailboxSending, { sourceId, on }),
 
   /** The rules for replies sent by themselves, whether they run, and the last day's count. */
   autoReply: () => call("get_autoreply", AutoReplyState),

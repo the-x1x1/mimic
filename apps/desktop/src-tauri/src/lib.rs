@@ -148,6 +148,7 @@ pub fn run() {
             commands::background::paste_back,
             commands::sending::test_mailbox_reading,
             commands::sending::set_mailbox_signature,
+            commands::sending::set_mailbox_quoting,
             commands::sources::sign_in_to_mailbox,
             commands::sources::connect_signed_in_mailbox,
             commands::sources::cancel_mail_sign_in,

@@ -216,6 +216,7 @@ fn add_mailbox(
         also_read: Vec::new(),
         passed_over: Vec::new(),
         through_graph: false,
+        quote: None,
     };
     let source = state.db.create_source(&mimic_core::db::NewSource {
         connector: imap::CONNECTOR.into(),

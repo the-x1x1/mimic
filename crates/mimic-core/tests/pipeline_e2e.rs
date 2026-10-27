@@ -1074,6 +1074,7 @@ fn a_reply_sent_from_the_mailbox_answers_the_thread() {
             to: envelope.to.clone(),
             cc: vec![],
             subject: envelope.subject.clone(),
+            quote: None,
         },
     )
     .unwrap();

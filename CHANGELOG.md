@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.96] — 2026-10-26
+
+A reply quotes what it answers.
+
+### Added
+
+- **Their message goes quoted under your reply, as mail programs do.** "On Mon, 2 Mar at 09:00, Ada Lovelace wrote:" and her words after "> ", under your words and signature, so whoever reads it in Outlook or anywhere else sees what you're answering. The Send panel shows it, with **Quote their message** to leave it off for that reply, and each mailbox has **Quote their message under my replies** under Your mail. Replies sent by themselves quote the same way. What Mimic learns from is still your words alone.
+
 ## [0.10.0-alpha.95] — 2026-10-26
 
 A thread from its start, and readings held to what they say.
