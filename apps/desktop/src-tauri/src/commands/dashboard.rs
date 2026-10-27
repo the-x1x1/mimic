@@ -83,13 +83,21 @@ pub async fn search_messages(
     before_at: Option<String>,
     before_id: Option<String>,
     limit: Option<usize>,
+    with_person: Option<String>,
 ) -> CommandResult<mimic_core::db::SearchPage> {
     let before = match (&before_at, &before_id) {
         (Some(at), Some(id)) => Some((at.as_str(), id.as_str())),
         (None, None) => None,
         _ => return Err(CommandError::new("invalid", "Where to read on from needs both a time and an id.")),
     };
-    Ok(state.db.search_messages(&query, who.unwrap_or_default(), before, limit.unwrap_or(20).clamp(1, 100))?)
+    // In one person's conversations, when asked (0.10.0-alpha.101).
+    Ok(state.db.search_messages_with(
+        &query,
+        who.unwrap_or_default(),
+        with_person.as_deref().filter(|p| !p.is_empty()),
+        before,
+        limit.unwrap_or(20).clamp(1, 100),
+    )?)
 }
 
 /// Say whether a thread needs a reply: `no_reply_needed` takes it off the
