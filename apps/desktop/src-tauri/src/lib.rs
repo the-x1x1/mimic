@@ -212,6 +212,7 @@ pub fn run() {
             commands::sending::get_mailbox_sending,
             commands::mail_folders::mailbox_folders,
             commands::mail_folders::set_mailbox_folders,
+            commands::mail_servers::reach_mail_servers,
             commands::sending::set_mailbox_sending,
             commands::sending::reset_mailbox_sending,
             commands::compose::get_draft_outcomes,

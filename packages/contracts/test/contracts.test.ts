@@ -41,6 +41,7 @@ import {
   MailSignIns,
   SignInSetup,
   MailboxFolders,
+  MailServers,
   TelegramApp,
   TelegramStep,
   telegramAccount,
@@ -146,6 +147,13 @@ describe("fixtures written by the Rust pipeline parse against the zod schemas", 
       }),
     ).toEqual({ name: "C Haynes", username: "c", lastCheckedAt: null });
     expect(telegramAccount({ connector: "telegram", config: {} })).toBeNull();
+  });
+
+  it("parses what checking a mailbox's servers found", () => {
+    const found = MailServers.parse(read(contractFixture("mail_servers.json")));
+    expect(found.reading).toMatchObject({ host: "imap.example.org", port: 993, reached: true });
+    expect(found.reading.said).toContain("as mail arrives");
+    expect(found.sending).toMatchObject({ host: "smtp.example.org", port: 465, reached: false });
   });
 
   it("parses the other folders a mailbox may be read in", () => {

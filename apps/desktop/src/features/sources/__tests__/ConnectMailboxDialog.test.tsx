@@ -18,6 +18,7 @@ const native = vi.hoisted(() => ({
   connectSignedInMailbox: vi.fn(),
   cancelMailSignIn: vi.fn(),
   mailExchangers: vi.fn(),
+  reachMailServers: vi.fn(),
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
@@ -285,6 +286,41 @@ describe("an address at a domain of its own", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(MICROSOFT_UNAVAILABLE)).toBeInTheDocument();
     expect(screen.queryByLabelText("App password")).toBeNull();
+  });
+
+  it("checks the server without a password, and says what each server said", async () => {
+    native.mailExchangers.mockResolvedValue([]);
+    native.reachMailServers.mockResolvedValue({
+      reading: {
+        host: "imap.formicaria.us",
+        port: 993,
+        reached: true,
+        said: "It answered, encrypted, and tells me as mail arrives (IDLE).",
+      },
+      sending: null,
+    });
+    renderDialog();
+    leaveAddress("c@formicaria.us");
+    fireEvent.click(await screen.findByText("Server settings"));
+    fireEvent.change(screen.getByLabelText("IMAP server"), {
+      target: { value: "imap.formicaria.us" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check the server (no password sent)" }));
+    expect(
+      await screen.findByText(
+        "imap.formicaria.us:993 \u2014 It answered, encrypted, and tells me as mail arrives (IDLE).",
+      ),
+    ).toBeInTheDocument();
+    expect(native.reachMailServers).toHaveBeenCalledWith(
+      "imap.formicaria.us",
+      993,
+      "c@formicaria.us",
+    );
+    // Changing the server forgets what the last one said.
+    fireEvent.change(screen.getByLabelText("IMAP server"), {
+      target: { value: "mail.formicaria.us" },
+    });
+    expect(screen.queryByText(/It answered/)).toBeNull();
   });
 
   it("doesn't ask about a provider it already knows", async () => {
