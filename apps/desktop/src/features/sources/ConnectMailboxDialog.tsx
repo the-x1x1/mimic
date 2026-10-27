@@ -10,6 +10,7 @@ import {
   mailHostFromExchangers,
   type ImapAccount,
   type ImapProbe,
+  type MailServers,
   type SignInWith,
 } from "@mimic/contracts";
 import { ipc } from "@/lib/ipc";
@@ -59,6 +60,9 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"checking" | "connecting" | "signing-in" | null>(null);
   const [isMine, setIsMine] = useState(true);
+  // What reaching the servers found, signed in to neither (0.10.0-alpha.89).
+  const [servers, setServers] = useState<MailServers | null>(null);
+  const [reaching, setReaching] = useState(false);
   // Said only when the store reports it: until then, and on a build that
   // does not seal, the note claims nothing it cannot back.
   const protection = useProviderState().data?.credentials.protection;
@@ -132,6 +136,20 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
       if (!wasStopped(e)) setError((e as Error).message);
     } finally {
       setBusy(null);
+    }
+  }
+
+  /** Reach the servers as connecting would, sending no password; say what each said. */
+  async function checkServers() {
+    setError(null);
+    setServers(null);
+    setReaching(true);
+    try {
+      setServers(await ipc.reachMailServers(account.host, account.port, account.username));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setReaching(false);
     }
   }
 
@@ -321,6 +339,7 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                           onChange={(e) => {
                             setHost(e.target.value);
                             setProbe(null);
+                            setServers(null);
                           }}
                         />
                       </Field>
@@ -329,7 +348,10 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                           id="mb-port"
                           type="number"
                           value={port}
-                          onChange={(e) => setPort(Number(e.target.value) || 993)}
+                          onChange={(e) => {
+                            setPort(Number(e.target.value) || 993);
+                            setServers(null);
+                          }}
                         />
                       </Field>
                     </div>
@@ -338,6 +360,27 @@ export function ConnectMailboxDialog({ onClose }: { onClose: () => void }) {
                 )}
               </>
             )}
+            {account.host ? (
+              <div className="stack gap-1">
+                <div className="row gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={reaching || busy !== null}
+                    onClick={() => void checkServers()}
+                  >
+                    {reaching ? "Checking the server…" : "Check the server (no password sent)"}
+                  </Button>
+                </div>
+                {servers ? (
+                  <ul className="small" aria-label="What the servers said">
+                    {[servers.reading, ...(servers.sending ? [servers.sending] : [])].map((s) => (
+                      <li key={`${s.host}:${s.port}`}>{`${s.host}:${s.port} \u2014 ${s.said}`}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
           </details>
 
           {busy === "signing-in" ? (

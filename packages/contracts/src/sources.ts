@@ -391,6 +391,23 @@ export const MailboxFolders = z.object({
 });
 export type MailboxFolders = z.infer<typeof MailboxFolders>;
 
+/** One mail server, reached without signing in, and what it said. */
+export const ServerReached = z.object({
+  host: z.string(),
+  port: z.number(),
+  reached: z.boolean(),
+  /** What it said, or why it couldn't be reached, in a sentence. */
+  said: z.string(),
+});
+export type ServerReached = z.infer<typeof ServerReached>;
+
+/** A mailbox's reading server, and the sending server paired with it when one is known. */
+export const MailServers = z.object({
+  reading: ServerReached,
+  sending: ServerReached.nullable(),
+});
+export type MailServers = z.infer<typeof MailServers>;
+
 /**
  * Server settings for the providers most people use. Most want an app
  * password for IMAP, not the account password; the dialog says so. Microsoft

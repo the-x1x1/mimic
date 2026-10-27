@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.89] — 2026-10-26
+
+Check the server before the password.
+
+### Added
+
+- **Check the server (no password sent).** Under Server settings when you connect a mailbox, Mimic reaches the reading server — and the sending server it would pair with it — exactly as it will once connected, and says what each said: that it answered encrypted, whether it tells Mimic as mail arrives, the ways it takes a sign-in, or why it couldn't be reached. A mistyped server or port shows before you type anything secret, and a server that takes no password at all (Microsoft's) says to sign in instead.
+
+### Run
+
+- The real servers of Gmail, Outlook.com, Microsoft 365, Yahoo, iCloud, AOL, Fastmail, Zoho and GMX were all reached from the owner's desktop, signed in to none. Microsoft's reading server takes no password (it says `LOGINDISABLED`), which is why Microsoft mailboxes sign in instead; iCloud's doesn't offer to say when mail arrives, so an iCloud mailbox is checked on a schedule.
+
 ## [0.10.0-alpha.88] — 2026-10-26
 
 Reaching the mail servers, signed in to none.

@@ -52,6 +52,7 @@ import {
   AutoReplyState,
   MailboxSending,
   MailboxFolders,
+  MailServers,
   TelegramApp,
   TelegramStep,
   MailExchangers,
@@ -242,6 +243,9 @@ export const ipc = {
     call("forget_sign_in_setup", SignInSetup, { with: withProvider }),
   /** Who handles mail for a domain: its mail exchangers, from this computer's resolver. */
   mailExchangers: (domain: string) => call("mail_exchangers", MailExchangers, { domain }),
+  /** Reach a mailbox's reading server and its paired sending server; signs in to neither. */
+  reachMailServers: (host: string, port: number, address: string) =>
+    call("reach_mail_servers", MailServers, { host, port, address }),
   /**
    * Sign in with Microsoft or Google in the browser, and look at the mailbox
    * without importing anything. Resolves once the browser has come back.

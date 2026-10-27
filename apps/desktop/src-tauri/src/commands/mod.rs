@@ -9,6 +9,7 @@ pub mod google_chat;
 pub mod jobs;
 pub mod localmodel;
 pub mod mail_folders;
+pub mod mail_servers;
 pub mod people;
 pub mod providers;
 pub mod sending;

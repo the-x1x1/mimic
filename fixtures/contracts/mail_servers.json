@@ -1,0 +1,14 @@
+{
+  "reading": {
+    "host": "imap.example.org",
+    "port": 993,
+    "reached": true,
+    "said": "It answered, encrypted, and tells me as mail arrives (IDLE)."
+  },
+  "sending": {
+    "host": "smtp.example.org",
+    "port": 465,
+    "reached": false,
+    "said": "Couldn't reach smtp.example.org:465 to send. Check the server name and port, and that you're online."
+  }
+}
