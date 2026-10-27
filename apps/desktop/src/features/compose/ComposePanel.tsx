@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Button, Card, Field, InlineError } from "@mimic/ui";
 import {
@@ -19,6 +19,7 @@ import {
   useProviderHealth,
   useProviderState,
   useResolveDraft,
+  useWriteAnother,
 } from "@/hooks/useCompose";
 import { useSettings } from "@/hooks/useSystem";
 import { ipc } from "@/lib/ipc";
@@ -49,19 +50,37 @@ const GUESSED_AS: Record<Channel, string> = {
  * aside, so the reply can be pasted where the message was. Mimic can't see
  * it go from there, so the next time Write is open it asks whether it did,
  * and records only what the user says (`useAnywhere`).
+ *
+ * Shorter, longer, more casual and more professional write another way of
+ * saying the draft beside it (0.10.0-alpha.98), as on the home screen, rather
+ * than in its place: the user picks which one is in the editor, and the one
+ * used — sent, pasted or copied away — decides the rest (`Db::resolve_draft`),
+ * so which way was chosen is learned from (0.10.0-alpha.97). Regenerate and
+ * a new message replace the whole set; "None of these" puts it all aside.
  */
 export function ComposePanel({ title = "Write something new" }: { title?: string }) {
   const people = usePeople();
   const providers = useProviderState();
   const generate = useGenerateDraft();
+  const another = useWriteAnother();
   const resolve = useResolveDraft();
 
   const [participantId, setParticipantId] = useState<string>("");
   const [channel, setChannel] = useState<Channel>("email");
   const [incoming, setIncoming] = useState("");
   const [intent, setIntent] = useState("");
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [edited, setEdited] = useState<string>("");
+  // The set being chosen from (0.10.0-alpha.98): the first draft, the other
+  // ways of saying it written beside it (oldest first), which one is in the
+  // editor (the first when none), and what was typed into each.
+  const [first, setFirst] = useState<Draft | null>(null);
+  const [ways, setWays] = useState<Draft[]>([]);
+  const [chosenId, setChosenId] = useState<string | null>(null);
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  const draft = first === null ? null : (ways.find((w) => w.id === chosenId) ?? first);
+  const edited = draft ? (texts[draft.id] ?? draft.generatedText) : "";
+  const setEdited = (text: string) => {
+    if (draft) setTexts((t) => ({ ...t, [draft.id]: text }));
+  };
   const [fromAnywhere, setFromAnywhere] = useState(false);
   // Whom the window's title named, when it was chosen for the user.
   const [guessed, setGuessed] = useState<string | null>(null);
@@ -81,10 +100,23 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   // recorded as regenerated, as one replaced here is, not left pending.
   const location = useLocation();
   const pasted = (location.state as { pasted?: unknown } | null)?.pasted;
+  // The set's first draft: what is put aside decides the rest with it.
   const current = useRef<Draft | null>(null);
   useEffect(() => {
-    current.current = draft;
-  }, [draft]);
+    current.current = first;
+  }, [first]);
+  const resetWriteAnother = another.reset;
+  /** Show this first draft alone, or nothing. */
+  const showSet = useCallback(
+    (d: Draft | null) => {
+      setFirst(d);
+      setWays([]);
+      setChosenId(null);
+      setTexts({});
+      resetWriteAnother();
+    },
+    [resetWriteAnother],
+  );
   const handled = useRef<string | null>(null);
   const lastGuess = useRef<string | null>(null);
   const windowTitle = (location.state as { windowTitle?: unknown } | null)?.windowTitle;
@@ -104,8 +136,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
       );
     }
     setIncoming(pasted);
-    setDraft(null);
-    setEdited("");
+    showSet(null);
     setFromAnywhere(true);
     // Whom the last window named was for the last message, not this one.
     const before = lastGuess.current;
@@ -120,7 +151,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     else if (was) setChannel((c) => (c === was ? "email" : c));
     lastChannelGuess.current = kind;
     setChannelGuessed(kind);
-  }, [location.key, pasted, windowTitle, resolveAsync]);
+  }, [location.key, pasted, windowTitle, resolveAsync, showSet]);
 
   // Who it's from, when the title of the window it was copied in names one
   // person on the list (0.10.0-alpha.52): chosen for them once the list is
@@ -175,8 +206,8 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
       : undefined,
   );
   const dirty = draft !== null && edited !== draft.generatedText;
-  // A draft asked for shorter, longer or in another register is not read for
-  // habits: what is changed in it was changed from that request.
+  // Another way of saying it, shorter, longer or in another register, is not
+  // read for habits: what is changed in it was changed from that request.
   const adjusted = draft ? adjustmentOf(draft) : null;
 
   // Which message is on screen now: a draft finished after another was
@@ -186,9 +217,10 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     showing.current = location.key;
   }, [location.key]);
 
-  async function run(adjustment?: Adjustment) {
+  /** A first draft, in place of the set on screen. */
+  async function run() {
     const writtenFor = showing.current;
-    const result = await generate.mutateAsync({ ...request, adjustment: adjustment ?? null });
+    const result = await generate.mutateAsync({ ...request, adjustment: null });
     if (showing.current !== writtenFor) {
       // Its message is gone from here: not shown under the next one, and
       // not left waiting either.
@@ -197,16 +229,48 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
         .catch(() => undefined);
       return;
     }
-    // The draft it replaces was passed over for this one, not left pending
-    // for ever: recorded as regenerated, which is neither sent nor turned down.
-    if (draft && draft.outcome === null) {
+    // The set it replaces was passed over for this one, not left pending for
+    // ever: recorded as regenerated, which is neither sent nor turned down,
+    // and which the first draft's other ways go with.
+    if (first && first.outcome === null) {
       await resolve
-        .mutateAsync({ draftId: draft.id, outcome: "regenerated", finalText: null })
+        .mutateAsync({ draftId: first.id, outcome: "regenerated", finalText: null })
         .catch(() => undefined);
     }
-    setDraft(result);
-    setEdited(result.generatedText);
+    showSet(result);
   }
+
+  /**
+   * Another way of saying the first draft, written beside it and put in the
+   * editor (0.10.0-alpha.98). One finished after the set was replaced is
+   * passed over with it: kept nowhere, since nothing is left to choose it
+   * from.
+   */
+  async function writeAnother(adjustment: Adjustment) {
+    if (!first) return;
+    const forFirst = first.id;
+    try {
+      const d = await another.mutateAsync({ draftId: forFirst, adjustment });
+      if (current.current?.id !== forFirst) return;
+      setWays((w) => [...w, d]);
+      setChosenId(d.id);
+    } catch {
+      // Said below, from the mutation's own error.
+    }
+  }
+
+  /** Not this way: put aside on its own, and the first back in the editor. */
+  async function dropWay(d: Draft) {
+    await resolve.mutateAsync({ draftId: d.id, outcome: "discarded", finalText: null });
+    setWays((w) => w.filter((x) => x.id !== d.id));
+    setChosenId((c) => (c === d.id ? null : c));
+  }
+
+  const labelOf = (d: Draft) => {
+    const a = adjustmentOf(d);
+    return a ? ADJUSTMENT_LABELS[a] : "Another way";
+  };
+  const offered = new Set(ways.map(adjustmentOf));
 
   // The latest `run`, for the draft written at once: an effect that named
   // `run` would run again on every render.
@@ -219,7 +283,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     if (typeof pasted !== "string" || !settingsLoaded || !draftAtOnce) return;
     if (autoFor.current === location.key) return;
     // After the message is in, and the window's title has been read.
-    if (incoming !== pasted || draft !== null) return;
+    if (incoming !== pasted || first !== null) return;
     if (typeof windowTitle === "string" && guessDone !== location.key) return;
     if (!readiness.ready || generate.isPending) return;
     autoFor.current = location.key;
@@ -230,7 +294,7 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     draftAtOnce,
     location.key,
     incoming,
-    draft,
+    first,
     windowTitle,
     guessDone,
     readiness.ready,
@@ -241,8 +305,8 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
   // back: Enter pastes it (and sends it, when that is on).
   const pasteButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (draft && fromAnywhere) pasteButton.current?.focus();
-  }, [draft, fromAnywhere]);
+    if (first && fromAnywhere) pasteButton.current?.focus();
+  }, [first, fromAnywhere]);
 
   async function markSent() {
     if (!draft) return;
@@ -254,13 +318,12 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
     toast.success(
       dirty && !adjusted ? "Saved, and Mimic noted what you changed" : "Saved",
       adjusted
-        ? `This one was written ${ADJUSTMENT_LABELS[adjusted].toLowerCase()}, so Mimic doesn't learn your habits from it.`
+        ? `You chose the ${ADJUSTMENT_LABELS[adjusted].toLowerCase()} way, and I noticed. What you change in it isn't read for your habits.`
         : dirty
           ? undefined
           : "Nothing to learn from this one — you sent it as written.",
     );
-    setDraft(null);
-    setEdited("");
+    showSet(null);
     setIntent("");
   }
 
@@ -277,11 +340,15 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
    * question as a copy: whether it went is the user's to say.
    */
   async function pasteThere(send = false) {
-    if (!draft) return;
+    if (!draft || !first) return;
     const text = edited;
-    setCopiedAway({ draftId: draft.id, text, generatedText: draft.generatedText });
-    setDraft(null);
-    setEdited("");
+    setCopiedAway({
+      draftId: draft.id,
+      firstId: first.id,
+      text,
+      generatedText: draft.generatedText,
+    });
+    showSet(null);
     setIntent("");
     setIncoming("");
     setFromAnywhere(false);
@@ -299,11 +366,15 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
 
   /** Copy the reply and step aside, to paste it where the message came from. */
   async function copyAndGoBack() {
-    if (!draft) return;
+    if (!draft || !first) return;
     await navigator.clipboard.writeText(edited);
-    setCopiedAway({ draftId: draft.id, text: edited, generatedText: draft.generatedText });
-    setDraft(null);
-    setEdited("");
+    setCopiedAway({
+      draftId: draft.id,
+      firstId: first.id,
+      text: edited,
+      generatedText: draft.generatedText,
+    });
+    showSet(null);
     setIntent("");
     setIncoming("");
     setFromAnywhere(false);
@@ -323,6 +394,14 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
       outcome: went ? (changed ? "sent_edited" : "sent_unedited") : "discarded",
       finalText: went ? copiedAway.text : null,
     });
+    // Another way that didn't go leaves its first draft and the rest beside
+    // it: none of them went either.
+    const firstId = copiedAway.firstId;
+    if (!went && firstId && firstId !== copiedAway.draftId) {
+      await resolve
+        .mutateAsync({ draftId: firstId, outcome: "discarded", finalText: null })
+        .catch(() => undefined);
+    }
     setCopiedAway(null);
     toast.success(
       "Noted",
@@ -478,32 +557,73 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
               >
                 {generate.isPending ? "Writing…" : draft ? "Regenerate" : "Write a draft"}
               </Button>
-              {draft
-                ? Adjustment.options.map((a) => (
-                    <Button
-                      key={a}
-                      variant="ghost"
-                      onClick={() => run(a)}
-                      disabled={generate.isPending || !readiness.ready}
-                    >
-                      {ADJUSTMENT_LABELS[a]}
-                    </Button>
-                  ))
-                : null}
             </div>
             {generate.isError ? (
               <InlineError>{(generate.error as Error).message}</InlineError>
             ) : null}
           </Card>
 
-          {draft ? (
+          {draft && first ? (
             <Card title="Draft">
+              {ways.length > 0 ? (
+                <fieldset className="compose__ways">
+                  <legend className="muted small">Which way of saying it</legend>
+                  <label className="row gap-1">
+                    <input
+                      type="radio"
+                      name="compose-way"
+                      checked={draft.id === first.id}
+                      onChange={() => setChosenId(null)}
+                    />
+                    <span>As I first wrote it</span>
+                  </label>
+                  {ways.map((w) => (
+                    <label key={w.id} className="row gap-1">
+                      <input
+                        type="radio"
+                        name="compose-way"
+                        checked={draft.id === w.id}
+                        onChange={() => setChosenId(w.id)}
+                      />
+                      <span>{labelOf(w)}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
               <textarea
                 className="compose__draft"
                 rows={8}
                 value={edited}
                 onChange={(e) => setEdited(e.target.value)}
               />
+              {offered.size < Adjustment.options.length ? (
+                <div className="thread__another" role="group" aria-label="Write it another way">
+                  <span className="muted small" aria-hidden="true">
+                    Write it another way:
+                  </span>
+                  {Adjustment.options
+                    .filter((a) => !offered.has(a))
+                    .map((a) => (
+                      <Button
+                        key={a}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void writeAnother(a)}
+                        disabled={another.isPending || generate.isPending || !readiness.ready}
+                      >
+                        {ADJUSTMENT_LABELS[a]}
+                      </Button>
+                    ))}
+                  {another.isPending ? (
+                    <span className="muted small" role="status">
+                      Writing it another way&hellip;
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              {another.isError ? (
+                <InlineError>{(another.error as Error).message}</InlineError>
+              ) : null}
               <div className="row gap-2">
                 {fromAnywhere && pressEnter ? (
                   <Button ref={pasteButton} variant="primary" onClick={() => void pasteThere(true)}>
@@ -532,23 +652,32 @@ export function ComposePanel({ title = "Write something new" }: { title?: string
                     Copy
                   </Button>
                 )}
+                {draft.id !== first.id ? (
+                  <Button
+                    variant="ghost"
+                    onClick={() => void dropWay(draft).catch(() => undefined)}
+                  >
+                    Not this one
+                  </Button>
+                ) : null}
                 <Button
                   variant="ghost"
                   onClick={async () => {
+                    // The first draft, which puts every other way aside with it.
                     await resolve.mutateAsync({
-                      draftId: draft.id,
+                      draftId: first.id,
                       outcome: "discarded",
                       finalText: null,
                     });
-                    setDraft(null);
+                    showSet(null);
                   }}
                 >
-                  Discard
+                  {ways.length > 0 ? "None of these" : "Discard"}
                 </Button>
               </div>
               <p className="muted small">
                 {adjusted
-                  ? `This draft was written ${ADJUSTMENT_LABELS[adjusted].toLowerCase()}, so Mimic won't learn your habits from what you change in it. Nothing is sent for you.`
+                  ? `Using the ${ADJUSTMENT_LABELS[adjusted].toLowerCase()} way tells me which way you like; what you change in it isn't read for your habits, since it was written that way on purpose. Nothing is sent for you.`
                   : dirty
                     ? "Mimic will compare what it wrote with what you send, and use the difference."
                     : "Telling Mimic what you actually sent is the only way it improves. Nothing is sent for you."}

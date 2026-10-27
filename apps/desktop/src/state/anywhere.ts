@@ -8,6 +8,11 @@ import { create } from "zustand";
  */
 export interface CopiedAway {
   draftId: string;
+  /**
+   * The first draft of its set, when another way of saying it was copied
+   * (0.10.0-alpha.98): put aside with it when it didn't go.
+   */
+  firstId?: string;
   /** What was copied: the draft as the user left it. */
   text: string;
   /** What Mimic wrote, to tell an edited reply from an unedited one. */

@@ -1326,6 +1326,22 @@ select option {
   line-height: 1.6;
 }
 
+/* Which way of saying it is in the editor (0.10.0-alpha.98): a row of
+   choices above it, wrapping where there isn't room. */
+.compose__ways {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  border: 0;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+}
+.compose__ways legend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+}
+
 /* --------------------------------------------------------- evidence ------ */
 
 .examples {
