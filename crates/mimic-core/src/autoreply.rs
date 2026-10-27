@@ -37,6 +37,9 @@
 //!   only while it is the account connected (`sending::slack::still_theirs`);
 //!   and, just before it goes, Slack is asked what was said after the
 //!   message (`sending::slack::said_since`), as a mailbox's Sent folder is.
+//!   Telegram the same way (0.10.0-alpha.76): a one-to-one chat with a
+//!   person only (`telegramDirect`), through the account's own session
+//!   (`sending::telegram::still_theirs`, `said_since`).
 
 use std::collections::HashSet;
 
@@ -50,6 +53,7 @@ use crate::sources::imap::{Credentials, ImapError, ImapSourceConfig};
 use crate::sources::outgoing;
 use crate::sources::slack::{SlackApi, SlackSourceConfig};
 use crate::sources::teams::{GraphApi, TeamsSourceConfig};
+use crate::sources::telegram_account::{TelegramPost, TelegramSourceConfig};
 
 /// Where the rules are kept.
 pub const SETTING: &str = "autoreply";
@@ -100,6 +104,12 @@ pub const ALREADY_IN_TEAMS: &str = "You'd already replied in Teams, so this one 
 pub const SAID_SINCE_TEAMS: &str = "They wrote again in Teams after the message this answers, so it waits for you.";
 pub const TEAMS_UNKNOWN: &str = "I couldn't look in Teams for a reply already there, so this one waits for you.";
 pub const NO_TEAMS: &str = "I don't have a Teams sign-in I can use for this account, so this one waits for you.";
+/// Telegram (0.10.0-alpha.76).
+pub const ALREADY_IN_TELEGRAM: &str = "You'd already replied in Telegram, so this one didn't go.";
+pub const SAID_SINCE_TELEGRAM: &str =
+    "They wrote again in Telegram after the message this answers, so it waits for you.";
+pub const TELEGRAM_UNKNOWN: &str = "I couldn't look in Telegram for a reply already there, so this one waits for you.";
+pub const NO_TELEGRAM: &str = "I don't have a Telegram sign-in I can use for this account, so this one waits for you.";
 pub const GONE: &str = "Its draft isn't here any more, so this wasn't sent.";
 pub const BEFORE_ON: &str = "It came before replying by myself was turned on, so it waits for you.";
 pub const OLD: &str = "I read it more than a day ago, or long after it was sent, so it waits for you.";
@@ -343,12 +353,14 @@ fn waiting_now(db: &Db) -> Result<HashSet<(String, String)>, DbError> {
         .collect())
 }
 
-/// Whether a draft answers a message read from a Slack workspace or a
-/// Teams account.
+/// Whether a draft answers a message read from a Slack workspace, a Teams
+/// account or a Telegram account.
 fn answers_chat(db: &Db, draft: &Draft) -> Result<bool, DbError> {
     let Some(incoming) = sending::answered(db, draft)? else { return Ok(false) };
     Ok(db.get_source(&incoming.source_id)?.is_some_and(|s| {
-        s.connector == crate::sources::slack::CONNECTOR || s.connector == crate::sources::teams::CONNECTOR
+        s.connector == crate::sources::slack::CONNECTOR
+            || s.connector == crate::sources::teams::CONNECTOR
+            || s.connector == crate::sources::telegram_account::CONNECTOR
     }))
 }
 
@@ -456,7 +468,7 @@ fn refusal(
     // copied in (0.10.0-alpha.54).
     if in_chat {
         // A direct message is to the user; a group's reply goes to the group.
-        let direct = ["slackDirect", "teamsDirect"]
+        let direct = ["slackDirect", "teamsDirect", "telegramDirect"]
             .iter()
             .any(|k| incoming.metadata.get(*k).and_then(serde_json::Value::as_bool) == Some(true));
         if !direct {
@@ -637,6 +649,13 @@ pub fn hold_replies(db: &Db, now: DateTime<Utc>) -> Result<usize, SendError> {
         } else if envelope.kind == sending::ReplyKind::Teams {
             let Ok((config, chat)) = sending::teams::route(db, &incoming) else { continue };
             (sending::teams::from_address(&config), draft.generated_text.clone(), sending::teams::pending_id(&chat))
+        } else if envelope.kind == sending::ReplyKind::Telegram {
+            let Ok((config, chat)) = sending::telegram::route(db, &incoming) else { continue };
+            (
+                sending::telegram::from_address(&config),
+                draft.generated_text.clone(),
+                sending::telegram::pending_id(&chat),
+            )
         } else {
             let Ok((config, account)) = sending::sending_from(db, &incoming.source_id) else { continue };
             if !goes_to_them(db, draft.participant_id.as_deref(), &envelope.to)? {
@@ -726,6 +745,10 @@ pub enum TeamsUnavailable {
 /// one to use.
 pub type SlackFor<'a> = dyn Fn(&str) -> Option<SlackApi> + 'a;
 
+/// A Telegram account's connection with its own session (by source id),
+/// when there is one to use (0.10.0-alpha.76). Dropping it closes it.
+pub type TelegramFor<'a> = dyn Fn(&str) -> Option<Box<dyn TelegramPost>> + 'a;
+
 /// How long past its time a reply waits for its Sent folder to be read
 /// before it is left for the user.
 pub const SENT_PATIENCE_MINUTES: i64 = 30;
@@ -805,6 +828,19 @@ pub fn send_due_all(
     slack: &SlackFor<'_>,
     teams: &TeamsFor<'_>,
 ) -> Result<Run, SendError> {
+    send_due_every(db, credentials, now, in_sent, slack, teams, &|_| None)
+}
+
+/// `send_due_all`, and `telegram` for each Telegram account's connection.
+pub fn send_due_every(
+    db: &Db,
+    credentials: &Credentials,
+    now: DateTime<Utc>,
+    in_sent: &SentCheck<'_>,
+    slack: &SlackFor<'_>,
+    teams: &TeamsFor<'_>,
+    telegram: &TelegramFor<'_>,
+) -> Result<Run, SendError> {
     let mut run = Run::default();
     let now_text = fmt_rfc3339(now);
     let due: Vec<_> = db.due_outgoing(&now_text)?.into_iter().filter(|e| e.how == SendHow::Autonomous).collect();
@@ -842,6 +878,10 @@ pub fn send_due_all(
         }
         if connector.as_deref() == Some(crate::sources::teams::CONNECTOR) {
             send_into_teams(db, &rules, &draft, &entry, now, teams, &mut run)?;
+            continue;
+        }
+        if connector.as_deref() == Some(crate::sources::telegram_account::CONNECTOR) {
+            send_into_telegram(db, &rules, &draft, &entry, now, telegram, &mut run)?;
             continue;
         }
         let (config, account) = match sending::sending_from(db, &entry.source_id) {
@@ -1148,6 +1188,97 @@ fn teams_read_since(db: &Db, config: &TeamsSourceConfig, source_id: &str, since:
     Ok(settled && matches!((read, held), (Some(r), Some(h)) if r > h))
 }
 
+/// `send_into_slack`, for a reply held to go into Telegram (0.10.0-alpha.76).
+fn send_into_telegram(
+    db: &Db,
+    rules: &Rules,
+    draft: &Draft,
+    entry: &crate::db::OutboxEntry,
+    now: DateTime<Utc>,
+    telegram: &TelegramFor<'_>,
+    run: &mut Run,
+) -> Result<(), SendError> {
+    let Some(incoming) = sending::answered(db, draft)? else { return stopped(db, entry, run, NOT_WAITING) };
+    let (config, chat) = match sending::telegram::route(db, &incoming) {
+        Ok(found) => found,
+        Err(why) => return stopped(db, entry, run, why),
+    };
+    if entry.from_address != sending::telegram::from_address(&config) {
+        return stopped(db, entry, run, FROM_CHANGED);
+    }
+    if !telegram_read_since(db, &config, &entry.source_id, &entry.send_after)? {
+        if !run.waiting_for_check.contains(&entry.source_id) {
+            run.waiting_for_check.push(entry.source_id.clone());
+        }
+        return Ok(());
+    }
+    let waiting = waiting_now(db)?;
+    if let Some(why) = refusal(db, rules, draft, &waiting, Some(&entry.id), false, now)? {
+        return stopped(db, entry, run, why);
+    }
+    let waited_long = || {
+        DateTime::parse_from_rfc3339(&entry.send_after)
+            .ok()
+            .is_none_or(|t| now - t.with_timezone(&Utc) > Duration::minutes(SENT_PATIENCE_MINUTES))
+    };
+    let Some(account) = telegram(&entry.source_id) else { return stopped(db, entry, run, NO_TELEGRAM) };
+    match sending::telegram::still_theirs(account.as_ref(), &config) {
+        Ok(()) => {}
+        Err(SendError::Cannot(why)) => return stopped(db, entry, run, &why),
+        Err(e) => {
+            tracing::warn!(target: "autoreply", error = %e, "couldn't ask Telegram whose session it is");
+            return if waited_long() { stopped(db, entry, run, TELEGRAM_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    match sending::telegram::said_since(account.as_ref(), &chat, &incoming) {
+        Ok(Ok(sending::slack::Since::Nothing)) => {}
+        Ok(Ok(sending::slack::Since::You)) => return stopped(db, entry, run, ALREADY_IN_TELEGRAM),
+        Ok(Ok(sending::slack::Since::Them)) => return stopped(db, entry, run, SAID_SINCE_TELEGRAM),
+        Ok(Err(why)) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = true, "couldn't look in Telegram");
+            return stopped(db, entry, run, TELEGRAM_UNKNOWN);
+        }
+        Err(why) => {
+            tracing::warn!(target: "autoreply", error = %why, refused = false, "couldn't look in Telegram");
+            return if waited_long() { stopped(db, entry, run, TELEGRAM_UNKNOWN) } else { Ok(()) };
+        }
+    }
+    if rules.rehearse {
+        run.rehearsed += usize::from(db.stop_held_outgoing(&entry.id, REHEARSED)?);
+        return Ok(());
+    }
+    if !db.take_held_outgoing(&entry.id, &fmt_rfc3339(now))? {
+        return Ok(());
+    }
+    match sending::telegram::post(db, account.as_ref(), entry, &chat, &entry.body) {
+        Ok(at) => {
+            run.sent += 1;
+            if let Err(e) = db
+                .mark_sent_on_its_own(&draft.id)
+                .and_then(|_| sending::record_sent_draft(db, draft, &draft.generated_text))
+            {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be recorded on its draft");
+            }
+            if let Err(e) =
+                sending::telegram::record_in_conversation(db, entry, &config, &incoming, &entry.body, at, true)
+            {
+                tracing::warn!(target: "autoreply", error = %e, "a reply sent on its own could not be put in its conversation");
+            }
+        }
+        Err(e) if e.may_have_gone() => run.unsure += 1,
+        Err(_) => run.failed += 1,
+    }
+    Ok(())
+}
+
+/// Whether a check that read the Telegram account through began after `since`.
+fn telegram_read_since(db: &Db, config: &TelegramSourceConfig, source_id: &str, since: &str) -> Result<bool, DbError> {
+    let settled = db.get_source(source_id)?.is_some_and(|s| s.status != "failed" && s.status != "importing");
+    let read = config.last_read_at.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let held = DateTime::parse_from_rfc3339(since).ok();
+    Ok(settled && matches!((read, held), (Some(r), Some(h)) if r > h))
+}
+
 /// One look: hold what may go, then send what is due.
 pub fn tick(db: &Db, credentials: &Credentials, now: DateTime<Utc>) -> Result<Run, SendError> {
     tick_with(db, credentials, &|_| None, &|_| Err(TeamsUnavailable::NotSignedIn), now)
@@ -1228,6 +1359,22 @@ pub fn tick_now(
     teams: &TeamsFor<'_>,
 ) -> Result<Run, SendError> {
     tick_with(db, credentials, slack, teams, Utc::now())
+}
+
+/// `tick` at the current time, with each Slack workspace's, Teams account's
+/// and Telegram account's connection (0.10.0-alpha.76).
+pub fn tick_every_now(
+    db: &Db,
+    credentials: &Credentials,
+    slack: &SlackFor<'_>,
+    teams: &TeamsFor<'_>,
+    telegram: &TelegramFor<'_>,
+) -> Result<Run, SendError> {
+    let now = Utc::now();
+    let held = hold_replies(db, now)?;
+    let mut run = send_due_every(db, credentials, now, &reply_in_sent(credentials), slack, teams, telegram)?;
+    run.held = held;
+    Ok(run)
 }
 
 /// Replies sent, or held to send, by themselves in the last day: what the
@@ -2616,5 +2763,262 @@ mod teams_tests {
         assert_eq!((run.sent, run.stopped), (0, 1));
         assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(ALREADY_IN_TEAMS));
         assert_eq!(w.chats.lock().unwrap()[0].messages.len(), 3, "nothing posted");
+    }
+}
+
+#[cfg(test)]
+mod telegram_tests {
+    //! Replying by itself in Telegram (0.10.0-alpha.76), against a Telegram
+    //! that keeps what it is told (`sending::telegram::fake`).
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::db::{NewDraft, SendStatus};
+    use crate::sending::telegram::fake;
+    use crate::sources::telegram_account::{account_id, check, new_source, Chat, Fetched, Me, Said, TelegramError};
+
+    fn credentials() -> Credentials {
+        Credentials::new(
+            Arc::new(|_: &str| None),
+            Arc::new(|_: &str, _: &str| Ok(())),
+            crate::sources::oauth::Provider::microsoft(),
+            None,
+        )
+    }
+
+    fn at(minutes: i64) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-26T09:00:00Z").unwrap().with_timezone(&Utc) + Duration::minutes(minutes)
+    }
+
+    fn me() -> Me {
+        Me { id: 7, name: "C Haynes".into(), username: Some("c".into()) }
+    }
+
+    fn said(id: i32, minutes: i64, from: Option<(i64, &str)>, text: &str) -> Said {
+        Said {
+            id,
+            at: at(minutes).timestamp(),
+            text: text.into(),
+            outgoing: from.is_none(),
+            from: from.map(|(id, name)| (id, name.to_string())),
+            ..Default::default()
+        }
+    }
+
+    fn chat(id: i64, direct: bool, messages: Vec<Said>) -> Chat {
+        let newest = messages.iter().map(|m| m.id).max().unwrap_or(0);
+        Chat {
+            id,
+            title: if direct { "Ada Lovelace".into() } else { "Sunday".into() },
+            direct,
+            kind: if direct { "user".into() } else { "chat".into() },
+            newest,
+            messages,
+            complete: true,
+        }
+    }
+
+    struct World {
+        db: Db,
+        source: String,
+        telegram: fake::Telegram,
+        direct: String,
+        group: String,
+    }
+
+    /// One Telegram account read once: a chat with Ada, where the user
+    /// wrote before and her question waits, and a group where Bob's does; a
+    /// draft prepared for each; replying by itself on for the account.
+    fn world() -> World {
+        let ada = vec![
+            said(1, -120, None, "lunch soon?"),
+            said(2, -10, Some((4242, "Ada Lovelace")), "the place by the river?"),
+        ];
+        let group = vec![said(5, -10, Some((5555, "Bob")), "dinner sunday, all of us?")];
+        let telegram = fake::Telegram::new(me(), vec![(4242, ada.clone()), (99, group.clone())]);
+        let db = Db::open_in_memory().unwrap();
+        db.set_user_identity("C Haynes").unwrap();
+        db.add_user_identifier(IdentifierKind::AccountId, &account_id(7)).unwrap();
+        db.set_setting(crate::db::WITHIN_DAYS_SETTING, &0).unwrap();
+        db.set_setting(crate::assist::SETTING, &true).unwrap();
+        let source = db.create_source(&new_source(&me()).unwrap()).unwrap().id;
+        let fetched = Fetched {
+            me: Some(me()),
+            chats: vec![chat(4242, true, ada), chat(99, false, group)],
+            ..Default::default()
+        };
+        check(&db, &source, Ok(fetched)).unwrap();
+        db.conn().execute("UPDATE messages SET imported_at = ?1", [fmt_rfc3339(at(-5))]).unwrap();
+        read_through(&db, &source, at(-5));
+        let direct = prepared(&db, "telegram:4242:2", "yes, the river place. 12:30?");
+        let group = prepared(&db, "telegram:99:5", "sunday works");
+        set_rules(&db, Rules { enabled: true, mailboxes: vec![source.clone()], ..Rules::default() }).unwrap();
+        let on = Rules { enabled_at: Some("2026-01-01T00:00:00.000Z".into()), ..rules(&db).unwrap() };
+        db.set_setting(SETTING, &on).unwrap();
+        World { db, source, telegram, direct, group }
+    }
+
+    fn prepared(db: &Db, external_id: &str, text: &str) -> String {
+        let (message, conversation, person, body): (String, String, Option<String>, String) = db
+            .conn()
+            .query_row(
+                "SELECT id, conversation_id, participant_id, body FROM messages WHERE external_id = ?1",
+                [external_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        let draft = db
+            .create_draft(&NewDraft {
+                participant_id: person,
+                conversation_id: Some(conversation),
+                channel: "chat".into(),
+                situation_id: None,
+                incoming_message: Some(body),
+                incoming_message_id: Some(message),
+                intent: None,
+                generated_text: text.into(),
+                provider: "mock".into(),
+                model: "m".into(),
+                context: json!({}),
+                prompt_hash: "h".into(),
+                evidence: json!({}),
+                alternative_to: None,
+            })
+            .unwrap();
+        db.mark_prepared(&draft.id).unwrap();
+        draft.id
+    }
+
+    fn read_through(db: &Db, source: &str, began: DateTime<Utc>) {
+        let mut config: TelegramSourceConfig =
+            serde_json::from_value(db.get_source(source).unwrap().unwrap().config).unwrap();
+        config.last_read_at = Some(fmt_rfc3339(began));
+        db.set_source_config(source, &serde_json::to_value(&config).unwrap()).unwrap();
+        db.set_source_status(source, "imported", None).unwrap();
+    }
+
+    fn send(w: &World, minutes: i64) -> Run {
+        let telegram = w.telegram.clone();
+        send_due_every(
+            &w.db,
+            &credentials(),
+            at(minutes),
+            &|_, _, _, _| Ok(false),
+            &|_| None,
+            &|_| Err(TeamsUnavailable::NotSignedIn),
+            &|_| Some(Box::new(telegram.clone()) as Box<dyn TelegramPost>),
+        )
+        .unwrap()
+    }
+
+    fn last_error(w: &World) -> Option<String> {
+        w.db.recent_outgoing(5).unwrap().remove(0).error
+    }
+
+    #[test]
+    fn a_one_to_one_chat_is_answered_by_itself_and_a_group_is_not() {
+        let w = world();
+        assert_eq!(why_not_by_itself(&w.db, &w.group, at(0)).unwrap().as_deref(), Some(GROUP));
+        assert_eq!(why_not_by_itself(&w.db, &w.direct, at(0)).unwrap(), None);
+        assert_eq!(hold_replies(&w.db, at(0)).unwrap(), 1);
+        let held = w.db.recent_outgoing(5).unwrap();
+        assert_eq!((held[0].status, held[0].from_address.as_str()), (SendStatus::Held, "telegram:user7"));
+
+        let early = send(&w, 20);
+        assert_eq!((early.sent, early.waiting_for_check.clone()), (0, vec![w.source.clone()]));
+        read_through(&w.db, &w.source, at(60 * 24));
+        let run = send(&w, 20);
+        assert_eq!(run.sent, 1, "{run:?}");
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert_eq!((entry.status, entry.message_id.as_str()), (SendStatus::Sent, "telegram:4242:3"));
+        let posted = w.telegram.said_in(4242).last().cloned().unwrap();
+        assert_eq!((posted.text.as_str(), posted.outgoing), ("yes, the river place. 12:30?", true));
+        let draft = w.db.get_draft(&w.direct).unwrap().unwrap();
+        assert_eq!(draft.context["sentOnItsOwn"], true);
+
+        // Read back by the next check: the same message, not the user's writing.
+        let back = Fetched { me: Some(me()), chats: vec![chat(4242, true, vec![posted])], ..Default::default() };
+        let next = check(&w.db, &w.source, Ok(back)).unwrap();
+        assert_eq!((next.inserted, next.duplicates), (0, 1));
+        let metadata: String =
+            w.db.conn()
+                .query_row("SELECT metadata_json FROM messages WHERE external_id = 'telegram:4242:3'", [], |r| r.get(0))
+                .unwrap();
+        assert!(metadata.contains(r#""sentOnItsOwn":true"#), "{metadata}");
+    }
+
+    #[test]
+    fn what_was_said_in_telegram_since_stops_it() {
+        // The user answered in Telegram itself, after the last check.
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        read_through(&w.db, &w.source, at(60 * 24));
+        w.telegram.chats.lock().unwrap()[0].1.push(said(3, -2, None, "on my way"));
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(last_error(&w).as_deref(), Some(ALREADY_IN_TELEGRAM));
+
+        // Ada wrote again: this answers what is no longer her last word.
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        read_through(&w.db, &w.source, at(60 * 24));
+        w.telegram.chats.lock().unwrap()[0].1.push(said(3, -2, Some((4242, "Ada Lovelace")), "or the cafe?"));
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(last_error(&w).as_deref(), Some(SAID_SINCE_TELEGRAM));
+        assert_eq!(w.telegram.said_in(4242).len(), 3, "nothing posted");
+    }
+
+    #[test]
+    fn not_knowing_what_was_said_waits_a_while_then_leaves_it_for_the_user() {
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        read_through(&w.db, &w.source, at(60 * 24));
+        *w.telegram.after_fails.lock().unwrap() = Some(TelegramError::Network("offline".into()));
+        let run = send(&w, DEFAULT_HOLD_MINUTES + 1);
+        assert_eq!((run.sent, run.stopped), (0, 0), "{run:?}");
+        *w.telegram.after_fails.lock().unwrap() = Some(TelegramError::Network("offline".into()));
+        let run = send(&w, DEFAULT_HOLD_MINUTES + SENT_PATIENCE_MINUTES + 2);
+        assert_eq!((run.sent, run.stopped), (0, 1), "{run:?}");
+        assert_eq!(last_error(&w).as_deref(), Some(TELEGRAM_UNKNOWN));
+
+        // Without a session to use, it waits for the user at once.
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        read_through(&w.db, &w.source, at(60 * 24));
+        let run = send_due_every(
+            &w.db,
+            &credentials(),
+            at(20),
+            &|_, _, _, _| Ok(false),
+            &|_| None,
+            &|_| Err(TeamsUnavailable::NotSignedIn),
+            &|_| None,
+        )
+        .unwrap();
+        assert_eq!(run.stopped, 1);
+        assert_eq!(last_error(&w).as_deref(), Some(NO_TELEGRAM));
+    }
+
+    #[test]
+    fn a_reply_sent_by_itself_read_back_first_is_known_by_its_id() {
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        let entry = w.db.recent_outgoing(5).unwrap().remove(0);
+        assert!(w.db.take_held_outgoing(&entry.id, &fmt_rfc3339(at(20))).unwrap());
+        w.db.outgoing_sent_as(&entry.id, "telegram:4242:9").unwrap();
+        let back = Fetched {
+            me: Some(me()),
+            chats: vec![chat(4242, true, vec![said(9, -1, None, "yes, the river place. 12:30?")])],
+            ..Default::default()
+        };
+        check(&w.db, &w.source, Ok(back)).unwrap();
+        let metadata: String =
+            w.db.conn()
+                .query_row("SELECT metadata_json FROM messages WHERE external_id = 'telegram:4242:9'", [], |r| r.get(0))
+                .unwrap();
+        assert!(metadata.contains(r#""sentOnItsOwn":true"#), "{metadata}");
     }
 }

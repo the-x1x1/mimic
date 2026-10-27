@@ -284,6 +284,8 @@ export const ipc = {
   signInTeamsAgain: (sourceId: string) => call("sign_in_teams_again", Source, { sourceId }),
   /** Try a Slack workspace as a check would, sending nothing: what was found. */
   testSlack: (sourceId: string) => call("test_slack", z_string, { sourceId }),
+  /** Try a Telegram account's session, sending nothing: what was found (0.10.0-alpha.76). */
+  testTelegram: (sourceId: string) => call("test_telegram", z_string, { sourceId }),
   /** Try a Teams account as a check would, sending nothing: what was found. */
   testTeams: (sourceId: string) => call("test_teams", z_string, { sourceId }),
   /** A connected workspace's token, given again for the same account. */

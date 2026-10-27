@@ -73,12 +73,12 @@ export function ReplyingForYou() {
   const mailboxes = (sources.data ?? []).filter((s) => s.connector === "imap");
   // Slack workspaces (0.10.0-alpha.64) and Teams accounts (.67).
   const chats = (sources.data ?? []).flatMap((s) =>
-    s.connector === "slack" || s.connector === "teams"
+    s.connector === "slack" || s.connector === "teams" || s.connector === "telegram_account"
       ? [
           {
             id: s.id,
             name: s.name,
-            connector: s.connector as "slack" | "teams",
+            connector: s.connector as "slack" | "teams" | "telegram_account",
             failing:
               s.status === "failed" ? (s.lastError?.message ?? "the last check failed") : null,
           },

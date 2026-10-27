@@ -12,6 +12,7 @@ use mimic_core::db::IdentifierKind;
 use mimic_core::providers::SecretStore;
 use mimic_core::sources::telegram_account::{
     self as telegram, AppCredentials, KeptSession, Live, LoginToken, Me, PasswordToken, Step, TelegramError,
+    TelegramPost,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -99,6 +100,52 @@ pub(crate) fn keep_session(state: &crate::AppState, source_id: &str, session: &K
     if let Ok(kept) = session.to_kept() {
         if let Err(e) = state.secrets.set(&telegram::secret_key(source_id), &kept) {
             tracing::warn!(target: "telegram", error = %e, "couldn't keep the session");
+        }
+    }
+}
+
+/// A connection through an account's session that, when it is dropped,
+/// keeps what Telegram changed in the session and closes (0.10.0-alpha.76).
+pub(crate) struct KeptPost {
+    post: Option<telegram::LivePost>,
+    state: SharedState,
+    source_id: String,
+}
+
+impl KeptPost {
+    pub(crate) fn start(
+        handle: tokio::runtime::Handle,
+        state: SharedState,
+        source_id: &str,
+        app: &AppCredentials,
+        session: KeptSession,
+    ) -> Self {
+        let post = telegram::LivePost::start(handle, app, Arc::new(session));
+        KeptPost { post: Some(post), state, source_id: source_id.to_string() }
+    }
+
+    fn live(&self) -> Result<&telegram::LivePost, TelegramError> {
+        self.post.as_ref().ok_or_else(|| TelegramError::Network("the connection was closed".into()))
+    }
+}
+
+impl TelegramPost for KeptPost {
+    fn me(&self) -> Result<Me, TelegramError> {
+        self.live()?.me()
+    }
+    fn post(&self, chat: &telegram::ChatRef, text: &str) -> Result<(i32, i64), telegram::PostError> {
+        self.live().map_err(telegram::PostError::NotSent)?.post(chat, text)
+    }
+    fn after(&self, chat: &telegram::ChatRef, after: i32) -> Result<Vec<telegram::Said>, TelegramError> {
+        self.live()?.after(chat, after)
+    }
+}
+
+impl Drop for KeptPost {
+    fn drop(&mut self) {
+        if let Some(post) = self.post.take() {
+            keep_session(&self.state, &self.source_id, post.session());
+            post.close();
         }
     }
 }
@@ -216,6 +263,37 @@ pub async fn telegram_sign_in_password(state: State<'_, SharedState>, password: 
             Err(telegram_error(e))
         }
     }
+}
+
+/// Try a connected account's session as a reply would use it, sending
+/// nothing (0.10.0-alpha.76): who it is, and that it is the account
+/// connected. A sentence saying what was found.
+#[tauri::command]
+pub async fn test_telegram(state: State<'_, SharedState>, source_id: String) -> CommandResult<String> {
+    let source = state
+        .db
+        .get_source(&source_id)?
+        .filter(|s| s.connector == telegram::CONNECTOR)
+        .ok_or_else(|| CommandError::new("not_found", "That account isn't connected any more."))?;
+    let config: telegram::TelegramSourceConfig = serde_json::from_value(source.config)
+        .map_err(|_| CommandError::new("unreadable", "I can't read its settings; remove it and connect it again."))?;
+    let (app, session) = session_for(&state, &source_id).ok_or_else(|| CommandError::new("telegram", NO_SESSION))?;
+    let shared = state.inner().clone();
+    let handle = tokio::runtime::Handle::current();
+    let me = tauri::async_runtime::spawn_blocking(move || {
+        let post = KeptPost::start(handle, shared, &source_id, &app, session);
+        post.me()
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", e.to_string()))?
+    .map_err(telegram_error)?;
+    if me.id != config.user_id {
+        return Err(CommandError::new(
+            "not_this",
+            format!("Its sign-in is {}'s, not the account you connected. Sign in again.", me.name),
+        ));
+    }
+    Ok(format!("Signed in to Telegram as {}. Nothing was sent.", me.name))
 }
 
 /// Stop a sign-in under way.

@@ -84,6 +84,7 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
     }
     let (db, credentials, secrets) = (state.db.clone(), state.mail_credentials.clone(), state.secrets.clone());
     let teams_access = state.teams_access.clone();
+    let (shared, handle) = (state.clone(), tokio::runtime::Handle::current());
     let ran = tauri::async_runtime::spawn_blocking(move || {
         // Each Slack workspace with its own token (0.10.0-alpha.66), each
         // Teams account with its own sign-in (0.10.0-alpha.68).
@@ -106,7 +107,15 @@ pub async fn look(app: &AppHandle, state: &SharedState) {
             })?;
             GraphApi::new(&token).map_err(|e| TeamsUnavailable::Failed(e.to_string()))
         };
-        autoreply::tick_now(&db, &credentials, &slack, &teams)
+        // Each Telegram account through its own session (0.10.0-alpha.76),
+        // kept again and closed once the reply is done with it.
+        let telegram = |source_id: &str| -> Option<Box<dyn mimic_core::sources::telegram_account::TelegramPost>> {
+            let (app, session) = crate::commands::telegram::session_for(&shared, source_id)?;
+            let post =
+                crate::commands::telegram::KeptPost::start(handle.clone(), shared.clone(), source_id, &app, session);
+            Some(Box::new(post))
+        };
+        autoreply::tick_every_now(&db, &credentials, &slack, &teams, &telegram)
     })
     .await;
     state.replying.store(false, Ordering::SeqCst);

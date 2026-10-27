@@ -15,6 +15,7 @@ const native = vi.hoisted(() => ({
   testMailboxSending: vi.fn(),
   testSlack: vi.fn(),
   testTeams: vi.fn(),
+  testTelegram: vi.fn(),
   providerState: vi.fn(),
   checkProvider: vi.fn(),
 }));
@@ -97,10 +98,12 @@ describe("replying for you, set up in one place", () => {
         status: "failed",
         lastError: { message: "Microsoft wants you to sign in to Teams again." },
       },
+      { ...mailbox("s9", "C Haynes (Telegram)"), connector: "telegram_account", channel: "chat" },
     ]);
     native.autoReply.mockResolvedValue(rules(false));
     native.testSlack.mockResolvedValue("Read your direct messages in Acme as c. Nothing was sent.");
     native.testTeams.mockRejectedValue(new Error("Microsoft wants you to sign in to Teams again."));
+    native.testTelegram.mockResolvedValue("Signed in to Telegram as C Haynes. Nothing was sent.");
     native.providerState.mockResolvedValue({ providers: [], active: null });
     renderIt();
     const list = await screen.findByRole("list", { name: "Replying for you" });
@@ -121,6 +124,13 @@ describe("replying for you, set up in one place", () => {
     expect(await within(found).findByText(/sign in to Teams again/)).toBeInTheDocument();
     expect(native.testSlack).toHaveBeenCalledWith("s7");
     expect(native.testTeams).toHaveBeenCalledWith("s8");
+    expect(await within(found).findByText(/Signed in to Telegram as C Haynes/)).toBeInTheDocument();
+    expect(native.testTelegram).toHaveBeenCalledWith("s9");
+    expect(
+      within(list).getByText(
+        "C Haynes (Telegram) is connected: replies to it go in as you, from here.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("says which mailboxes can send, and what runs by itself", async () => {

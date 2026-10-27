@@ -16,7 +16,7 @@ use crate::db::{Db, DbError, Draft, IdentifierInput, IdentifierKind, Message, Ne
 use crate::db::{ALREADY_DECIDED, MAY_HAVE_GONE as MAIL_MAY_HAVE_GONE};
 use crate::import::Importer;
 use crate::sources::telegram_account::{
-    self as telegram, account_id, ChatRef, PostError, TelegramPost, TelegramSourceConfig,
+    self as telegram, account_id, ChatRef, PostError, TelegramError, TelegramPost, TelegramSourceConfig,
 };
 use crate::sources::{AuthorRef, DiscoveredConversation, RawMessage};
 
@@ -192,6 +192,45 @@ pub(crate) fn post(
             db.outgoing_unsure(&entry.id, PANICKED)?;
             Err(SendError::ServiceUnsure(PANICKED.into()))
         }
+    }
+}
+
+/// The id Telegram gave a message read from it.
+fn message_number(incoming: &Message) -> Option<i32> {
+    let id = incoming
+        .metadata
+        .get("telegramMessage")
+        .and_then(Value::as_i64)
+        .or_else(|| incoming.external_id.rsplit(':').next().and_then(|id| id.parse().ok()))?;
+    i32::try_from(id).ok()
+}
+
+/// What people said in a chat after `incoming`, asked just before a reply
+/// goes by itself (0.10.0-alpha.76): `Ok(Err(why))` when Telegram refused
+/// to say, as it would again; `Err(why)` for a failure that may pass.
+/// Telegram's own lines and bots aren't anyone saying anything.
+pub(crate) fn said_since(
+    telegram: &dyn TelegramPost,
+    chat: &ChatRef,
+    incoming: &Message,
+) -> Result<Result<super::slack::Since, String>, String> {
+    use super::slack::Since;
+    let Some(after) = message_number(incoming) else {
+        return Ok(Err("I don't know which message this answers in Telegram".into()));
+    };
+    match telegram.after(chat, after) {
+        Ok(said) => {
+            let people: Vec<_> = said.iter().filter(|m| !m.notice && !m.bot).collect();
+            Ok(Ok(if people.iter().any(|m| m.outgoing) {
+                Since::You
+            } else if people.is_empty() {
+                Since::Nothing
+            } else {
+                Since::Them
+            }))
+        }
+        Err(e @ (TelegramError::Network(_) | TelegramError::RateLimited)) => Err(e.to_string()),
+        Err(e) => Ok(Err(e.to_string())),
     }
 }
 

@@ -24,8 +24,8 @@ export function CheckEverything({
   ready,
 }: {
   mailboxes: { id: string; name: string }[];
-  /** Slack workspaces and Teams accounts. */
-  chats?: { id: string; name: string; connector: "slack" | "teams" }[];
+  /** Slack workspaces, Teams accounts and Telegram accounts. */
+  chats?: { id: string; name: string; connector: "slack" | "teams" | "telegram_account" }[];
   /** Whether the mailboxes are known yet: until then, a check would leave them out. */
   ready: boolean;
 }) {
@@ -64,7 +64,11 @@ export function CheckEverything({
     for (const c of chats) {
       try {
         const said =
-          c.connector === "slack" ? await ipc.testSlack(c.id) : await ipc.testTeams(c.id);
+          c.connector === "slack"
+            ? await ipc.testSlack(c.id)
+            : c.connector === "teams"
+              ? await ipc.testTeams(c.id)
+              : await ipc.testTelegram(c.id);
         note({ what: `Reading ${c.name}`, ok: true, said });
       } catch (e) {
         note({ what: `Reading ${c.name}`, ok: false, said: (e as Error).message });
