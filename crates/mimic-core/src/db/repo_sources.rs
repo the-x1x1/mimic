@@ -99,6 +99,25 @@ impl Db {
         Ok(())
     }
 
+    /// Replace a source's configuration, but for one flag (`key`, a plain
+    /// name), which keeps what is stored now — the user's, set while a check
+    /// ran — in the same statement (0.10.0-alpha.95). Missing, it is false.
+    pub fn set_source_config_keeping_flag(&self, id: &str, config: &Value, key: &str) -> DbResult<()> {
+        if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(DbError::Invalid(format!("not a configuration key: {key:?}")));
+        }
+        let n = self.conn().execute(
+            "UPDATE sources SET config_json = json_set(?1, ?2,
+                 json(CASE WHEN json_extract(config_json, ?2) THEN 'true' ELSE 'false' END))
+             WHERE id = ?3",
+            params![config.to_string(), format!("$.{key}"), id],
+        )?;
+        if n == 0 {
+            return Err(DbError::NotFound(id.into()));
+        }
+        Ok(())
+    }
+
     /// Recount from `messages` rather than incrementing, so a re-import or a
     /// deletion can never leave the displayed count lying.
     pub fn refresh_source_counts(&self, id: &str) -> DbResult<i64> {
@@ -179,5 +198,22 @@ mod tests {
         assert!(db.set_source_config_key(&s.id, "a.b", &Value::Null).is_err(), "a path is not a key");
         assert!(db.set_source_config_key(&s.id, "", &Value::Null).is_err());
         assert!(matches!(db.set_source_config_key("nobody", "spaces", &Value::Null), Err(DbError::NotFound(_))));
+    }
+
+    #[test]
+    fn a_whole_configuration_written_back_keeps_the_flag_as_stored_now() {
+        let db = Db::open_in_memory().unwrap();
+        let s = db.create_source(&src("chat")).unwrap();
+        db.set_source_config(&s.id, &serde_json::json!({ "marks": {}, "spaces": true })).unwrap();
+        // A check that read `spaces: false` at its start writes its marks back.
+        let read_at_start = serde_json::json!({ "marks": { "spaces/A": "t2" }, "spaces": false });
+        db.set_source_config_keeping_flag(&s.id, &read_at_start, "spaces").unwrap();
+        let config = db.get_source(&s.id).unwrap().unwrap().config;
+        assert_eq!(config, serde_json::json!({ "marks": { "spaces/A": "t2" }, "spaces": true }));
+        // Never stored: false, as a boolean.
+        let t = db.create_source(&src("chat")).unwrap();
+        db.set_source_config_keeping_flag(&t.id, &serde_json::json!({ "marks": {} }), "spaces").unwrap();
+        assert_eq!(db.get_source(&t.id).unwrap().unwrap().config["spaces"], serde_json::json!(false));
+        assert!(db.set_source_config_keeping_flag(&t.id, &Value::Null, "a.b").is_err());
     }
 }

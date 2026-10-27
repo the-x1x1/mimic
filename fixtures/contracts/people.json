@@ -2,21 +2,21 @@
   "people": [
     {
       "participant": {
-        "id": "25445b42-4d0c-435e-bf17-4b48276d9bd5",
+        "id": "d94043fe-7275-439a-895e-8476c53448bf",
         "displayName": "Bob",
         "isSelf": false,
         "relationship": null,
         "notes": null,
         "identifiers": [
           {
-            "id": "8929fb08-375d-4cf5-8815-0ac840f01892",
+            "id": "95225356-92ae-484a-a490-6c660e547f48",
             "kind": "phone",
             "value": "+1 (555) 010-2222",
             "normalizedValue": "5550102222"
           }
         ],
-        "createdAt": "2026-10-27T00:19:47.844Z",
-        "updatedAt": "2026-10-27T00:19:47.844Z"
+        "createdAt": "2026-10-27T00:22:14.076Z",
+        "updatedAt": "2026-10-27T00:22:14.076Z"
       },
       "messageCount": 5,
       "sentByUser": 2,
@@ -29,21 +29,21 @@
     },
     {
       "participant": {
-        "id": "150b67a2-d73e-40c2-a595-96880b356826",
+        "id": "cc229496-c02a-4530-9f62-ca495a859d6f",
         "displayName": "Ada Lovelace",
         "isSelf": false,
         "relationship": null,
         "notes": null,
         "identifiers": [
           {
-            "id": "d79a52b2-3c84-4a81-9eb0-9a096d451a60",
+            "id": "10c05533-aa98-4774-8d7f-5b2ebbceb933",
             "kind": "email",
             "value": "ada@example.com",
             "normalizedValue": "ada@example.com"
           }
         ],
-        "createdAt": "2026-10-27T00:19:47.813Z",
-        "updatedAt": "2026-10-27T00:19:47.813Z"
+        "createdAt": "2026-10-27T00:22:14.043Z",
+        "updatedAt": "2026-10-27T00:22:14.043Z"
       },
       "messageCount": 40,
       "sentByUser": 20,
@@ -60,21 +60,21 @@
   "automatedSenders": [
     {
       "participant": {
-        "id": "1628bb65-a679-4e5e-a904-3ddc0d465d95",
+        "id": "550475d9-f68d-4895-8542-77dcd21db667",
         "displayName": "Brand Weekly",
         "isSelf": false,
         "relationship": null,
         "notes": null,
         "identifiers": [
           {
-            "id": "a8bdf295-b359-4e48-91e1-960c2fec36fd",
+            "id": "9e024b45-2e63-4dc2-b270-35b1865aa439",
             "kind": "email",
             "value": "news@brand.example",
             "normalizedValue": "news@brand.example"
           }
         ],
-        "createdAt": "2026-10-27T00:19:47.865Z",
-        "updatedAt": "2026-10-27T00:19:47.865Z"
+        "createdAt": "2026-10-27T00:22:14.099Z",
+        "updatedAt": "2026-10-27T00:22:14.099Z"
       },
       "messageCount": 1,
       "sentByUser": 0,

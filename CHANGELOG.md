@@ -2,6 +2,16 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.95] — 2026-10-26
+
+A thread from its start, and readings held to what they say.
+
+### Fixed
+
+- **A Google Chat thread you're mentioned in is read from its start.** When someone first @mentions you in a thread — or you first write there — Mimic now reads what was said in it before (up to a hundred messages), so the draft knows what "the above" is.
+- **Turning spaces off takes effect at once.** A check already running stops reading spaces from the next one on, and your choice is kept however the check ends.
+- **Fewer good readings of how you write turned away.** "Avoids formal greetings", "low formality", "rarely capitalizes, uses contractions" and the like are no longer taken as calling you formal or as saying you avoid contractions; a comma now ends a clause.
+
 ## [0.10.0-alpha.94] — 2026-10-26
 
 Sending from Microsoft 365 when SMTP is off.
