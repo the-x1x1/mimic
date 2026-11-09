@@ -72,56 +72,17 @@ export function PeoplePage() {
         </p>
       ) : null}
       {view && view.people.length > 0 ? (
-        <Card>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Person</th>
-                <th>How you know them</th>
-                <th className="num">Messages</th>
-                <th className="num">Yours</th>
-                <th>Channels</th>
-                <th>Last</th>
-                <th>Profile</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {view.people.map((p) => (
-                <tr key={p.participant.id}>
-                  <td>
-                    <Who p={p} />
-                  </td>
-                  <td>
-                    <Relationship p={p} onSave={setRelationship.mutate} />
-                  </td>
-                  <td className="num">{p.messageCount.toLocaleString()}</td>
-                  <td className="num">{p.sentByUser.toLocaleString()}</td>
-                  <td>{p.channels.map((c) => CHANNEL_LABELS[c as Channel] ?? c).join(", ")}</td>
-                  <td className="muted small">{formatRelative(p.lastMessageAt)}</td>
-                  <td>
-                    {p.hasRelationshipProfile ? (
-                      <Badge tone="success">Built</Badge>
-                    ) : (
-                      <Badge
-                        tone="neutral"
-                        title={`A profile needs at least ${MIN_SAMPLE} messages you wrote to them.`}
-                      >
-                        {countOf(Math.max(0, MIN_SAMPLE - p.sentByUser), "more")} needed
-                      </Badge>
-                    )}
-                  </td>
-                  <td>
-                    <div className="row gap-1">
-                      <ConversationsButton p={p} onOpen={setReading} />
-                      <DeleteButton p={p} onDelete={setDeleting} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+        <ul className="people" aria-label="People">
+          {view.people.map((p) => (
+            <PersonRow
+              key={p.participant.id}
+              p={p}
+              onSave={setRelationship.mutate}
+              onOpen={setReading}
+              onDelete={setDeleting}
+            />
+          ))}
+        </ul>
       ) : null}
       {showAutomated && view && view.automatedSendersTotal > 0 ? (
         <section id="automated-senders" aria-label="Senders I left out">
@@ -143,37 +104,18 @@ export function PeoplePage() {
                     ? ` Here are the ${senders.automatedSenders.length} most recent.`
                     : null}
                 </p>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Sender</th>
-                      <th>How you know them</th>
-                      <th className="num">Messages</th>
-                      <th>Last</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {senders.automatedSenders.map((p) => (
-                      <tr key={p.participant.id}>
-                        <td>
-                          <Who p={p} />
-                        </td>
-                        <td>
-                          <Relationship p={p} onSave={setRelationship.mutate} />
-                        </td>
-                        <td className="num">{p.messageCount.toLocaleString()}</td>
-                        <td className="muted small">{formatRelative(p.lastMessageAt)}</td>
-                        <td>
-                          <div className="row gap-1">
-                            <ConversationsButton p={p} onOpen={setReading} />
-                            <DeleteButton p={p} onDelete={setDeleting} />
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <ul className="people" aria-label="Senders I left out">
+                  {senders.automatedSenders.map((p) => (
+                    <PersonRow
+                      key={p.participant.id}
+                      p={p}
+                      sender
+                      onSave={setRelationship.mutate}
+                      onOpen={setReading}
+                      onDelete={setDeleting}
+                    />
+                  ))}
+                </ul>
               </>
             )}
           </Card>
@@ -199,6 +141,61 @@ export function PeoplePage() {
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * One person: who, what is known of them, how the user knows them, and what
+ * can be done. A row of its own rather than a table's: eight columns were
+ * wider than the drawer, and squeezed into it they broke every word.
+ */
+function PersonRow({
+  p,
+  sender = false,
+  onSave,
+  onOpen,
+  onDelete,
+}: {
+  p: ParticipantSummary;
+  /** One of the senders left out as automated: no profile is built for them. */
+  sender?: boolean;
+  onSave: (v: { id: string; relationship: string | null }) => void;
+  onOpen: (d: { id: string; name: string }) => void;
+  onDelete: (d: { id: string; name: string }) => void;
+}) {
+  const channels = p.channels.map((c) => CHANNEL_LABELS[c as Channel] ?? c).join(", ");
+  return (
+    <li className="person">
+      <div className="person__top">
+        <div className="person__who">
+          <Who p={p} />
+        </div>
+        <div className="person__actions">
+          <ConversationsButton p={p} onOpen={onOpen} />
+          <DeleteButton p={p} onDelete={onDelete} />
+        </div>
+      </div>
+      <div className="person__facts small">
+        <span>{countOf(p.messageCount, "message")}</span>
+        {sender ? null : <span>{p.sentByUser.toLocaleString()} from you</span>}
+        {channels ? <span>{channels}</span> : null}
+        <span className="muted">last {formatRelative(p.lastMessageAt)}</span>
+        {sender ? null : p.hasRelationshipProfile ? (
+          <Badge tone="success">Profile built</Badge>
+        ) : (
+          <Badge
+            tone="neutral"
+            title={`A profile needs at least ${MIN_SAMPLE} messages you wrote to them.`}
+          >
+            {countOf(Math.max(0, MIN_SAMPLE - p.sentByUser), "more", "more")} needed for a profile
+          </Badge>
+        )}
+      </div>
+      <label className="person__how">
+        <span className="muted small">How you know them</span>
+        <Relationship p={p} onSave={onSave} />
+      </label>
+    </li>
   );
 }
 
@@ -228,8 +225,8 @@ function Relationship({
 function Who({ p }: { p: ParticipantSummary }) {
   return (
     <>
-      <div>{p.participant.displayName}</div>
-      <div className="muted small mono">
+      <div className="person__name">{p.participant.displayName}</div>
+      <div className="muted small mono person__ids">
         {p.participant.identifiers.map((i) => i.value).join(", ")}
       </div>
     </>

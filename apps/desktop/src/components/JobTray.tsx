@@ -6,7 +6,9 @@ export function JobTray() {
   const jobs = useJobs(true);
   const cancel = useCancelJob();
   const active = jobs.data ?? [];
-  if (active.length === 0) return <div className="jobtray jobtray--idle">No background work</div>;
+  // Nothing running says nothing: the bar is for what is happening and where
+  // the writing is done, and "No background work" was one more thing to read.
+  if (active.length === 0) return null;
   return (
     <div className="jobtray">
       {active.slice(0, 3).map((j) => (

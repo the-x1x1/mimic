@@ -76,6 +76,9 @@ p {
 .gap-4 {
   gap: var(--space-4);
 }
+.gap-5 {
+  gap: var(--space-5);
+}
 .wrap {
   flex-wrap: wrap;
 }
@@ -335,7 +338,7 @@ a.ui-btn {
 .thread {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
   padding: var(--card-padding);
   border: var(--card-border);
   border-radius: var(--radius-md);
@@ -406,7 +409,7 @@ a.ui-btn {
 .thread__subject {
   font-size: var(--text-body-sm);
   color: var(--text-secondary);
-  margin-top: calc(-1 * var(--space-3));
+  margin-top: calc(-1 * var(--space-2));
 }
 /* The rest of the conversation either side of the message on screen: the
    same letters, read back in order, ruled off from it so it is plainly not
@@ -483,6 +486,18 @@ fieldset.message-filing {
   flex-direction: column;
   gap: var(--space-1);
   max-width: 28rem;
+}
+/* A reply asked for in a few words: the box and Write it on one line, and
+   Enter writes it. Under the box when the card is too narrow for both. */
+.thread__ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.thread__intent {
+  flex: 1 1 18rem;
+  min-width: 0;
 }
 .thread__tell {
   display: flex;
@@ -1109,9 +1124,10 @@ select option {
   border-bottom: 1px solid var(--border);
   vertical-align: top;
   user-select: text;
-  /* An address or a path breaks where it must instead of pushing the table
-     wider than the drawer. */
-  overflow-wrap: anywhere;
+  /* An address or a path breaks where it would overflow. Not `anywhere`: that
+     lowers every column's narrowest width, and a table with many columns was
+     squeezed until it broke every word (0.10.0-alpha.104, People). */
+  overflow-wrap: break-word;
 }
 
 /* Job tray */
@@ -1693,4 +1709,61 @@ select option {
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   align-items: end;
   gap: var(--space-3);
+}
+
+/* ----------------------------------------------------------- people ------ */
+
+/* Each person a row of their own, like a source under Your mail. */
+.people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+.person {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.person__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+.person__who {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.person__name {
+  font-weight: 600;
+}
+.person__ids {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.person__actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.person__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+}
+/* How the user knows them: a label and a box sized to a word or two. */
+.person__how {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.person__how input {
+  width: min(18rem, 100%);
 }

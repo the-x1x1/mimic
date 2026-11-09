@@ -2,6 +2,22 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.105] — 2026-11-08
+
+People fits the drawer, and asking for a reply takes a few words and Enter.
+
+### Changed
+
+- **People is a list of people, not a table.** Each person is a row of their own: who they are and their addresses, how many messages and how many from you, where you talk, when last, whether there's a profile for them yet, and how you know them — with Conversations and Delete beside them. Its eight columns didn't fit the drawer, and in alpha.104 they were squeezed until every word broke. The senders left out as automated are listed the same way.
+- **Asking for a reply is one line.** On a card I haven't written yet, the box for what you want to say and **Write it** sit side by side, and Enter writes it. Why I'm asking is one sentence instead of two. Cards are a little tighter.
+- **The bar says nothing when nothing is running**, instead of "No background work".
+
+### Fixed
+
+- A profile "16 mores needed" now reads "16 more needed for a profile".
+- Your mail had no space between its two parts; it has now.
+- A table cell breaks a long word only where it would overflow, so a table is never squeezed until every word breaks.
+
 ## [0.10.0-alpha.104] — 2026-11-08
 
 Your mail fits the drawer, and every box you type in looks like one.

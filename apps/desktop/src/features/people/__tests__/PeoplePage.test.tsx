@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ParticipantSummary, PeopleView } from "@mimic/contracts";
+import { MIN_SAMPLE, type ParticipantSummary, type PeopleView } from "@mimic/contracts";
 import { PeoplePage } from "../PeoplePage";
 
 // The real hooks and query client run; only the native call is replaced, so
@@ -67,6 +67,21 @@ function renderPage() {
 }
 
 describe("People lists people", () => {
+  it("gives each person a row: who, what I know of them, and how many more a profile needs", async () => {
+    renderPage();
+    const list = await screen.findByRole("list", { name: "People" });
+    const ada = within(list).getAllByRole("listitem")[0]!;
+    expect(within(ada).getByText("Ada")).toBeInTheDocument();
+    expect(within(ada).getByText("3 messages")).toBeInTheDocument();
+    expect(within(ada).getByText("1 from you")).toBeInTheDocument();
+    // "more", not "mores".
+    expect(
+      within(ada).getByText(`${MIN_SAMPLE - 1} more needed for a profile`),
+    ).toBeInTheDocument();
+    expect(within(ada).getByLabelText("How you know Ada")).toBeInTheDocument();
+    expect(within(ada).getByRole("button", { name: "Conversations with Ada" })).toBeInTheDocument();
+  });
+
   it("leaves the senders of automated mail out, says how many, and asks for them only when shown", async () => {
     renderPage();
     expect(await screen.findByText("Ada")).toBeInTheDocument();

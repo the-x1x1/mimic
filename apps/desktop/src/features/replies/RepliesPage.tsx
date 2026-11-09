@@ -490,20 +490,35 @@ export function Thread({
           }}
         />
       ) : (
-        <div className="thread__part thread__part--ruled">
+        <form
+          className="thread__part thread__part--ruled"
+          aria-label={`Write a reply to ${who}`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!generate.isPending) void writeDraft();
+          }}
+        >
           <div className="letter-label">I haven&rsquo;t written this one yet</div>
-          <p className="muted">
+          <p className="muted small">
             {thread.participant && !thread.hasRelationshipProfile
-              ? `I haven't seen enough of your mail with ${who.split(" ")[0]} to know how you write to them. Tell me roughly what you want to say and I'll put it in your words.`
-              : "Tell me roughly what you want to say, or leave it blank and I'll answer from what they asked."}
+              ? `I don't know yet how you write to ${who.split(" ")[0]}, so tell me roughly what to say and I'll put it in your words.`
+              : "Tell me roughly what to say, or leave it empty and I'll answer what they asked."}
           </p>
-          <input
-            type="text"
-            aria-label={`Roughly what you want to say to ${who}`}
-            placeholder="yes, happy to, same as last year"
-            value={intent}
-            onChange={(e) => setIntent(e.target.value)}
-          />
+          {/* The note and the button on one line, and Enter writes it: the
+              commonest reply is a few words and a keypress. */}
+          <div className="thread__ask">
+            <input
+              type="text"
+              className="thread__intent"
+              aria-label={`Roughly what you want to say to ${who}`}
+              placeholder="yes, happy to, same as last year"
+              value={intent}
+              onChange={(e) => setIntent(e.target.value)}
+            />
+            <Button type="submit" variant="primary" disabled={generate.isPending}>
+              {generate.isPending ? "Writing…" : "Write it"}
+            </Button>
+          </div>
           {situations.data ? (
             <label className="thread__kind">
               <span className="muted small">What kind of reply</span>
@@ -518,12 +533,7 @@ export function Thread({
               </select>
             </label>
           ) : null}
-          <div className="row gap-3">
-            <Button variant="primary" onClick={writeDraft} disabled={generate.isPending}>
-              {generate.isPending ? "Writing…" : "Write it"}
-            </Button>
-          </div>
-        </div>
+        </form>
       )}
       {generate.isError ? <InlineError>{(generate.error as Error).message}</InlineError> : null}
     </article>

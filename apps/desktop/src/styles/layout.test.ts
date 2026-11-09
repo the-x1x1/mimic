@@ -100,6 +100,8 @@ describe("nothing in the drawer or a dialog scrolls sideways", () => {
   it("breaks a long path or address instead of widening a dialog or a table", () => {
     expect(declarations(".dialog")).toMatch(/overflow-wrap:\s*anywhere/);
     expect(declarations(".dialog")).not.toMatch(/overflow:\s*auto/);
-    expect(declarations(".table td")).toMatch(/overflow-wrap:\s*anywhere/);
+    // In a table, break-word: `anywhere` lets a table squeeze its columns
+    // until every word breaks.
+    expect(declarations(".table td")).toMatch(/overflow-wrap:\s*break-word/);
   });
 });
