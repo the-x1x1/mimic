@@ -2,6 +2,20 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.110] — 2026-11-08
+
+A third read of the thank-you reading, and what it found.
+
+### Fixed
+
+- **Only a conversation you've written in can end in a thank-you.** A thread someone else began may carry its whole ask in the subject ("Please sign the NDA by Friday") with "Thanks!" as its body; it stays on your list.
+- **A P.S. under a signature is read**: "Thanks!" with "P.S. send me the deck by Friday" under the signature stays on your list.
+- **A sender's display name can't make a request into a name.** Someone who calls themselves "Call Me" doesn't turn "Thanks, Call Me" into a thank-you.
+- **"Thanks for …" is a thank-you only for a short list of things** — the update, your help, letting me know, the call, and the like. "Thank you for your prompt response" wants an answer, and "thanks for the reminder" means something's overdue; both stay on your list.
+- **"Done" and "Received" aren't thank-yous**: they usually mean it's your turn to look.
+- Every way of writing a question mark counts, and a symbol that isn't a thumbs-up, heart or smile ("▶", "‼") isn't a thank-you.
+- A very large message isn't read for a thank-you at all, so a huge one can't slow the home screen.
+
 ## [0.10.0-alpha.109] — 2026-11-08
 
 Tightened again after a re-review of alpha.108: a thank-you is read more carefully still.

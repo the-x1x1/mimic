@@ -215,7 +215,15 @@ fn unanswered_cte_in(scope: Scope) -> String {
          unanswered AS MATERIALIZED (
            SELECT d.conversation_id, d.message_id, d.automated, tm.mark AS mark,
                   COALESCE(julianday(dm.sent_at) < julianday(:cutoff), 0) AS quiet,
-                  CASE WHEN d.automated IS NULL AND mimic_closes(dm.body, {deciding_names}) AND NOT EXISTS (
+                  CASE WHEN d.automated IS NULL
+                         -- Only in a conversation the user has written in: a
+                         -- thread someone began, whose ask may be all in its
+                         -- subject, is never only a thank-you.
+                         AND EXISTS (
+                               SELECT 1 FROM messages s
+                               WHERE s.conversation_id = d.conversation_id AND s.direction = 'self'
+                                 AND {self_automated} IS NULL)
+                         AND mimic_closes(dm.body, {deciding_names}) AND NOT EXISTS (
                          SELECT 1 FROM messages o
                          WHERE o.conversation_id = d.conversation_id AND o.direction = 'other'
                            AND o.id <> dm.id
@@ -795,6 +803,16 @@ mod tests {
     }
 
     #[test]
+    fn a_thread_the_user_never_wrote_in_is_never_only_a_thank_you() {
+        // Its ask may be all in the subject ("Please sign the NDA by Friday").
+        let w = world();
+        w.thread("ada", &[("other", "Thanks!", None)]);
+        w.thread("grace", &[("self", "I'm away", Some("auto_reply")), ("other", "No rush, thanks!", None)]);
+        assert_eq!(w.waiting().len(), 2);
+        assert_eq!(w.db.count_left_out().unwrap().closed, 0);
+    }
+
+    #[test]
     fn the_users_own_automatic_reply_is_not_the_user_writing() {
         let w = world();
         // Ada asks, the user's vacation responder answers, Ada thanks it.
@@ -824,8 +842,8 @@ mod tests {
     #[test]
     fn a_thank_you_that_looks_automated_is_counted_as_automated_and_one_that_is_old_as_a_thank_you() {
         let w = world();
-        w.thread("shop", &[("other", "Thanks for your order!", Some("no_reply_address"))]);
-        w.thread("ada", &[("other", "Thanks!", None)]);
+        w.thread("shop", &[("self", "order", None), ("other", "Thanks for your order!", Some("no_reply_address"))]);
+        w.thread("ada", &[("self", "here you go", None), ("other", "Thanks!", None)]);
         // Any age: the dates above are early September.
         w.db.set_setting(WITHIN_DAYS_SETTING, &1).unwrap();
         assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 1, not_needed: 0, quiet: 0, closed: 1 });
@@ -842,10 +860,13 @@ mod tests {
         // Nothing is stored: the reading is made in SQL from the words, so a
         // thank-you imported by an older version is left out too.
         let w = world();
-        let convo = w.thread("ada", &[("other", "can you check slide 4?", None)]);
+        let convo = w.thread("ada", &[("self", "deck attached", None), ("other", "can you check slide 4?", None)]);
         assert_eq!(w.waiting().len(), 1);
         w.db.conn()
-            .execute("UPDATE messages SET body = 'Got it, thanks!' WHERE conversation_id = ?1", [&convo])
+            .execute(
+                "UPDATE messages SET body = 'Got it, thanks!' WHERE conversation_id = ?1 AND direction = 'other'",
+                [&convo],
+            )
             .unwrap();
         assert!(w.waiting().is_empty());
         assert_eq!(w.db.count_left_out().unwrap().closed, 1);

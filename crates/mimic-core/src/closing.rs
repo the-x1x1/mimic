@@ -97,8 +97,6 @@ const ACKS: &[&str] = &[
     "my pleasure",
     "anytime",
     "any time",
-    "received",
-    "done",
 ];
 
 /// The closing phrases that thank, and so may say what for.
@@ -152,57 +150,9 @@ const WISHES: &[&str] = &["good", "great", "nice", "lovely", "wonderful", "fun",
 const SPANS: &[&str] =
     &["one", "day", "weekend", "evening", "night", "week", "trip", "time", "flight", "holiday", "holidays"];
 
-/// A word that makes any part it is in more than a thank-you, even after
-/// "thanks for": a modal, a conjunction, a question word, a negation.
-const ASKING_ALWAYS: &[&str] = &[
-    "but",
-    "however",
-    "though",
-    "although",
-    "also",
-    "please",
-    "pls",
-    "plz",
-    "can",
-    "could",
-    "would",
-    "should",
-    "need",
-    "needs",
-    "lmk",
-    "when",
-    "if",
-    "still",
-    "question",
-    "wait",
-    "actually",
-    "unfortunately",
-    "sorry",
-    "not",
-    "don't",
-    "dont",
-    "didn't",
-    "didnt",
-    "can't",
-    "cant",
-    "won't",
-    "wont",
-    "never",
-    "why",
-    "how",
-    "what",
-    "where",
-    "who",
-    "which",
-    "asap",
-    "urgent",
-    "urgently",
-    "nothing",
-];
-
 /// A word anywhere in a fragment, or a line taken for a name, that makes it
-/// more than a thank-you: `ASKING_ALWAYS`, and words that ask for something
-/// done, which are nouns too ("thanks for the update" is a thank-you).
+/// more than a thank-you: modals, conjunctions, question words, negations,
+/// and words that ask for something done. A name is never one of these.
 const ASKING: &[&str] = &[
     "but",
     "however",
@@ -304,7 +254,93 @@ const SIGN_OFFS: &[&str] = &[
 ];
 
 /// Every way of writing a question mark, the pictographs among them.
-const QUESTION_MARKS: [char; 10] = ['?', '？', '¿', '؟', '﹖', '❓', '❔', '⁉', '‽', '⸮'];
+const QUESTION_MARKS: [char; 14] = ['?', '？', '¿', '؟', '﹖', '❓', '❔', '⁉', '‽', '⸮', '⁇', '⁈', '፧', '՞'];
+
+/// Bodies longer than this, in bytes, are never only closing, and are not
+/// read to find that out: every thread's deciding message is read on every
+/// load of the home screen.
+const MOST_BYTES: usize = 8 * 1024;
+
+/// What a thank-you may be for, word for word after "for": a closed list, so
+/// that "thank you for your prompt response" (a reply is wanted) and "thanks
+/// for the reminder" (something is overdue) are not thank-yous.
+const THANKED_FOR: &[&str] = &[
+    "the update",
+    "the updates",
+    "the info",
+    "the information",
+    "the help",
+    "your help",
+    "all your help",
+    "all the help",
+    "the call",
+    "the chat",
+    "the catch up",
+    "the catch-up",
+    "letting me know",
+    "the heads up",
+    "the heads-up",
+    "everything",
+    "that",
+    "this",
+    "the note",
+    "the reply",
+    "your reply",
+    "the quick reply",
+    "the quick response",
+    "getting back to me",
+    "sending",
+    "sending it",
+    "sending that",
+    "sending this",
+    "sending them",
+    "the link",
+    "the photos",
+    "the pics",
+    "the pictures",
+    "the invite",
+    "the invitation",
+    "having me",
+    "having us",
+    "the flowers",
+    "the gift",
+    "the card",
+    "dinner",
+    "lunch",
+    "coffee",
+    "tonight",
+    "today",
+    "yesterday",
+    "checking",
+    "checking in",
+    "asking",
+    "the kind words",
+    "your kind words",
+    "sharing",
+    "sharing it",
+    "sharing this",
+    "sharing that",
+    "the feedback",
+    "your feedback",
+    "the intro",
+    "the introduction",
+    "the recommendation",
+    "the tip",
+    "the advice",
+    "your advice",
+    "the lift",
+    "the ride",
+    "coming",
+    "doing this",
+    "doing that",
+    "sorting it",
+    "sorting that",
+    "sorting this",
+    "sorting that out",
+    "sorting it out",
+    "the help today",
+    "the help yesterday",
+];
 
 /// Words a greeting line starts with.
 const GREETINGS: &[&str] = &["hi", "hey", "hello", "dear", "hiya", "morning", "good morning", "evening", "yo"];
@@ -330,12 +366,18 @@ pub fn closes(body: &str) -> bool {
 struct Names(Vec<String>);
 
 impl Names {
+    /// Every word of `names` — but never a word that asks or a closing
+    /// phrase: a sender sets their own display name, and one called "Call
+    /// Me" would otherwise make "Thanks, Call Me" a thank-you.
     fn of(names: &str) -> Self {
         Names(
             names
                 .split(|c: char| !c.is_alphabetic() && c != '\'' && c != '-')
                 .filter(|w| w.chars().count() > 1)
                 .map(str::to_lowercase)
+                .filter(|w| {
+                    !ASKING.contains(&w.as_str()) && !ACKS.contains(&w.as_str()) && !GREETINGS.contains(&w.as_str())
+                })
                 .collect(),
         )
     }
@@ -413,6 +455,9 @@ enum Part {
 /// quoted lines, trimmed, empty ones dropped. `None` once it is plainly too
 /// long to be a thank-you, without reading the rest.
 fn own_lines(body: &str) -> Option<Vec<String>> {
+    if body.len() > MOST_BYTES {
+        return None;
+    }
     let mut out = Vec::new();
     let mut words = 0;
     let mut lines = body.lines();
@@ -425,7 +470,15 @@ fn own_lines(body: &str) -> Option<Vec<String>> {
         if line == "--" {
             // A signature. Nothing in it may ask: a chat message with a "--"
             // line is not an email's signature.
-            if lines.clone().any(|l| l.contains(QUESTION_MARKS) || asks(&words_of(l), ASKING_ALWAYS)) {
+            // A P.S. under it is the writer's own words, and anything that
+            // asks there asks.
+            if lines.clone().any(|l| {
+                let low = l.trim_start().to_lowercase();
+                l.contains(QUESTION_MARKS)
+                    || asks(&words_of(l), ASKING)
+                    || low.starts_with("p.s")
+                    || low.starts_with("ps")
+            }) {
                 return None;
             }
             break;
@@ -456,12 +509,21 @@ fn own_lines(body: &str) -> Option<Vec<String>> {
 /// punctuation round it taken off, beside the word as written.
 fn words_of(text: &str) -> Vec<(String, String)> {
     text.split_whitespace()
-        .map(|w| {
+        .filter_map(|w| {
             let bare = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '’');
-            (bare.to_string(), bare.to_lowercase().replace('’', "'"))
+            if !bare.is_empty() {
+                return Some((bare.to_string(), bare.to_lowercase().replace('’', "'")));
+            }
+            // A word of nothing but symbols: ordinary punctuation says
+            // nothing, but "▶" or "©" is a word, and not a thank-you.
+            (!w.chars().all(is_plain_punctuation)).then(|| (w.to_string(), w.to_string()))
         })
-        .filter(|(bare, _)| !bare.is_empty())
         .collect()
+}
+
+/// Punctuation that says nothing either way.
+fn is_plain_punctuation(c: char) -> bool {
+    ".!,;:-~'\"()…".contains(c)
 }
 
 /// Whether `words` (lower-cased) start with `phrase`, word for word; the
@@ -568,8 +630,13 @@ fn part(fragment: &str, after_comma: bool, names: &Names) -> Part {
     }
     let words = words_of(fragment);
     if words.is_empty() {
-        // Only punctuation: nothing either way.
-        return Part::Neutral;
+        // Only ordinary punctuation says nothing either way; any other
+        // symbol ("▶", "‼", "©") is not a thank-you.
+        return if fragment.chars().all(|c| c.is_whitespace() || is_plain_punctuation(c)) {
+            Part::Neutral
+        } else {
+            Part::Other
+        };
     }
     let lows: Vec<&str> = words.iter().map(|(_, l)| l.as_str()).collect();
     if PLEASANTRIES.contains(&lows.join(" ").as_str()) || is_wish(&lows) {
@@ -581,23 +648,10 @@ fn part(fragment: &str, after_comma: bool, names: &Names) -> Part {
         if let Some(n) = starts_with_phrase(&words, ack) {
             let rest = &words[n..];
             if rest.first().is_some_and(|(_, w)| w == "for") {
-                // "Thanks for the update", "thank you for letting me know": a
-                // few words of what the thanks is for, after a thank-you only.
-                // The word straight after "for", or after "for the", may be
-                // one that asks as a verb ("the update", "the call"); none
-                // after it may.
-                let what = &rest[1..];
-                let skip = if what.first().is_some_and(|(_, w)| matches!(w.as_str(), "the" | "your" | "this" | "that"))
-                {
-                    2
-                } else {
-                    1
-                };
-                if THANKS.contains(ack)
-                    && (2..=4).contains(&rest.len())
-                    && !asks(what, ASKING_ALWAYS)
-                    && !asks(&what[skip.min(what.len())..], ASKING)
-                {
+                // "Thanks for the update", "thank you for letting me know":
+                // what for, from a closed list, after a thank-you only.
+                let what: Vec<&str> = rest[1..].iter().map(|(_, w)| w.as_str()).collect();
+                if THANKS.contains(ack) && THANKED_FOR.contains(&what.join(" ").as_str()) {
                     return Part::Closing;
                 }
             } else if !asks(rest, ASKING) && rest_closes(rest, names) {
@@ -738,7 +792,7 @@ mod tests {
 
     #[test]
     fn a_thank_you_for_something_long_is_not_only_a_thank_you() {
-        assert!(closes("Thanks for sending the numbers"));
+        assert!(closes("Thanks for sending it"));
         assert!(!closes("Thanks for sending the revised numbers to the whole board yesterday"));
     }
 
@@ -889,5 +943,66 @@ mod tests {
         assert!(!closes("ok\n--\nalso can you resend the deck"));
         assert!(closes("Thanks!\nOn Monday Sam wrote:\n> here's the deck"));
         assert!(closes("Thanks!\n--\nMaya Chen\nNorthwind"));
+    }
+
+    #[test]
+    fn a_ps_under_a_signature_is_read() {
+        for body in [
+            "Thanks!\n-- \nMaya\nP.S. send me the deck by Friday",
+            "Thanks!\n--\nMaya\nPS - the invoice is overdue, pay by Friday",
+            "Thanks!\n--\nmeeting moved to 8am, bring the contract",
+            "Thanks\n--\nreview the attached and sign",
+        ] {
+            assert!(!closes(body), "{body:?} should not close");
+        }
+    }
+
+    #[test]
+    fn a_display_name_that_asks_is_not_a_name() {
+        for (body, names) in [
+            ("Thanks, Call Me", "Call Me Sam Rivera"),
+            ("Thanks\nCall me", "Call Me Sam Rivera"),
+            ("Thanks!\nsend me\nthe invoice", "Send Me The Invoice Sam Rivera"),
+            ("Thanks, Sign Here", "Sign Here"),
+            ("Hi Call Me,\nThanks", "Call Me"),
+            ("Ok, pay Bill", "Bill Pay"),
+            ("ok, will grant", "Will Grant"),
+        ] {
+            assert!(!super::closes_with(body, names), "{body:?} with {names:?} should not close");
+        }
+    }
+
+    #[test]
+    fn a_thank_you_that_asks_for_attention_or_brings_bad_news_does_not_close() {
+        for body in [
+            "Thank you for your prompt response.",
+            "Thank you for your prompt attention.",
+            "Thanks for your cooperation",
+            "Thank you for your consideration",
+            "Thanks for the reminder",
+            "Thanks for the overdue invoice",
+            "Thanks for the late payment",
+            "Thanks for the deadline Friday",
+            "Done.",
+            "Done 👍",
+            "Received.",
+        ] {
+            assert!(!closes(body), "{body:?} should not close");
+        }
+    }
+
+    #[test]
+    fn symbols_that_are_not_thank_yous_are_not() {
+        for body in ["ok ⁇", "ok⁈", "ok፧", "ok՞", "ok ▶", "ok ◻", "ok ‼", "ok ©", "ok ㊙", "ok #️⃣"]
+        {
+            assert!(!closes(body), "{body:?} should not close");
+        }
+        assert!(closes("ok!!"));
+        assert!(closes("thanks..."));
+    }
+
+    #[test]
+    fn a_large_body_is_not_read() {
+        assert!(!closes(&"thanks.".repeat(3_000)));
     }
 }
