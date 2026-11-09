@@ -131,7 +131,7 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
 
           {chosen ? (
             <>
-              <div className="row gap-2">
+              <div className="row gap-2 wrap">
                 {kinds.map((kind) => (
                   <Button key={kind} onClick={() => void pick(kind)}>
                     {location?.kind === kind
@@ -143,8 +143,8 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
                         : "Choose a file"}
                   </Button>
                 ))}
-                {location ? <span className="mono small">{location.path}</span> : null}
               </div>
+              {location ? <p className="mono small chosen-path">{location.path}</p> : null}
 
               {checking ? <p className="neutral">Reading it…</p> : null}
               {error ? <InlineError>{error}</InlineError> : null}
@@ -202,7 +202,7 @@ export function AddSourceDialog({ onClose }: { onClose: () => void }) {
                 </div>
               ) : null}
 
-              <div className="row gap-2">
+              <div className="field-row">
                 <Field label="Name" htmlFor="source-name">
                   <input id="source-name" value={name} onChange={(e) => setName(e.target.value)} />
                 </Field>

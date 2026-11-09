@@ -233,7 +233,10 @@ a.ui-btn {
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(560px, 92vw);
+  /* Wide enough for what the drawer holds: at 560px the Your mail page put its
+     title in a column one word wide beside six buttons, and People and Your
+     mail both scrolled sideways (0.10.0-alpha.104). */
+  width: min(780px, 92vw);
   display: flex;
   flex-direction: column;
   background: var(--surface-1);
@@ -583,10 +586,17 @@ fieldset.message-filing {
 
 .page-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-3) var(--space-4);
   margin-bottom: var(--space-5);
+}
+/* The title and what it says take the line; actions that don't fit beside
+   them go under them, rather than squeezing the words into a column. */
+.page-header__text {
+  flex: 1 1 22rem;
+  min-width: 0;
 }
 .page-header__title {
   font-size: var(--text-title);
@@ -594,9 +604,11 @@ fieldset.message-filing {
 .page-header__subtitle {
   color: var(--text-secondary);
   margin-top: 4px;
+  max-width: 62ch;
 }
 .page-header__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -801,10 +813,14 @@ fieldset.message-filing {
 /* Every text control looks the same whether or not the markup remembered to
    ask. A bare <select> renders as a white Windows combo box in a dark app,
    which is what it used to do on the dashboard, so the element selectors carry
-   the styling and `.input` is kept for the ones that set it explicitly. */
+   the styling and `.input` is kept for the ones that set it explicitly. An
+   <input> with no type is a text input too, and fourteen of them (your name in
+   setup and in Settings, a mailbox's server, Telegram's codes, how you know
+   someone) were left to the system until 0.10.0-alpha.104. */
 .input,
 select,
 textarea,
+input:not([type]),
 input[type="text"],
 input[type="search"],
 input[type="email"],
@@ -813,7 +829,7 @@ input[type="number"],
 input[type="password"] {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-control);
   background: var(--surface-2);
   color: var(--text-primary);
   font: inherit;
@@ -822,7 +838,6 @@ input[type="password"] {
 select:focus,
 textarea:focus,
 input:focus {
-  border-color: var(--border-strong);
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
@@ -977,7 +992,10 @@ select option {
   transform: translate(-50%, -50%);
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
-  overflow: auto;
+  overflow-y: auto;
+  /* A path, an address or a token breaks where it must; a dialog never
+     scrolls sideways. */
+  overflow-wrap: anywhere;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -989,6 +1007,14 @@ select option {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
+}
+/* Whatever a dialog holds is spaced the same: before 0.10.0-alpha.104 its parts
+   sat flush against each other, a field's label touching the line above it. */
+.dialog > * + * {
+  margin-top: var(--space-3);
+}
+.dialog > .dialog__title + * {
+  margin-top: var(--space-1);
 }
 
 .dialog__head {
@@ -1083,6 +1109,9 @@ select option {
   border-bottom: 1px solid var(--border);
   vertical-align: top;
   user-select: text;
+  /* An address or a path breaks where it must instead of pushing the table
+     wider than the drawer. */
+  overflow-wrap: anywhere;
 }
 
 /* Job tray */
@@ -1410,7 +1439,7 @@ select option {
 }
 
 .dialog__actions {
-  margin-top: var(--space-2);
+  margin-top: var(--space-4);
 }
 
 .danger {
@@ -1530,4 +1559,138 @@ select option {
   border-radius: var(--radius-sm);
   background: var(--surface-1);
   padding: var(--space-3);
+}
+
+/* --------------------------------------------------------- your mail ----- */
+
+/* A heading inside a drawer page: smaller than the page's own, larger than a
+   label, so a page with two parts reads as two parts. */
+.section-title {
+  font-size: var(--text-title-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+[data-theme="paper"] .section-title {
+  font-family: var(--font-serif);
+  font-weight: 500;
+}
+
+/* Each source is a row of its own: what it is and where from on the left, what
+   can be done with it on the right, how it stands underneath. */
+.sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+}
+.source__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+.source__what {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.source__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.source__where {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.source__actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.source__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+}
+/* Removing a source takes its messages with it, so it is asked about first,
+   in place, where the button was. */
+.source__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+/* The ways in: a choice among six, each saying what it reads. */
+.ways-in {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-2);
+}
+.way-in {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  text-align: left;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
+}
+.way-in:hover {
+  background: var(--surface-3);
+  border-color: var(--border-control);
+}
+.way-in:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.way-in__name {
+  font-weight: 600;
+}
+.way-in__note {
+  font-size: var(--text-body-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+/* A file is the way in that needs nothing else, so it is the one marked. */
+.way-in--first {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.way-in--first .way-in__name {
+  color: var(--accent-strong);
+}
+
+/* A chosen file's path, on a line of its own and broken where it has to be:
+   on one line it pushed the import dialog into scrolling sideways. */
+.chosen-path {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+/* Fields side by side line up on their boxes, whatever their labels do. */
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  align-items: end;
+  gap: var(--space-3);
 }

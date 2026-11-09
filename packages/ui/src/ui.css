@@ -52,11 +52,13 @@
   background: var(--surface-2);
   font-weight: 500;
   color: var(--text-primary);
-  border-color: var(--border);
+  /* A step stronger than a hairline, so "Choose a file" reads as something
+     to press and not as a label beside the field. */
+  border-color: var(--border-strong);
 }
 .ui-btn--secondary:hover:not(:disabled) {
   background: var(--surface-3);
-  border-color: var(--border-strong);
+  border-color: var(--border-control);
 }
 .ui-btn--ghost {
   background: transparent;
@@ -335,6 +337,11 @@
 }
 .ui-card__body {
   padding: var(--space-5);
+}
+/* A card's parts are spaced the same, so a note never sits flush under the
+   paragraph or the button it is about. */
+.ui-card__body > * + * {
+  margin-top: var(--space-3);
 }
 [data-theme="paper"] .ui-card__body {
   padding-left: 0;

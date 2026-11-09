@@ -23,6 +23,10 @@
   --surface-3: #eeebe4;
   --border: #e0ddd6;
   --border-strong: #c9c5bc;
+  /* The edge of something you type into. Hairlines are for separating; a box
+     you can type in has to be found, so its edge is at least 3:1 against the
+     surfaces it sits on (WCAG 1.4.11), in every theme. */
+  --border-control: #8a867d;
   --text-primary: #17171a;
   --text-secondary: #56565f;
   --text-muted: #6e6e77;
@@ -86,6 +90,7 @@
   --surface-3: #e4dccb;
   --border: #cfc5b0;
   --border-strong: #b9ae97;
+  --border-control: #857a64;
   --text-primary: #23201a;
   --text-secondary: #5c5648;
   --text-muted: #6b6354;
@@ -115,6 +120,7 @@
   --surface-3: #232228;
   --border: #2d2c33;
   --border-strong: #45444c;
+  --border-control: #6e6c76;
   --text-primary: #f2f1ee;
   --text-secondary: #a8a6b0;
   --text-muted: #9a98a2;

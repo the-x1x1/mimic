@@ -11,7 +11,7 @@ export function PageHeader({
 }) {
   return (
     <div className="page-header">
-      <div>
+      <div className="page-header__text">
         <h1 className="page-header__title">{title}</h1>
         {subtitle ? <p className="page-header__subtitle">{subtitle}</p> : null}
       </div>

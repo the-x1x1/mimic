@@ -2,6 +2,21 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.104] — 2026-11-08
+
+Your mail fits the drawer, and every box you type in looks like one.
+
+### Changed
+
+- **Your mail is laid out for the drawer it opens in.** Each place your messages come from is a row of its own — what it is, where it's read from, how it stands, how many messages — with Import again or Check now beside it. Below them, **Bring in more** offers a file first and then a mailbox, Slack, Teams, Google Chat and Telegram, each saying what it reads. Before, six buttons beside the title squeezed it into a column one word wide, and the table scrolled sideways.
+- **The drawer is wider**, and a page's buttons go under its title when they don't fit beside it. People no longer scrolls sideways; a long address breaks instead.
+- **Every box you type in has an edge you can see**, at 3:1 or better against what's behind it, in all three themes. Fourteen boxes — your name in setup and in Settings, a mailbox's server, Telegram's codes, how you know someone, the import's name — were drawn by Windows itself, small and unstyled; they now look like the rest.
+- **Dialogs and cards are spaced evenly.** A field's label no longer touches the line above it, and a note no longer sits flush under its button. A chosen file's path goes on a line of its own and wraps, rather than pushing the import dialog into scrolling sideways.
+
+### Fixed
+
+- **Removing a source asks first.** Remove took the source and every message read from it at one click. It now says what goes — the messages, what was worked out from them, and for a connected account its sign-in — that it can't be undone, and that a file itself isn't touched, with **Remove it** and **Keep it**.
+
 ## [0.10.0-alpha.103] — 2026-11-08
 
 Replies in a thread inside a Slack direct message.

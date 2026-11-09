@@ -67,14 +67,39 @@ describe("a screen that can outgrow the window scrolls", () => {
 
 describe("no control falls back to the system's own styling", () => {
   it("styles select, textarea and text inputs together with .input", () => {
-    for (const el of ["select", "textarea", 'input[type="text"]']) {
+    // An <input> with no type is a text input; fourteen of them were left to
+    // the system because the rule named only [type="text"].
+    for (const el of ["select", "textarea", 'input[type="text"]', "input:not([type])"]) {
       expect(declarations(el), `${el} is left to the system`).toMatch(/border:/);
     }
+  });
+
+  it("draws a text control's edge in the colour made to be seen", () => {
+    expect(declarations("textarea")).toMatch(/border:\s*1px solid var\(--border-control\)/);
   });
 
   it("draws the drop-down arrow back after removing the system one", () => {
     const select = declarations("select");
     expect(select).toMatch(/appearance:\s*none/);
     expect(select).toMatch(/background-image:/);
+  });
+});
+
+describe("nothing in the drawer or a dialog scrolls sideways", () => {
+  it("makes the drawer wide enough for a page with a table in it", () => {
+    const width = /width:\s*min\((\d+)px/.exec(declarations(".drawer"));
+    expect(width, "the drawer has no min() width").not.toBeNull();
+    expect(Number(width![1])).toBeGreaterThanOrEqual(720);
+  });
+
+  it("lets a page's actions go under its title rather than squeeze it", () => {
+    expect(declarations(".page-header")).toMatch(/flex-wrap:\s*wrap/);
+    expect(declarations(".page-header__text")).toMatch(/min-width:\s*0/);
+  });
+
+  it("breaks a long path or address instead of widening a dialog or a table", () => {
+    expect(declarations(".dialog")).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(declarations(".dialog")).not.toMatch(/overflow:\s*auto/);
+    expect(declarations(".table td")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 });
