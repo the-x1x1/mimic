@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.112] — 2026-11-08
+
+Settings and the README say what counts as waiting now.
+
+### Changed
+
+- **Settings → What counts as waiting** says that a conversation you've written in, where all they've said since is a thank-you, an okay or a thumbs-up, is left out too — never when any of it asks something — and that It needs a reply puts one back. The README's list says so as well.
+
 ## [0.10.0-alpha.111] — 2026-11-08
 
 Seen in a running build: "Thanks for the notes!" stayed on the list.

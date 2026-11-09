@@ -349,6 +349,11 @@ function WaitingSection() {
         more, so I leave out threads whose last message is older than this. I count them and show
         them when you ask, and anything you said needs a reply stays, whatever its age.
       </p>
+      <p className="neutral">
+        I also leave out a conversation you&rsquo;ve written in when all they&rsquo;ve said since is
+        a thank-you, an okay or a thumbs-up &mdash; never when any of it asks something. Those are
+        counted and shown too, and &ldquo;It needs a reply&rdquo; puts one back.
+      </p>
       <label className="row gap-2">
         <span>Waiting means the last message is from</span>
         <select
