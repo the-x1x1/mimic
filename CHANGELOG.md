@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.103] — 2026-11-08
+
+Replies in a thread inside a Slack direct message.
+
+### Added
+
+- **Slack threads in direct and group messages are read.** Someone answering in a thread inside a direct or group message wasn't seen: Slack keeps those replies out of the conversation itself. Each thread is now a conversation of its own, "Thread with Ada Lovelace: can you send the deck?", so what's said in it decides whether it's waiting on you. It's followed until it's been quiet for two weeks. A reply to it goes into the thread, approved by you or on its own in a direct message under the same rules. A draft for it is shown the message the thread began with. A reply first read only after a check that read everything had passed it by, as when catching up, is never answered on its own. A thread begun on a message more than four days old, and never seen with replies before then, isn't seen.
+
 ## [0.10.0-alpha.102] — 2026-10-26
 
 From someone in People to what was said with them.

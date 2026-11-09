@@ -25,10 +25,10 @@ export function ConnectSlackDialog({ onClose }: { onClose: () => void }) {
         <Dialog.Content className="dialog dialog--wide">
           <Dialog.Title className="dialog__title">Connect Slack</Dialog.Title>
           <Dialog.Description className="neutral">
-            I&rsquo;ll read your direct messages and group messages in one workspace, and check for
-            new ones as often as I check your mail. Once it&rsquo;s connected you can have me read
-            the channels you&rsquo;re in too, for what&rsquo;s said to you. Reading changes nothing
-            in Slack.
+            I&rsquo;ll read your direct messages and group messages in one workspace, replies in
+            their threads too, and check for new ones as often as I check your mail. Once it&rsquo;s
+            connected you can have me read the channels you&rsquo;re in too, for what&rsquo;s said
+            to you. Reading changes nothing in Slack.
           </Dialog.Description>
 
           <ol className="small stack gap-1">

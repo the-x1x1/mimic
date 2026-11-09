@@ -31,6 +31,24 @@
 //! the user scopes `channels:history`, `channels:read`, `groups:history` and
 //! `groups:read`; a token without them reads direct messages as before and
 //! says what to add (`channels_missing`).
+//!
+//! Replies in a thread inside a direct or group message aren't in the
+//! conversation's history either (0.10.0-alpha.103). A conversation with a
+//! word in it in the last `DIRECT_THREAD_DAYS` is read again from that far
+//! back, and each message there whose thread has replies not read yet
+//! (`latest_reply` past `direct_threads`) has them asked for
+//! (`conversations.replies`). Each thread is a conversation of its own, as a
+//! channel's is — "Thread with <who>: <how it began>" — with its replies,
+//! each `slackThread`, so whether it waits on the user is decided by what
+//! was said in it, and a reply to one goes into it. Its first message stays
+//! in the conversation it was written in (a draft is shown it,
+//! `thread_start`), and its people are the thread's too. A thread is
+//! followed until quiet `FOLLOW_DAYS`: one begun before the window is asked
+//! on its own, the longest unasked first, at most `MOST_DIRECT_THREADS` asks
+//! a check in all. A reply that was there to read when its thread was last
+//! asked — or, never asked, when the last check that read everything began
+//! — is `readLate`, and nothing replies to it by itself. A thread begun
+//! before the window and never seen with replies isn't seen.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
@@ -67,6 +85,18 @@ const THREAD_MOST: usize = 200;
 const MOST_THREADS: usize = 30;
 /// A followed thread with no word in it for this many days is let go.
 const FOLLOW_DAYS: i64 = 14;
+/// How far back a direct or group message with a word in it since is read
+/// again, for the threads its messages were given (0.10.0-alpha.103): long
+/// enough that one begun on Friday's message after a weekend is seen.
+const DIRECT_THREAD_DAYS: i64 = 4;
+/// Threads in direct and group messages asked for their replies in one
+/// check at most; the rest are asked on the next.
+const MOST_DIRECT_THREADS: usize = 30;
+/// How much earlier than a thread was last asked (or, never asked, than the
+/// last check that read everything began) a reply must be to have been
+/// there to read then — this computer's clock and Slack's may differ a
+/// little.
+const LATE_MARGIN_SECS: i64 = 120;
 /// When Slack asks a check to slow down (429 with `Retry-After`), it waits
 /// as long as asked, up to this, and asks again — at most `WAITS` times a
 /// request (0.10.0-alpha.70) — rather than stopping: a workspace with more
@@ -291,6 +321,20 @@ impl SlackApi {
         oldest: Option<&str>,
         most: usize,
     ) -> Result<Vec<Value>, SlackError> {
+        self.replies_of(channel, thread, oldest, most, "read your channels")
+    }
+
+    /// `replies`, saying what it was for when a scope is missing: a
+    /// channel's thread, or one in a direct or group message
+    /// (0.10.0-alpha.103).
+    pub fn replies_of(
+        &self,
+        channel: &str,
+        thread: &str,
+        oldest: Option<&str>,
+        most: usize,
+        what: &'static str,
+    ) -> Result<Vec<Value>, SlackError> {
         let mut out = Vec::new();
         let mut cursor = String::new();
         for _ in 0..MAX_PAGES {
@@ -301,7 +345,7 @@ impl SlackApi {
             if !cursor.is_empty() {
                 params.push(("cursor", cursor.as_str()));
             }
-            let v = self.call("conversations.replies", &params, "read your channels")?;
+            let v = self.call("conversations.replies", &params, what)?;
             out.extend(v.get("messages").and_then(Value::as_array).cloned().unwrap_or_default());
             cursor = next_cursor(&v);
             if v.get("has_more").and_then(Value::as_bool) != Some(true) || cursor.is_empty() || out.len() >= most {
@@ -530,7 +574,7 @@ pub fn readable(text: &str, name_of: &dyn Fn(&str) -> String) -> String {
 }
 
 /// Slack's `ts` (`1700000000.000100`) as (seconds, microseconds), for order.
-fn ts_key(ts: &str) -> (u64, u64) {
+pub(crate) fn ts_key(ts: &str) -> (u64, u64) {
     let (secs, micros) = ts.split_once('.').unwrap_or((ts, "0"));
     (secs.parse().unwrap_or(0), micros.parse().unwrap_or(0))
 }
@@ -585,6 +629,15 @@ pub struct SlackSourceConfig {
     /// first, so every one gets its turn.
     #[serde(default)]
     pub thread_asked: BTreeMap<String, i64>,
+    /// The threads in direct and group messages whose replies have been
+    /// read (0.10.0-alpha.103), as `<conversation>/<thread ts>`, each with
+    /// the last of them read; let go of once their first message is older
+    /// than `DIRECT_THREAD_DAYS`.
+    #[serde(default)]
+    pub direct_threads: BTreeMap<String, String>,
+    /// When each of those was last asked about, in seconds since 1970.
+    #[serde(default)]
+    pub direct_thread_asked: BTreeMap<String, i64>,
 }
 
 impl SlackSourceConfig {
@@ -674,6 +727,13 @@ pub struct SlackSummary {
     /// Slack asked to slow down, or wasn't reached, before every channel and
     /// followed thread was read; the rest are read on the next check.
     pub channels_partial: bool,
+    /// Threads in direct and group messages asked for their replies
+    /// (0.10.0-alpha.103).
+    pub direct_threads: usize,
+    /// Threads in direct and group messages known to have replies this check
+    /// didn't read (more than a check asks, or than one ask gives): read on
+    /// the next, and until then nothing reads as read through.
+    pub direct_threads_left: bool,
 }
 
 /// Check a workspace: read what is new in each direct and group message,
@@ -699,7 +759,7 @@ pub fn sync(
     let began = crate::ids::now_rfc3339();
     let result = sync_inner(db, source_id, &mut config, api, should_stop);
     config.last_checked_at = Some(crate::ids::now_rfc3339());
-    if matches!(&result, Ok(s) if !s.partial) {
+    if matches!(&result, Ok(s) if !s.partial && !s.direct_threads_left) {
         config.last_read_at = Some(began);
     }
     // Reading channels as the user has it now, whatever this check found.
@@ -747,16 +807,36 @@ fn sync_inner(
     let mut people: HashMap<String, Person> = HashMap::new();
     let mut summary = SlackSummary::default();
     let (mut tried, mut last_refusal) = (0usize, String::new());
+    // Read again from here, for the threads begun since (0.10.0-alpha.103);
+    // a followed thread is let go of once quiet `FOLLOW_DAYS`, or once its
+    // conversation isn't the user's any more.
+    let now = Utc::now().timestamp();
+    let window = format!("{}.000000", now - DIRECT_THREAD_DAYS * 86_400);
+    let listed: HashSet<&str> = conversations.iter().map(|c| c.id.as_str()).collect();
+    config.direct_threads.retain(|key, last| {
+        key.split_once('/').is_some_and(|(c, _)| listed.contains(c))
+            && now - i64::try_from(ts_key(last).0).unwrap_or(0) <= FOLLOW_DAYS * 86_400
+    });
+    config.direct_thread_asked.retain(|key, _| config.direct_threads.contains_key(key));
+    let mut asks: Vec<DirectThread> = Vec::new();
+    let mut taken: Vec<(String, String)> = Vec::new();
     let mut importer = Importer::begin(db, source_id)?;
-    'conversations: for conversation in conversations {
+    'conversations: for conversation in &conversations {
         if should_stop() {
             importer.abandon();
             return Err(SlackError::Canceled);
         }
         let mark = config.marks.get(&conversation.id).cloned();
         let most = if mark.is_some() { MOST_NEW } else { FIRST_READ };
+        // A conversation with a word in it since `window` is read from there,
+        // so the threads its messages were given since are seen; what is new
+        // is what comes after its mark.
+        let from = match mark.as_deref() {
+            Some(m) if ts_key(m) > ts_key(&window) => Some(window.as_str()),
+            m => m,
+        };
         tried += 1;
-        let raw = match api.history(&conversation.id, mark.as_deref(), most) {
+        let raw = match api.history(&conversation.id, from, most) {
             Ok((raw, complete)) => {
                 // More new than a check reads: what is between is passed over.
                 if mark.is_some() && !complete {
@@ -786,15 +866,45 @@ fn sync_inner(
                 continue;
             }
         };
-        let Some(newest) = raw.iter().filter_map(|m| m.get("ts").and_then(Value::as_str)).max_by_key(|ts| ts_key(ts))
+        // Its threads begun since `window` with replies not read yet, asked
+        // for them once every conversation is read (0.10.0-alpha.103).
+        for m in &raw {
+            let Some(thread) = m.get("ts").and_then(Value::as_str) else { continue };
+            if m.get("reply_count").and_then(Value::as_u64).unwrap_or(0) == 0 || ts_key(thread) <= ts_key(&window) {
+                continue;
+            }
+            let since = config.direct_threads.get(&thread_key(&conversation.id, thread)).cloned();
+            let latest = m.get("latest_reply").and_then(Value::as_str).map(str::to_string);
+            if matches!((&latest, &since), (Some(latest), Some(since)) if ts_key(latest) <= ts_key(since)) {
+                continue;
+            }
+            asks.push(DirectThread {
+                conversation: conversation.clone(),
+                thread: thread.to_string(),
+                since,
+                latest,
+                first: Some(m.clone()),
+            });
+        }
+        let fresh: Vec<&Value> = raw
+            .iter()
+            .filter(|m| {
+                mark.as_deref()
+                    .is_none_or(|mark| m.get("ts").and_then(Value::as_str).is_some_and(|ts| ts_key(ts) > ts_key(mark)))
+            })
+            .collect();
+        let Some(newest) = fresh
+            .iter()
+            .filter_map(|m| m.get("ts").and_then(Value::as_str))
+            .max_by_key(|ts| ts_key(ts))
+            .map(str::to_string)
         else {
             continue;
         };
-        let newest = newest.to_string();
-        summary.fetched += raw.len();
+        summary.fetched += fresh.len();
         // Everyone who wrote, or was named, by name.
         let mut wanted: Vec<String> = conversation.other.iter().cloned().collect();
-        for m in &raw {
+        for m in &fresh {
             wanted.extend(m.get("user").and_then(Value::as_str).map(str::to_string));
             wanted.extend(mentioned(m.get("text").and_then(Value::as_str).unwrap_or("")));
         }
@@ -811,7 +921,7 @@ fn sync_inner(
         }
         let name_of = |id: &str| people.get(id).map_or_else(|| id.to_string(), |p| p.name.clone());
         let mut messages: Vec<(String, RawMessage)> = Vec::new();
-        for m in &raw {
+        for m in &fresh {
             match as_raw(m, &config.team_id, &conversation.id, &people, conversation.other.is_some(), None) {
                 Some(found) => messages.push(found),
                 None => summary.left_out += 1,
@@ -855,6 +965,22 @@ fn sync_inner(
         importer.abandon();
         return Err(SlackError::Refused(format!("it gave none of your conversations ({last_refusal})")));
     }
+    // The threads in them, once every conversation is read, and not after
+    // Slack asked to slow down (0.10.0-alpha.103).
+    if !summary.partial {
+        let read = DirectThreadReading {
+            api,
+            importer: &mut importer,
+            taken: &mut taken,
+            people: &mut people,
+            summary: &mut summary,
+        }
+        .read(config, asks, &conversations, &window, should_stop);
+        if let Err(e) = read {
+            importer.abandon();
+            return Err(e);
+        }
+    }
     // Channels, once the direct messages are in, and only while asked for
     // (0.10.0-alpha.99); not after Slack asked to slow down.
     if !summary.partial && reading_channels(db, source_id) {
@@ -866,6 +992,11 @@ fn sync_inner(
         }
     }
     let imported = importer.finish()?;
+    // A thread's people are its conversation's (0.10.0-alpha.103): someone
+    // who only began it is still in it.
+    for (conversation, thread) in &taken {
+        db.link_participants_of(source_id, conversation, thread)?;
+    }
     summary.inserted = imported.inserted;
     summary.duplicates = imported.duplicates;
     summary.from_self = imported.from_self;
@@ -953,7 +1084,7 @@ fn as_raw(
 /// Whether a message is a person's own, as `as_raw` keeps it: not a bot's,
 /// and not a notice — a join, an edit shown as its own message — though a
 /// thread broadcast or a shared file is.
-fn by_a_person(m: &Value) -> bool {
+pub(crate) fn by_a_person(m: &Value) -> bool {
     m.get("user").and_then(Value::as_str).is_some()
         && m.get("bot_id").is_none()
         && m.get("subtype").and_then(Value::as_str).is_none_or(|s| s == "thread_broadcast" || s == "file_share")
@@ -979,6 +1110,252 @@ fn names(m: &Value, user: &str) -> bool {
 /// The newest of some messages' `ts`.
 fn newest_ts(raw: &[Value]) -> Option<String> {
     raw.iter().filter_map(|m| m.get("ts").and_then(Value::as_str)).max_by_key(|ts| ts_key(ts)).map(str::to_string)
+}
+
+/// A thread in a direct or group message to ask for its replies
+/// (0.10.0-alpha.103).
+struct DirectThread {
+    conversation: Conversation,
+    thread: String,
+    /// The last of its replies read, when some were.
+    since: Option<String>,
+    /// Its newest reply, as its first message says.
+    latest: Option<String>,
+    /// Its first message, when it was read with its conversation: a thread
+    /// known to have replies not read yet.
+    first: Option<Value>,
+}
+
+/// How a thread is named by what it began with: its first line, at most 60
+/// characters.
+fn snippet(text: &str) -> String {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    if line.chars().count() <= 60 {
+        return line.to_string();
+    }
+    let mut out: String = line.chars().take(60).collect::<String>().trim_end().to_string();
+    out.push('…');
+    out
+}
+
+/// One check's reading of the threads in direct and group messages
+/// (0.10.0-alpha.103): what it reads with, and what it found.
+struct DirectThreadReading<'r, 'i> {
+    api: &'r SlackApi,
+    importer: &'r mut Importer<'i>,
+    /// Each thread conversation taken into, with the conversation it is in:
+    /// its people are the thread's too, once the import is done.
+    taken: &'r mut Vec<(String, String)>,
+    people: &'r mut HashMap<String, Person>,
+    summary: &'r mut SlackSummary,
+}
+
+impl DirectThreadReading<'_, '_> {
+    /// Each thread in `asks`, then the followed ones begun before `window`
+    /// (no history read says what was said in them since), the longest
+    /// unasked first; `MOST_DIRECT_THREADS` in all. Each thread's replies
+    /// after the last read are imported as a conversation of its own. An
+    /// error is one every request would meet.
+    fn read(
+        self,
+        config: &mut SlackSourceConfig,
+        mut asks: Vec<DirectThread>,
+        conversations: &[Conversation],
+        window: &str,
+        should_stop: &dyn Fn() -> bool,
+    ) -> Result<(), SlackError> {
+        let now = Utc::now().timestamp();
+        // A thread never asked before: what was there before the last check
+        // that read everything began was there to be read then.
+        let read_from = config
+            .last_read_at
+            .as_deref()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| t.timestamp());
+        let asked: HashSet<String> = asks.iter().map(|a| thread_key(&a.conversation.id, &a.thread)).collect();
+        let mut quiet: Vec<(String, String)> = config
+            .direct_threads
+            .iter()
+            .filter(|(key, _)| {
+                !asked.contains(*key) && key.rsplit_once('/').is_some_and(|(_, t)| ts_key(t) <= ts_key(window))
+            })
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        quiet.sort_by_key(|(key, last)| {
+            (config.direct_thread_asked.get(key).copied().unwrap_or(0), std::cmp::Reverse(ts_key(last)))
+        });
+        for (key, since) in quiet {
+            let Some((id, thread)) = key.split_once('/') else { continue };
+            let Some(conversation) = conversations.iter().find(|c| c.id == id) else { continue };
+            asks.push(DirectThread {
+                conversation: conversation.clone(),
+                thread: thread.to_string(),
+                since: Some(since),
+                latest: None,
+                first: None,
+            });
+        }
+        for (i, ask) in asks.into_iter().enumerate() {
+            if should_stop() {
+                return Err(SlackError::Canceled);
+            }
+            if i >= MOST_DIRECT_THREADS {
+                // Known to have replies not read: the next check reads them.
+                if ask.first.is_some() {
+                    self.summary.direct_threads_left = true;
+                }
+                continue;
+            }
+            let key = thread_key(&ask.conversation.id, &ask.thread);
+            self.summary.direct_threads += 1;
+            // A reply from before this thread was last asked was there to read
+            // then: read only now, it is late.
+            let late_before = config.direct_thread_asked.get(&key).copied().or(read_from).map(|t| t - LATE_MARGIN_SECS);
+            config.direct_thread_asked.insert(key.clone(), now);
+            let got = match self.api.replies_of(
+                &ask.conversation.id,
+                &ask.thread,
+                ask.since.as_deref(),
+                THREAD_MOST,
+                "read your direct messages",
+            ) {
+                Ok(got) => got,
+                Err(SlackError::RateLimited) => {
+                    self.summary.partial = true;
+                    return Ok(());
+                }
+                Err(e @ SlackError::Refused(_)) => {
+                    tracing::warn!(target: "slack", error = %e, "a thread couldn't be read");
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            // More than one ask gives: read on from the newest read.
+            let truncated = got.len() >= THREAD_MOST;
+            if truncated {
+                self.summary.direct_threads_left = true;
+            }
+            let thread = ask.thread.as_str();
+            let first = got.iter().find(|r| r.get("ts").and_then(Value::as_str) == Some(thread)).cloned().or(ask.first);
+            let after: Vec<Value> = got
+                .into_iter()
+                .filter(|r| {
+                    r.get("ts").and_then(Value::as_str).is_some_and(|ts| {
+                        ts != thread && ask.since.as_deref().is_none_or(|since| ts_key(ts) > ts_key(since))
+                    })
+                })
+                .collect();
+            // Never back: past the newest read to the newest its first
+            // message says only when every reply was given.
+            let mut marks = vec![newest_ts(&after), ask.since.clone()];
+            if !truncated {
+                marks.push(ask.latest.clone());
+            }
+            let last = marks.into_iter().flatten().max_by_key(|ts| ts_key(ts));
+            self.summary.fetched += after.len();
+            if !after.is_empty() {
+                let mut wanted: Vec<String> = ask.conversation.other.iter().cloned().collect();
+                for m in after.iter().chain(first.iter()) {
+                    wanted.extend(m.get("user").and_then(Value::as_str).map(str::to_string));
+                    wanted.extend(mentioned(m.get("text").and_then(Value::as_str).unwrap_or("")));
+                }
+                match know(self.api, self.people, wanted) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        self.summary.partial = true;
+                        return Ok(());
+                    }
+                    Err(e) => return Err(e),
+                }
+                let direct = ask.conversation.other.is_some();
+                let mut messages = Vec::new();
+                for m in &after {
+                    match as_raw(m, &config.team_id, &ask.conversation.id, self.people, direct, Some(thread)) {
+                        Some((ts, mut raw)) => {
+                            let secs = i64::try_from(ts_key(&ts).0).unwrap_or(0);
+                            if late_before.is_none_or(|before| secs < before) {
+                                raw.metadata["readLate"] = Value::Bool(true);
+                            }
+                            messages.push(raw);
+                        }
+                        None => self.summary.left_out += 1,
+                    }
+                }
+                if !messages.is_empty() {
+                    let people = &*self.people;
+                    let name_of = |id: &str| people.get(id).map_or_else(|| id.to_string(), |p| p.name.clone());
+                    let who = match &ask.conversation.other {
+                        Some(other) => name_of(other),
+                        None => {
+                            let started =
+                                first.as_ref().and_then(|f| f.get("user")).and_then(Value::as_str).map(name_of);
+                            let mut names: Vec<String> = messages
+                                .iter()
+                                .map(|m| m.author.display_name.clone())
+                                .chain(started)
+                                .filter(|n| *n != name_of(&config.user_id))
+                                .collect();
+                            names.sort();
+                            names.dedup();
+                            if names.is_empty() {
+                                "a group".to_string()
+                            } else {
+                                names.join(", ")
+                            }
+                        }
+                    };
+                    let began = first
+                        .as_ref()
+                        .map(|f| snippet(&readable(f.get("text").and_then(Value::as_str).unwrap_or(""), &name_of)))
+                        .filter(|s| !s.is_empty());
+                    let subject = match began {
+                        Some(began) => format!("Thread with {who}: {began}"),
+                        None => format!("Thread with {who}"),
+                    };
+                    self.importer.take(DiscoveredConversation {
+                        external_id: account_id(&config.team_id, &key),
+                        subject: Some(subject),
+                        channel: "chat".into(),
+                        messages,
+                    })?;
+                    self.taken
+                        .push((account_id(&config.team_id, &ask.conversation.id), account_id(&config.team_id, &key)));
+                    self.summary.conversations += 1;
+                }
+            }
+            if let Some(last) = last {
+                config.direct_threads.insert(key, last);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The message a thread began with, for a transcript of one that hasn't it
+/// (0.10.0-alpha.103): a thread in a direct or group message is a
+/// conversation of its own, and its first message is in the conversation it
+/// was written in; a long channel thread's may be further back than the
+/// transcript reaches. Known by the message answered (`answering`) when
+/// there is one — a transcript before a thread's first reply is empty —
+/// else by the transcript's first. `None` when the transcript isn't all
+/// that thread's.
+pub fn thread_start(
+    db: &Db,
+    transcript: &[crate::db::Message],
+    answering: Option<&crate::db::Message>,
+) -> Result<Option<crate::db::Message>, DbError> {
+    let Some(anchor) = answering.or(transcript.first()) else { return Ok(None) };
+    let thread_of = |m: &crate::db::Message| m.metadata.get("slackThread").and_then(Value::as_str).map(str::to_string);
+    let Some(thread) = thread_of(anchor) else { return Ok(None) };
+    if transcript.iter().any(|m| thread_of(m).as_deref() != Some(thread.as_str()) || m.source_id != anchor.source_id) {
+        return Ok(None);
+    }
+    let Some((conversation, _)) = anchor.external_id.rsplit_once(':') else { return Ok(None) };
+    let start = format!("{conversation}:{thread}");
+    if anchor.external_id == start || transcript.iter().any(|m| m.external_id == start) {
+        return Ok(None);
+    }
+    db.message_by_external_id(&anchor.source_id, &start)
 }
 
 /// One check's reading of the channels the user is in (0.10.0-alpha.99):
@@ -1699,6 +2076,164 @@ mod tests {
     /// A `ts` some seconds after `base`, as Slack writes it.
     fn ts(base: i64, after: i64) -> String {
         format!("{}.000100", base + after)
+    }
+
+    /// Acme with one direct message, with Ada (0.10.0-alpha.103), `now`
+    /// being when the test began: an hour ago she asked for the deck and C
+    /// answered in its thread, and a message of hers from nine days ago has a
+    /// thread too. Then, `round` 1, nothing new in the conversation itself,
+    /// and she asks more in the thread, which only asking it finds; `round` 2,
+    /// nothing new there, and a reply in a thread begun six days ago, which
+    /// is followed.
+    fn with_threads(round: std::sync::Arc<std::sync::atomic::AtomicUsize>, now: i64) -> fake::Answer {
+        let hour_ago = now - 3600;
+        let (asked, answer, more) = (ts(hour_ago, 100), ts(hour_ago, 200), ts(now, 30));
+        let (old, old_reply) = (ts(now - 9 * 86_400, 0), ts(now - 9 * 86_400, 60));
+        let (lunch, lunch_read, lunch_reply) = (ts(now - 6 * 86_400, 0), ts(now - 86_400, 0), ts(now, 40));
+        Box::new(move |method, query| {
+            let round = round.load(std::sync::atomic::Ordering::SeqCst);
+            let body = match method {
+                "auth.test" => json!({ "ok": true, "team_id": "T1", "team": "Acme", "user_id": "U1", "user": "c" }),
+                "users.conversations" => {
+                    json!({ "ok": true, "channels": [{ "id": "D1", "is_im": true, "user": "U2" }] })
+                }
+                "users.info" => {
+                    let name = if query.contains("U2") { "Ada Lovelace" } else { "C" };
+                    json!({ "ok": true, "user": { "profile": { "display_name": name } } })
+                }
+                "conversations.history" => {
+                    if round > 0 {
+                        // Read again from days back, not from its mark.
+                        assert!(query.contains("oldest=") && !query.contains(&format!("oldest={asked}")), "{query}");
+                    }
+                    let latest = if round == 0 { answer.clone() } else { more.clone() };
+                    let mut messages = vec![json!({ "type": "message", "user": "U2", "text": "can you send the deck?",
+                        "ts": asked, "thread_ts": asked, "reply_count": if round == 0 { 1 } else { 2 }, "latest_reply": latest })];
+                    if round == 0 {
+                        messages.push(json!({ "type": "message", "user": "U2", "text": "old news", "ts": old,
+                            "thread_ts": old, "reply_count": 3, "latest_reply": old_reply }));
+                    }
+                    json!({ "ok": true, "has_more": false, "messages": messages })
+                }
+                "conversations.replies" if query.contains(&format!("ts={lunch}")) => {
+                    assert!(query.contains(&format!("oldest={lunch_read}")), "{query}");
+                    json!({ "ok": true, "has_more": false, "messages": [
+                        { "type": "message", "user": "U2", "text": "lunch plans\nfor friday", "ts": lunch, "thread_ts": lunch },
+                        { "type": "message", "user": "U2", "text": "<@U1> still on?", "ts": lunch_reply, "thread_ts": lunch },
+                    ]})
+                }
+                "conversations.replies" => {
+                    assert!(query.contains(&format!("ts={asked}")), "only a thread begun in the last days: {query}");
+                    let mut messages = vec![json!({ "type": "message", "user": "U2", "text": "can you send the deck?",
+                        "ts": asked, "thread_ts": asked })];
+                    if round == 0 {
+                        assert!(!query.contains("oldest="), "{query}");
+                        messages.push(json!({ "type": "message", "user": "U1", "text": "sending it now", "ts": answer, "thread_ts": asked }));
+                    } else {
+                        assert!(query.contains(&format!("oldest={answer}")), "{query}");
+                        messages.push(json!({ "type": "message", "user": "U2", "text": "<@U1> and the notes?", "ts": more, "thread_ts": asked }));
+                    }
+                    json!({ "ok": true, "has_more": false, "messages": messages })
+                }
+                _ => json!({ "ok": false, "error": "unknown_method" }),
+            };
+            (200, body.to_string())
+        })
+    }
+
+    #[test]
+    fn a_thread_in_a_direct_message_is_a_conversation_of_its_own_read_when_it_has_new_replies() {
+        let round = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let now = Utc::now().timestamp();
+        let hour_ago = now - 3600;
+        let (base, seen) = fake::slack(with_threads(round.clone(), now));
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        let api = SlackApi::at(&base, TOKEN).unwrap();
+        let row = |body: &str| -> (String, Option<String>, Option<String>, Option<i64>, Option<i64>) {
+            db.conn()
+                .query_row(
+                    "SELECT m.conversation_id, c.subject, json_extract(m.metadata_json, '$.slackThread'),
+                            json_extract(m.metadata_json, '$.slackDirect'), json_extract(m.metadata_json, '$.readLate')
+                       FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.body = ?1",
+                    [body],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .unwrap()
+        };
+
+        let first = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!(
+            (first.conversations, first.inserted, first.from_self, first.direct_threads, first.direct_threads_left),
+            (2, 3, 1, 1, false),
+            "{first:?}"
+        );
+        let config: SlackSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        assert_eq!(config.marks.get("D1"), Some(&ts(hour_ago, 100)));
+        assert_eq!(config.direct_threads.get(&thread_key("D1", &ts(hour_ago, 100))), Some(&ts(hour_ago, 200)));
+        assert_eq!(config.direct_threads.len(), 1, "the thread begun nine days ago isn't asked for");
+        let (top, top_subject, top_thread, _, _) = row("can you send the deck?");
+        let (in_thread, subject, thread, direct, late) = row("sending it now");
+        assert_ne!(in_thread, top, "a conversation of its own");
+        assert_eq!(top_subject.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(top_thread, None);
+        assert_eq!(subject.as_deref(), Some("Thread with Ada Lovelace: can you send the deck?"));
+        assert_eq!((thread, direct), (Some(ts(hour_ago, 100)), Some(1)));
+        assert_eq!(late, Some(1), "read before any check read everything: late");
+        // Ada began it and only C has answered there: she is in it all the same.
+        let ada: String = db
+            .conn()
+            .query_row("SELECT id FROM participants WHERE display_name = 'Ada Lovelace'", [], |r| r.get(0))
+            .unwrap();
+        let with_her: Vec<String> = db
+            .conversations_with(&ada, None, 10)
+            .unwrap()
+            .conversations
+            .into_iter()
+            .map(|c| c.conversation_id)
+            .collect();
+        assert!(with_her.contains(&in_thread), "{with_her:?}");
+
+        // Nothing new in the conversation itself: the thread is asked, from
+        // where it was left, and what is said there decides it.
+        round.store(1, std::sync::atomic::Ordering::SeqCst);
+        let next = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((next.inserted, next.duplicates, next.direct_threads), (1, 0, 1), "{next:?}");
+        let waiting: Vec<(String, String)> =
+            db.threads_awaiting_reply(10).unwrap().into_iter().map(|t| (t.conversation.id, t.last_message)).collect();
+        assert!(waiting.contains(&(in_thread.clone(), "@C and the notes?".to_string())), "{waiting:?}");
+        let (asked_in, _, _, _, late) = row("@C and the notes?");
+        assert_eq!(asked_in, in_thread);
+        assert_eq!(late, None, "said after the last check began");
+        // A draft for it is shown what the thread began with.
+        let tail = db.conversation_tail(&in_thread, 20).unwrap();
+        let start =
+            |t: &[crate::db::Message], a: Option<&crate::db::Message>| thread_start(&db, t, a).unwrap().map(|m| m.body);
+        assert_eq!(start(&tail, None).as_deref(), Some("can you send the deck?"));
+        assert_eq!(start(&tail, tail.last()).as_deref(), Some("can you send the deck?"));
+        // Before the thread's first reply, nothing; known by the reply.
+        assert_eq!(start(&[], tail.first()).as_deref(), Some("can you send the deck?"));
+        assert_eq!(start(&db.conversation_tail(&top, 20).unwrap(), None), None);
+
+        // Nothing new in that thread: it isn't asked; a followed thread begun
+        // before what is read again is asked on its own.
+        let lunch = ts(now - 6 * 86_400, 0);
+        let mut followed = serde_json::Map::new();
+        followed.insert(thread_key("D1", &ts(hour_ago, 100)), json!(ts(now, 30)));
+        followed.insert(thread_key("D1", &lunch), json!(ts(now - 86_400, 0)));
+        db.set_source_config_key(&source, "directThreads", &Value::Object(followed)).unwrap();
+        round.store(2, std::sync::atomic::Ordering::SeqCst);
+        seen.lock().unwrap().clear();
+        let quiet = sync(&db, &source, &api, &|| false).unwrap();
+        assert_eq!((quiet.inserted, quiet.direct_threads), (1, 1), "{quiet:?}");
+        let asked: Vec<String> =
+            seen.lock().unwrap().iter().filter(|r| r.starts_with("conversations.replies")).cloned().collect();
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(asked[0].contains(&format!("ts={lunch}")), "{asked:?}");
+        let (_, subject, thread, _, _) = row("@C still on?");
+        assert_eq!(subject.as_deref(), Some("Thread with Ada Lovelace: lunch plans"));
+        assert_eq!(thread, Some(lunch));
     }
 
     /// Acme with no direct messages and one channel, #general (0.10.0-alpha.99):

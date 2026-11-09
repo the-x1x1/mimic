@@ -16,7 +16,9 @@
 //! it by, so that check skips it and the thread is answered at once. A reply
 //! to a message read in a channel goes into its thread there
 //! (0.10.0-alpha.99, `thread_ts`), as the approved one only: replying by
-//! itself answers direct messages alone.
+//! itself answers direct messages alone. So does a reply to one read in a
+//! thread inside a direct or group message (0.10.0-alpha.103), recorded in
+//! that thread's conversation.
 
 use serde_json::{json, Value};
 
@@ -48,17 +50,26 @@ fn channel_of(message: &Message) -> Option<&str> {
     message.metadata.get("slackChannel").and_then(Value::as_str).filter(|c| !c.is_empty())
 }
 
-/// The channel thread a message was read in (0.10.0-alpha.99): a reply to
-/// it goes there. None for a direct or group message.
+/// The thread a message was read in — a channel's (0.10.0-alpha.99), or
+/// one inside a direct or group message (0.10.0-alpha.103): a reply to it
+/// goes there. None for a message in the conversation itself.
 pub(crate) fn thread_of(message: &Message) -> Option<&str> {
     message.metadata.get("slackThread").and_then(Value::as_str).filter(|t| !t.is_empty())
 }
 
-/// Who a reply goes to, as the user reads it, said of a channel's thread
-/// when it is one.
+/// Who a reply goes to, as the user reads it, said of a thread when it is
+/// one: a channel's, or one in a conversation with someone.
 fn going_to(db: &Db, draft: &Draft, incoming: &Message) -> Result<String, DbError> {
     let name = conversation_name(db, draft, incoming)?;
-    Ok(if thread_of(incoming).is_some() { format!("the thread in {name}") } else { name })
+    Ok(match thread_of(incoming) {
+        Some(_) if name.starts_with('#') => format!("the thread in {name}"),
+        // A thread in a direct or group message, named "Thread with …".
+        Some(_) => match name.strip_prefix("Thread with ") {
+            Some(rest) => format!("the thread with {rest}"),
+            None => format!("{name}, in the thread"),
+        },
+        None => name,
+    })
 }
 
 /// Who a reply goes to, as the user reads it: the conversation's name (a
@@ -261,17 +272,31 @@ pub(crate) fn said_since(
         slack::SlackError::Network(_) | slack::SlackError::RateLimited => Err(e.to_string()),
         e => Ok(Err(e.to_string())),
     };
-    // A reply in the message's thread is not in the conversation itself:
-    // the message says who replied there.
-    let thread: Vec<String> = match api.message(channel, ts) {
-        Ok(Some(m)) if m.get("reply_count").and_then(Value::as_u64).unwrap_or(0) > 0 => m
-            .get("reply_users")
-            .and_then(Value::as_array)
-            .map(|u| u.iter().filter_map(Value::as_str).map(str::to_string).collect())
-            // Replied to, by whom it doesn't say: someone.
-            .unwrap_or_else(|| vec![String::new()]),
-        Ok(_) => Vec::new(),
-        Err(e) => return known(e),
+    // A reply in a thread is not in the conversation itself. A message read
+    // in a thread (0.10.0-alpha.103): who wrote in it after the message.
+    // Otherwise the message says who replied in its own thread.
+    let thread: Vec<String> = match thread_of(incoming) {
+        Some(thread) => match api.replies_of(channel, thread, Some(ts), 50, "read your direct messages") {
+            Ok(replies) => replies
+                .iter()
+                .filter(|m| {
+                    slack::by_a_person(m)
+                        && m.get("ts").and_then(Value::as_str).is_some_and(|t| slack::ts_key(t) > slack::ts_key(ts))
+                })
+                .filter_map(|m| m.get("user").and_then(Value::as_str).map(str::to_string))
+                .collect(),
+            Err(e) => return known(e),
+        },
+        None => match api.message(channel, ts) {
+            Ok(Some(m)) if m.get("reply_count").and_then(Value::as_u64).unwrap_or(0) > 0 => m
+                .get("reply_users")
+                .and_then(Value::as_array)
+                .map(|u| u.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                // Replied to, by whom it doesn't say: someone.
+                .unwrap_or_else(|| vec![String::new()]),
+            Ok(_) => Vec::new(),
+            Err(e) => return known(e),
+        },
     };
     match api.history(channel, Some(ts), 50) {
         Ok((messages, _)) => {
@@ -298,6 +323,30 @@ pub(crate) fn said_since(
     }
 }
 
+/// What has been read since `incoming` from its Slack conversation, in it
+/// or in any of its threads (0.10.0-alpha.103): a thread in a direct or
+/// group message is a conversation of its own, and what is said in one is in
+/// no other's history, so Slack asked about `incoming`'s conversation alone
+/// (`said_since`) wouldn't say. The user's word anywhere answers it;
+/// someone else's means it isn't the last word.
+pub(crate) fn said_since_read(db: &Db, channel: &str, incoming: &Message) -> Result<Since, DbError> {
+    let ts = incoming.external_id.rsplit(':').next().unwrap_or("");
+    let said =
+        db.slack_said_from(&incoming.source_id, channel, incoming.sent_at.as_deref().unwrap_or(""), &incoming.id)?;
+    let after: Vec<&str> = said
+        .iter()
+        .filter(|(id, _)| id.rsplit(':').next().is_some_and(|t| slack::ts_key(t) > slack::ts_key(ts)))
+        .map(|(_, direction)| direction.as_str())
+        .collect();
+    Ok(if after.contains(&"self") {
+        Since::You
+    } else if after.contains(&"other") {
+        Since::Them
+    } else {
+        Since::Nothing
+    })
+}
+
 /// What went, put in its conversation as the next check would read it: the
 /// user's message, under the id Slack gave it — the one its `outbox` row
 /// now carries, so one sent on its own (`on_its_own`) is marked as such
@@ -312,10 +361,17 @@ pub(crate) fn record_in_conversation(
     text: &str,
     on_its_own: bool,
 ) -> Result<(), String> {
-    // A channel's thread is a conversation of its own (0.10.0-alpha.99).
-    let conversation = match thread {
-        Some(thread) => account_id(&config.team_id, &slack::thread_key(channel, thread)),
-        None => account_id(&config.team_id, channel),
+    // Into the conversation the message it answers is in: a thread, a
+    // channel's (0.10.0-alpha.99) or one in a direct or group message
+    // (0.10.0-alpha.103), is one of its own.
+    let answered = match entry.conversation_id.as_deref() {
+        Some(id) => db.get_conversation(id).map_err(|e| e.to_string())?,
+        None => None,
+    };
+    let conversation = match (answered.filter(|c| c.source_id == entry.source_id), thread) {
+        (Some(c), _) => c.external_id,
+        (None, Some(thread)) => account_id(&config.team_id, &slack::thread_key(channel, thread)),
+        (None, None) => account_id(&config.team_id, channel),
     };
     let sent = db.outgoing(&entry.id).map_err(|e| e.to_string())?.ok_or("its outbox row is gone")?;
     let ts = sent.message_id.rsplit(':').next().unwrap_or("").to_string();
@@ -528,6 +584,129 @@ mod tests {
             .unwrap();
         assert_eq!(in_conversation, conversation);
         assert_eq!(in_thread.as_deref(), Some(asked.as_str()));
+    }
+
+    #[test]
+    fn a_reply_in_a_thread_of_a_direct_message_goes_into_it_and_its_conversation() {
+        let hour_ago = chrono::Utc::now().timestamp() - 3600;
+        let (asked, more, posted_as, later) = (
+            format!("{}.000100", hour_ago + 100),
+            format!("{}.000100", hour_ago + 200),
+            format!("{}.000100", hour_ago + 300),
+            format!("{}.000100", hour_ago + 400),
+        );
+        let round = Arc::new(AtomicUsize::new(0));
+        let at = round.clone();
+        let (thread, reply, ts, after) = (asked.clone(), more.clone(), posted_as.clone(), later.clone());
+        let answer: fake::Answer = Box::new(move |method, query| {
+            let body = match method {
+                "auth.test" => json!({ "ok": true, "team_id": "T1", "team": "Acme", "user_id": "U1", "user": "c" }),
+                "users.conversations" => {
+                    json!({ "ok": true, "channels": [{ "id": "D1", "is_im": true, "user": "U2" }] })
+                }
+                "users.info" => {
+                    let name = if query.contains("U2") { "Ada Lovelace" } else { "C" };
+                    json!({ "ok": true, "user": { "profile": { "display_name": name } } })
+                }
+                // Nothing in the conversation itself after the reply.
+                "conversations.history" if query.contains(&format!("oldest={reply}")) => {
+                    json!({ "ok": true, "has_more": false, "messages": [] })
+                }
+                "conversations.history" => json!({ "ok": true, "has_more": false, "messages": [
+                    { "type": "message", "user": "U2", "text": "can you send the deck?", "ts": thread,
+                      "thread_ts": thread, "reply_count": 1, "latest_reply": reply },
+                ]}),
+                "conversations.replies" => {
+                    let mut messages = vec![
+                        json!({ "type": "message", "user": "U2", "text": "can you send the deck?", "ts": thread, "thread_ts": thread }),
+                        json!({ "type": "message", "user": "U2", "text": "and the notes?", "ts": reply, "thread_ts": thread }),
+                    ];
+                    // Later, someone else answered in the thread.
+                    if at.load(Ordering::SeqCst) == 1 {
+                        messages.push(json!({ "type": "message", "user": "U3", "text": "here they are", "ts": after, "thread_ts": thread }));
+                    }
+                    json!({ "ok": true, "has_more": false, "messages": messages })
+                }
+                "chat.postMessage" => json!({ "ok": true, "channel": "D1", "ts": ts }),
+                _ => json!({ "ok": false, "error": "unknown_method" }),
+            };
+            (200, body.to_string())
+        });
+        let (base, seen) = fake::slack(answer);
+        let db = Db::open_in_memory().unwrap();
+        let source = fake::workspace(&db);
+        let api = SlackApi::at(&base, TOKEN).unwrap();
+        sync(&db, &source, &api, &|| false).unwrap();
+        let (message, conversation, participant): (String, String, Option<String>) = db
+            .conn()
+            .query_row(
+                "SELECT id, conversation_id, participant_id FROM messages WHERE external_id = ?1",
+                [format!("slack:T1:D1:{more}")],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+
+        // Before it goes by itself, Slack is asked what was said in the thread
+        // since: nothing, then someone else's answer.
+        let incoming = db.get_message(&message).unwrap().unwrap();
+        let config: SlackSourceConfig =
+            serde_json::from_value(db.get_source(&source).unwrap().unwrap().config).unwrap();
+        assert_eq!(said_since(&api, &config, "D1", &incoming), Ok(Ok(Since::Nothing)));
+        round.store(1, Ordering::SeqCst);
+        assert_eq!(said_since(&api, &config, "D1", &incoming), Ok(Ok(Since::Them)));
+        let from_it: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with("conversations.replies?") && r.contains(&format!("oldest={more}")))
+            .cloned()
+            .collect();
+        assert_eq!(from_it.len(), 2, "the thread asked from the message, each time: {from_it:?}");
+        assert!(from_it.iter().all(|r| r.contains(&format!("ts={asked}"))), "{from_it:?}");
+        round.store(0, Ordering::SeqCst);
+
+        let draft = db
+            .create_draft(&NewDraft {
+                participant_id: participant,
+                conversation_id: Some(conversation.clone()),
+                channel: "chat".into(),
+                situation_id: None,
+                incoming_message: Some("and the notes?".into()),
+                incoming_message_id: Some(message),
+                intent: None,
+                generated_text: "Attached now.".into(),
+                provider: "mock".into(),
+                model: "m".into(),
+                context: json!({}),
+                prompt_hash: "h".into(),
+                evidence: json!({}),
+                alternative_to: None,
+            })
+            .unwrap();
+        let envelope = super::super::envelope_for(&db, &draft.id).unwrap();
+        assert_eq!(envelope.why_not, None);
+        assert_eq!(envelope.to, ["the thread with Ada Lovelace: can you send the deck?"]);
+
+        let entry = send_reply(&db, &api, &request(&draft, &source, "Attached now.")).unwrap();
+        assert_eq!(entry.status, SendStatus::Sent);
+        let posted: Vec<String> =
+            seen.lock().unwrap().iter().filter(|r| r.starts_with("chat.postMessage?")).cloned().collect();
+        let body: Value = serde_json::from_str(posted[0].trim_start_matches("chat.postMessage?")).unwrap();
+        assert_eq!(body, json!({ "channel": "D1", "text": "Attached now.", "thread_ts": asked }));
+        // The user's, in the thread's own conversation.
+        let (in_conversation, in_thread): (String, Option<String>) = db
+            .conn()
+            .query_row(
+                "SELECT conversation_id, json_extract(metadata_json, '$.slackThread') FROM messages
+                  WHERE body = 'Attached now.' AND direction = 'self'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(in_conversation, conversation);
+        assert_eq!(in_thread.as_deref(), Some(asked.as_str()));
+        let waiting: Vec<String> = db.threads_awaiting_reply(10).unwrap().into_iter().map(|t| t.last_message).collect();
+        assert!(!waiting.iter().any(|m| m == "and the notes?"), "answered: {waiting:?}");
     }
 
     #[test]

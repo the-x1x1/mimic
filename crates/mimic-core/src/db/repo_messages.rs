@@ -319,6 +319,57 @@ impl Db {
         Ok(self.conn().query_row(&format!("SELECT {COLS} FROM messages WHERE id = ?1"), [id], map).optional()?)
     }
 
+    /// Everyone in one of a source's conversations (`from`, by the id it was
+    /// read under) is in another (`to`) too (0.10.0-alpha.103): a Slack
+    /// thread in a direct or group message is with its conversation's people,
+    /// whoever has written in it so far.
+    pub fn link_participants_of(&self, source_id: &str, from: &str, to: &str) -> DbResult<()> {
+        self.conn().execute(
+            "INSERT OR IGNORE INTO conversation_participants(conversation_id, participant_id)
+             SELECT t.id, cp.participant_id
+               FROM conversations t
+               JOIN conversations f ON f.source_id = t.source_id AND f.external_id = ?2
+               JOIN conversation_participants cp ON cp.conversation_id = f.id
+              WHERE t.source_id = ?1 AND t.external_id = ?3",
+            params![source_id, from, to],
+        )?;
+        Ok(())
+    }
+
+    /// What was read from one Slack conversation, in it or in any of its
+    /// threads, said at `sent_at` or after (0.10.0-alpha.103): each message's
+    /// id it was read under and whether it is the user's (`self`), other than
+    /// `except`.
+    pub fn slack_said_from(
+        &self,
+        source_id: &str,
+        channel: &str,
+        sent_at: &str,
+        except: &str,
+    ) -> DbResult<Vec<(String, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT external_id, direction FROM messages
+              WHERE source_id = ?1 AND id <> ?4 AND sent_at >= ?3
+                AND instr(metadata_json, '\"slackChannel\"') > 0
+                AND json_extract(metadata_json, '$.slackChannel') = ?2",
+        )?;
+        let rows = stmt.query_map(params![source_id, channel, sent_at, except], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.map(|r| r.map_err(DbError::from)).collect()
+    }
+
+    /// A source's message by the id it was read under (0.10.0-alpha.103).
+    pub fn message_by_external_id(&self, source_id: &str, external_id: &str) -> DbResult<Option<Message>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!("SELECT {COLS} FROM messages WHERE source_id = ?1 AND external_id = ?2 LIMIT 1"),
+                params![source_id, external_id],
+                map,
+            )
+            .optional()?)
+    }
+
     /// When Mimic read a message: not when it says it was sent.
     pub fn message_imported_at(&self, id: &str) -> DbResult<Option<String>> {
         Ok(self.conn().query_row("SELECT imported_at FROM messages WHERE id = ?1", [id], |r| r.get(0)).optional()?)

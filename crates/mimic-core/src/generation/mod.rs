@@ -260,11 +260,20 @@ pub fn build_context_holding_out(
         (None, Some(p)) => db.latest_conversation_with(p)?.map(|c| c.id),
         _ => None,
     };
-    let transcript = match (&conversation_id, &held.before_message) {
+    let mut transcript = match (&conversation_id, &held.before_message) {
         (Some(c), Some(before)) => db.messages_before(c, before, TRANSCRIPT)?,
         (Some(c), None) => db.conversation_tail(c, TRANSCRIPT)?,
         (None, _) => Vec::new(),
     };
+    // A Slack thread's replies, with the message it began with
+    // (0.10.0-alpha.103): what they answer.
+    let answering = match req.incoming_message_id.as_deref() {
+        Some(id) => db.get_message(id)?,
+        None => None,
+    };
+    if let Some(start) = crate::sources::slack::thread_start(db, &transcript, answering.as_ref())? {
+        transcript.insert(0, start);
+    }
 
     let mut evidence = Vec::new();
     match voice.layers.iter().find(|l| l.layer == "relationship") {

@@ -431,6 +431,11 @@ fn refusal(
     if !matches!((on_since, arrived), (Some(on), Some(at)) if at >= on) {
         return Ok(Some(BEFORE_ON));
     }
+    // Read only after a check that read everything had passed it by — a
+    // Slack thread's reply caught up on (0.10.0-alpha.103): a backlog.
+    if incoming.metadata.get("readLate").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Ok(Some(OLD));
+    }
     // Not a backlog however it came to be allowed: read more than a day
     // ago, or reaching Mimic days after it says it was sent. Asked when it
     // is held; a hold, or hours, may then keep it a day or more.
@@ -1073,6 +1078,13 @@ fn send_into_slack(
     let waiting = waiting_now(db)?;
     if let Some(why) = refusal(db, rules, draft, &waiting, Some(&entry.id), false, now)? {
         return stopped(db, entry, run, why);
+    }
+    // What a check read since, in the conversation or any of its threads
+    // (0.10.0-alpha.103).
+    match sending::slack::said_since_read(db, &channel, &incoming)? {
+        sending::slack::Since::Nothing => {}
+        sending::slack::Since::You => return stopped(db, entry, run, ALREADY_IN_SLACK),
+        sending::slack::Since::Them => return stopped(db, entry, run, SAID_SINCE),
     }
     let Some(api) = slack(&entry.source_id) else { return stopped(db, entry, run, NO_SLACK) };
     let waited_long = || {
@@ -2603,6 +2615,21 @@ mod slack_tests {
     }
 
     #[test]
+    fn a_reply_read_late_waits_for_the_user() {
+        // A thread's reply caught up on (0.10.0-alpha.103).
+        let w = world();
+        w.db.conn()
+            .execute(
+                "UPDATE messages SET metadata_json = json_set(metadata_json, '$.readLate', json('true'))
+                  WHERE body = 'the place by the river?'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(why_not_by_itself(&w.db, &w.direct.id, at(0)).unwrap().as_deref(), Some(OLD));
+        assert_eq!(hold_replies(&w.db, at(0)).unwrap(), 0);
+    }
+
+    #[test]
     fn a_direct_message_is_answered_by_itself_and_a_group_is_not() {
         let w = world();
         assert_eq!(why_not_by_itself(&w.db, &w.group.id, at(0)).unwrap().as_deref(), Some(GROUP));
@@ -2663,6 +2690,42 @@ mod slack_tests {
         assert_eq!((run.sent, run.stopped), (0, 1));
         assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(SAID_SINCE));
         assert_eq!(w.rooms.lock().unwrap()[0].messages.len(), 3, "nothing posted");
+    }
+
+    #[test]
+    fn a_word_since_in_one_of_its_threads_stops_it() {
+        // Ada, since, in a thread of the conversation (0.10.0-alpha.103): read
+        // into a conversation of its own, which Slack asked about this one
+        // alone wouldn't say.
+        let w = world();
+        hold_replies(&w.db, at(0)).unwrap();
+        checked(&w);
+        let mut importer = crate::import::Importer::begin(&w.db, &w.source).unwrap();
+        importer
+            .take(crate::sources::DiscoveredConversation {
+                external_id: format!("slack:T1:D1/{}", ts(-60)),
+                subject: Some("Thread with Ada Lovelace: earlier".into()),
+                channel: "chat".into(),
+                messages: vec![crate::sources::RawMessage {
+                    external_id: format!("slack:T1:D1:{}", ts(-2)),
+                    author: crate::sources::AuthorRef {
+                        display_name: "Ada Lovelace".into(),
+                        identifiers: vec![crate::db::IdentifierInput::new(
+                            crate::db::IdentifierKind::AccountId,
+                            "slack:T1:U2",
+                        )],
+                    },
+                    sent_at: crate::sources::slack::ts_time(&ts(-2)),
+                    body: "actually, never mind".into(),
+                    metadata: json!({ "slackChannel": "D1", "slackDirect": true, "slackThread": ts(-60), "attachments": false }),
+                }],
+            })
+            .unwrap();
+        importer.finish().unwrap();
+        let run = send(&w, 20);
+        assert_eq!((run.sent, run.stopped), (0, 1));
+        assert_eq!(w.db.recent_outgoing(5).unwrap()[0].error.as_deref(), Some(SAID_SINCE));
+        assert_eq!(w.rooms.lock().unwrap()[0].messages.len(), 2, "nothing posted");
     }
 
     #[test]
