@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.106] — 2026-11-08
+
+A thank-you isn't someone waiting on you.
+
+### Changed
+
+- **"Thanks!", "ok 👍" and "Sounds good, see you then" no longer count as waiting on you.** When the last word in a conversation only closes it — a thank-you, an okay, a see-you-then, a thumbs-up — I leave it off the list and say how many I left out, the way I do with automated mail. I only do it when every part of the message is one of those: anything with a question in it, anything long, or anything with a "but", "please", "can you" or "let me know" stays on the list, and so does "This is exactly what I needed. Thank you!". It's a reading of the words, and **It needs a reply** puts any of them back. It applies to everything already read, too, and drafting ahead and replying by yourself go by the same list, so neither answers a thank-you.
+
 ## [0.10.0-alpha.105] — 2026-11-08
 
 People fits the drawer, and asking for a reply takes a few words and Enter.

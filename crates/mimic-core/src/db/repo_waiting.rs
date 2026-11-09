@@ -21,12 +21,15 @@
 //! 2. Otherwise, whether the deciding message looks automated from its
 //!    headers (`metadata.automated`, written by `sources::automated` at
 //!    import) — which it can only when the whole thread does.
-//! 3. Otherwise, whether it has gone quiet: its deciding message is older
+//! 3. Otherwise, whether its deciding message only closes the conversation —
+//!    a thank-you, an okay, a thumbs-up (`crate::closing`, read in SQL as
+//!    `mimic_closes`, so mail read before the reading existed has it too).
+//! 4. Otherwise, whether it has gone quiet: its deciding message is older
 //!    than the window the user chose (`waiting.withinDays`, 30 days unless
 //!    they changed it, 0 for any age), measured against the clock. A message
 //!    with no date, or a date that cannot be read, is never quiet — Mimic
 //!    does not guess an age.
-//! 4. Otherwise it needs a reply.
+//! 5. Otherwise it needs a reply.
 //!
 //! Everything that asks "what is waiting" — the home screen, its counts, and
 //! assisted drafting — goes through the one definition below, so the list the
@@ -56,6 +59,10 @@ pub struct AwaitingReply {
     /// The message it is waiting on is older than the waiting window. Only
     /// ever true of a waiting thread when the user said it needs a reply.
     pub quiet: bool,
+    /// The message it is waiting on only closes the conversation: a
+    /// thank-you, an okay (`crate::closing`). Only ever true of a waiting
+    /// thread when the user said it needs a reply.
+    pub closes: bool,
 }
 
 /// How many days back a thread can wait: the setting, what it is unless the
@@ -76,8 +83,13 @@ pub struct LeftOut {
     pub not_needed: i64,
     /// Left out because its last message is older than the waiting window,
     /// and the user has not said otherwise. Not counted here when it also
-    /// looks automated: that reason is given first.
+    /// looks automated or only closes the conversation: those reasons are
+    /// given first.
     pub quiet: i64,
+    /// Left out because its last message only closes the conversation — a
+    /// thank-you, an okay — and the user has not said otherwise. Not counted
+    /// here when it also looks automated.
+    pub closed: i64,
 }
 
 /// What the user said about whether a thread needs a reply.
@@ -187,7 +199,8 @@ fn unanswered_cte_in(scope: Scope) -> String {
         "{deciding},
          unanswered AS (
            SELECT d.conversation_id, d.message_id, d.automated, tm.mark AS mark,
-                  COALESCE(julianday(dm.sent_at) < julianday(:cutoff), 0) AS quiet
+                  COALESCE(julianday(dm.sent_at) < julianday(:cutoff), 0) AS quiet,
+                  mimic_closes(dm.body) AS closes
            FROM deciding d
            JOIN messages dm ON dm.id = d.message_id
            LEFT JOIN thread_marks tm
@@ -199,7 +212,7 @@ fn unanswered_cte_in(scope: Scope) -> String {
 }
 
 /// The columns after the conversation's, for `map_row`.
-const ROW_COLS: &str = "u.message_id, m.body, m.sent_at, m.participant_id, u.automated, u.mark, u.quiet";
+const ROW_COLS: &str = "u.message_id, m.body, m.sent_at, m.participant_id, u.automated, u.mark, u.quiet, u.closes";
 
 fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AwaitingReply> {
     Ok(AwaitingReply {
@@ -211,12 +224,15 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AwaitingReply> {
         automated: r.get(14)?,
         mark: r.get::<_, Option<String>>(15)?.as_deref().and_then(ThreadMark::parse),
         quiet: r.get(16)?,
+        closes: r.get(17)?,
     })
 }
 
-/// The user's word first, then the headers, then the date.
-const NEEDS_REPLY: &str = "(u.mark = 'needs_reply' OR (u.mark IS NULL AND u.automated IS NULL AND NOT u.quiet))";
-const LEFT_OUT: &str = "(u.mark = 'no_reply_needed' OR (u.mark IS NULL AND (u.automated IS NOT NULL OR u.quiet)))";
+/// The user's word first, then the headers, then the words, then the date.
+const NEEDS_REPLY: &str =
+    "(u.mark = 'needs_reply' OR (u.mark IS NULL AND u.automated IS NULL AND NOT u.closes AND NOT u.quiet))";
+const LEFT_OUT: &str =
+    "(u.mark = 'no_reply_needed' OR (u.mark IS NULL AND (u.automated IS NOT NULL OR u.closes OR u.quiet)))";
 
 /// The waiting window as of one moment: how many days back a thread can be
 /// waiting, and the cutoff that makes. Taken once per read, so the lists and
@@ -240,6 +256,8 @@ pub enum Standing {
     Waiting,
     /// Left out: its deciding message looks automated.
     Automated,
+    /// Left out: its deciding message only closes the conversation.
+    Closed,
     /// Left out: its deciding message is older than the waiting window.
     Quiet,
     /// Left out: the user said it needs no reply.
@@ -283,8 +301,10 @@ pub struct PersonConversations {
 const ACTIVE: &str = "COALESCE(c.last_message_at, '')";
 
 /// Why an unanswered thread was left out, in the order the screen lists the
-/// reasons: automated, gone quiet, taken off by the user.
-const REASON: &str = "CASE WHEN u.mark = 'no_reply_needed' THEN 2 WHEN u.automated IS NOT NULL THEN 0 ELSE 1 END";
+/// reasons: automated, only closing the conversation, gone quiet, taken off
+/// by the user.
+const REASON: &str = "CASE WHEN u.mark = 'no_reply_needed' THEN 3 WHEN u.automated IS NOT NULL THEN 0
+                           WHEN u.closes THEN 1 ELSE 2 END";
 
 impl Db {
     /// How many days back a thread can be waiting, or `None` for any age.
@@ -382,12 +402,18 @@ impl Db {
                  SELECT COALESCE(SUM({NEEDS_REPLY}), 0),
                         COALESCE(SUM(u.mark IS NULL AND u.automated IS NOT NULL), 0),
                         COALESCE(SUM(u.mark = 'no_reply_needed'), 0),
-                        COALESCE(SUM(u.mark IS NULL AND u.automated IS NULL AND u.quiet), 0)
+                        COALESCE(SUM(u.mark IS NULL AND u.automated IS NULL AND NOT u.closes AND u.quiet), 0),
+                        COALESCE(SUM(u.mark IS NULL AND u.automated IS NULL AND u.closes), 0)
                  FROM unanswered u",
                 cte = unanswered_cte()
             ),
             named_params! { ":cutoff": window.cutoff },
-            |r| Ok((r.get(0)?, LeftOut { automated: r.get(1)?, not_needed: r.get(2)?, quiet: r.get(3)? })),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    LeftOut { automated: r.get(1)?, not_needed: r.get(2)?, quiet: r.get(3)?, closed: r.get(4)? },
+                ))
+            },
         )?)
     }
 
@@ -441,6 +467,7 @@ impl Db {
                          WHEN {NEEDS_REPLY} THEN 'waiting'
                          WHEN u.mark = 'no_reply_needed' THEN 'not_needed'
                          WHEN u.automated IS NOT NULL THEN 'automated'
+                         WHEN u.closes THEN 'closed'
                          ELSE 'quiet' END,
                     u.mark
              FROM theirs c
@@ -457,6 +484,7 @@ impl Db {
                 "waiting" => Standing::Waiting,
                 "not_needed" => Standing::NotNeeded,
                 "automated" => Standing::Automated,
+                "closed" => Standing::Closed,
                 "quiet" => Standing::Quiet,
                 _ => Standing::Undecided,
             };
@@ -671,11 +699,69 @@ mod tests {
         w.thread("bank", &[("other", "your statement is ready", Some("no_reply_address"))]);
 
         assert_eq!(w.waiting(), ["lunch on thursday?"]);
-        assert_eq!(w.db.waiting_counts().unwrap(), (1, LeftOut { automated: 2, not_needed: 0, quiet: 0 }));
+        assert_eq!(w.db.waiting_counts().unwrap(), (1, LeftOut { automated: 2, not_needed: 0, quiet: 0, closed: 0 }));
 
         let left: Vec<_> = w.db.threads_left_out(50).unwrap();
         assert_eq!(left.len(), 2);
         assert!(left.iter().all(|t| t.automated.is_some() && t.mark.is_none()));
+    }
+
+    #[test]
+    fn a_thank_you_is_left_out_and_counted_and_the_users_word_puts_it_back() {
+        let w = world();
+        w.thread("ada", &[("self", "here's the deck", None), ("other", "Thanks so much!", None)]);
+        w.thread(
+            "grace",
+            &[("self", "here's the deck", None), ("other", "Thanks! Can you send the numbers too?", None)],
+        );
+        let theo = w.thread(
+            "theo",
+            &[("other", "surf saturday?", None), ("self", "can't this week", None), ("other", "ok 👍", None)],
+        );
+
+        assert_eq!(w.waiting(), ["Thanks! Can you send the numbers too?"]);
+        assert_eq!(w.db.waiting_counts().unwrap(), (1, LeftOut { automated: 0, not_needed: 0, quiet: 0, closed: 2 }));
+        let left = w.db.threads_left_out(10).unwrap();
+        assert_eq!(left.len(), 2);
+        assert!(left.iter().all(|t| t.closes && t.automated.is_none() && t.mark.is_none()));
+
+        // The user's word outranks the reading, and the reading is still said.
+        let shown = w.db.threads_left_out(10).unwrap().into_iter().find(|t| t.conversation.id == theo).unwrap();
+        assert!(w.db.mark_thread(&theo, &shown.last_message_id, Some(ThreadMark::NeedsReply)).unwrap());
+        let waiting = w.db.threads_awaiting_reply(10).unwrap();
+        assert_eq!(waiting.len(), 2);
+        assert!(waiting.iter().any(|t| t.conversation.id == theo && t.closes));
+        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 0, not_needed: 0, quiet: 0, closed: 1 });
+    }
+
+    #[test]
+    fn a_thank_you_that_looks_automated_is_counted_as_automated_and_one_that_is_old_as_a_thank_you() {
+        let w = world();
+        w.thread("shop", &[("other", "Thanks for your order!", Some("no_reply_address"))]);
+        w.thread("ada", &[("other", "Thanks!", None)]);
+        // Any age: the dates above are early September.
+        w.db.set_setting(WITHIN_DAYS_SETTING, &1).unwrap();
+        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 1, not_needed: 0, quiet: 0, closed: 1 });
+        // Listed in the screen's order: automated, then thanks.
+        let left = w.db.threads_left_out(10).unwrap();
+        assert_eq!(
+            left.iter().map(|t| t.last_message.as_str()).collect::<Vec<_>>(),
+            ["Thanks for your order!", "Thanks!"]
+        );
+    }
+
+    #[test]
+    fn mail_read_before_the_reading_existed_is_read_the_same() {
+        // Nothing is stored: the reading is made in SQL from the words, so a
+        // thank-you imported by an older version is left out too.
+        let w = world();
+        let convo = w.thread("ada", &[("other", "can you check slide 4?", None)]);
+        assert_eq!(w.waiting().len(), 1);
+        w.db.conn()
+            .execute("UPDATE messages SET body = 'Got it, thanks!' WHERE conversation_id = ?1", [&convo])
+            .unwrap();
+        assert!(w.waiting().is_empty());
+        assert_eq!(w.db.count_left_out().unwrap().closed, 1);
     }
 
     #[test]
@@ -716,7 +802,7 @@ mod tests {
             ],
         );
         assert_eq!(w.waiting(), ["did it arrive?"]);
-        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 1, not_needed: 0, quiet: 0 });
+        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 1, not_needed: 0, quiet: 0, closed: 0 });
         let left = &w.db.threads_left_out(10).unwrap()[0];
         assert_eq!(left.last_message, "@you can you rebase?");
         // And it can be put on the list.
@@ -741,7 +827,7 @@ mod tests {
         let convo = w.thread("ada", &[("other", "fyi, the deck is attached", None)]);
         assert!(w.mark(&convo, Some(ThreadMark::NoReplyNeeded)));
         assert!(w.waiting().is_empty());
-        assert_eq!(w.db.waiting_counts().unwrap(), (0, LeftOut { automated: 0, not_needed: 1, quiet: 0 }));
+        assert_eq!(w.db.waiting_counts().unwrap(), (0, LeftOut { automated: 0, not_needed: 1, quiet: 0, closed: 0 }));
         assert_eq!(w.db.threads_left_out(10).unwrap()[0].mark, Some(ThreadMark::NoReplyNeeded));
 
         // A new message is a new question; the old answer does not cover it.
@@ -838,7 +924,7 @@ mod tests {
         let mut waiting = w.waiting();
         waiting.sort();
         assert_eq!(waiting, ["are we still on for friday?", "hello from nowhere", "hello from the past"]);
-        assert_eq!(w.db.waiting_counts().unwrap(), (3, LeftOut { automated: 1, not_needed: 0, quiet: 2 }));
+        assert_eq!(w.db.waiting_counts().unwrap(), (3, LeftOut { automated: 1, not_needed: 0, quiet: 2, closed: 0 }));
         let left = w.db.threads_left_out(50).unwrap();
         let lease = left.iter().find(|t| t.conversation.id == old).unwrap();
         assert!(lease.quiet && lease.automated.is_none() && lease.mark.is_none());
@@ -855,7 +941,7 @@ mod tests {
 
         // Any age: nothing goes quiet.
         w.db.set_setting(WITHIN_DAYS_SETTING, &0).unwrap();
-        assert_eq!(w.db.waiting_counts().unwrap(), (5, LeftOut { automated: 1, not_needed: 0, quiet: 0 }));
+        assert_eq!(w.db.waiting_counts().unwrap(), (5, LeftOut { automated: 1, not_needed: 0, quiet: 0, closed: 0 }));
         assert!(w.db.threads_left_out(50).unwrap().iter().all(|t| !t.quiet));
     }
 
@@ -879,7 +965,7 @@ mod tests {
         assert_eq!((left[0].last_message.as_str(), left[1].last_message.as_str()), ("sale 0", "sale 1"));
         assert_eq!(&ids[2..4], [old.as_str(), older.as_str()]);
         assert_eq!(ids[4], off);
-        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 5, not_needed: 1, quiet: 2 });
+        assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 5, not_needed: 1, quiet: 2, closed: 0 });
     }
 
     #[test]

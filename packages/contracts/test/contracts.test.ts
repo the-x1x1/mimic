@@ -685,6 +685,21 @@ describe("what was left out is said, and said as a reading", () => {
     );
   });
 
+  it("counts the threads where they only said thanks, between automated and gone quiet", () => {
+    const closed = (n: number, extra: Partial<{ automated: number; quiet: number }> = {}) => ({
+      ...base,
+      waitingWithinDays: 30,
+      leftOut: { automated: 0, notNeeded: 0, quiet: 0, ...extra, closed: n },
+    });
+    expect(describeLeftOut(closed(1))).toBe("I left out one where they only said thanks, or okay.");
+    expect(describeLeftOut(closed(4, { automated: 2, quiet: 1 }))).toBe(
+      "I left out 2 threads that look automated (newsletters, notifications and the like), 4 where they only said thanks, or okay and one thread whose last message is more than 30 days old.",
+    );
+    expect(leftOutTotal(closed(4, { automated: 2, quiet: 1 }))).toBe(7);
+    // A reply from before 0.10.0-alpha.106 has no count, read as none.
+    expect(leftOutTotal(left(1, 1, 1))).toBe(3);
+  });
+
   it("words gone quiet as a reading of a date, not a fact about anyone", () => {
     expect(describeQuiet(30)).toBe(
       "Its last message is more than 30 days old, so I've taken it that nobody is still waiting on a reply.",

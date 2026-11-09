@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Button, InlineError } from "@mimic/ui";
 import {
   ADJUSTMENT_LABELS,
+  CLOSED_WHY,
   Adjustment,
   adjustmentOf,
   type Dashboard,
@@ -153,9 +154,19 @@ export function LeftOutList({ data }: { data: Dashboard }) {
       total: data.leftOut.automated,
     },
     {
+      key: "closed",
+      title: "They only said thanks, or okay",
+      items: threads.filter(
+        (t) => t.mark !== "no_reply_needed" && t.automated === null && t.closes === true,
+      ),
+      total: data.leftOut.closed ?? 0,
+    },
+    {
       key: "quiet",
       title: `${data.leftOut.quiet === 1 ? "Its" : "Their"} last message is ${olderThan(withinDays)}`,
-      items: threads.filter((t) => t.mark !== "no_reply_needed" && t.automated === null),
+      items: threads.filter(
+        (t) => t.mark !== "no_reply_needed" && t.automated === null && t.closes !== true,
+      ),
       total: data.leftOut.quiet,
     },
     {
@@ -213,11 +224,14 @@ export function LeftOutThread({
       ? "You said this one doesn't need a reply."
       : thread.automated !== null
         ? `It looks automated to me: ${describeAutomated(thread.automated) ?? ""}`
-        : describeQuiet(withinDays);
-  // Putting back a thread that also looks automated, or has gone quiet, has
-  // to say it needs a reply: taking the mark away alone would leave it out
-  // for the other reason.
-  const back: ThreadMark | null = thread.automated !== null || thread.quiet ? "needs_reply" : null;
+        : thread.closes
+          ? CLOSED_WHY
+          : describeQuiet(withinDays);
+  // Putting back a thread that also looks automated, only says thanks, or
+  // has gone quiet, has to say it needs a reply: taking the mark away alone
+  // would leave it out for the other reason.
+  const back: ThreadMark | null =
+    thread.automated !== null || thread.closes || thread.quiet ? "needs_reply" : null;
   return (
     <article className="thread thread--left-out">
       <header className="thread__head">
@@ -444,7 +458,8 @@ export function Thread({
 
       {thread.subject ? <p className="thread__subject">{thread.subject}</p> : null}
 
-      {thread.mark === "needs_reply" && (thread.automated !== null || thread.quiet) ? (
+      {thread.mark === "needs_reply" &&
+      (thread.automated !== null || thread.closes || thread.quiet) ? (
         <KeptOnTheList thread={thread} withinDays={withinDays} />
       ) : null}
 
@@ -676,7 +691,9 @@ function KeptOnTheList({
     <p className="muted small">
       {thread.automated !== null
         ? `You said this one needs a reply, though it looks automated to me: ${describeAutomated(thread.automated) ?? ""}`
-        : `You said this one needs a reply, though its last message is ${olderThan(withinDays)}.`}{" "}
+        : thread.closes
+          ? "You said this one needs a reply, though they only said thanks, or okay."
+          : `You said this one needs a reply, though its last message is ${olderThan(withinDays)}.`}{" "}
       <button
         type="button"
         className="linkish"

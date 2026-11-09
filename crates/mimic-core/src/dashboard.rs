@@ -62,6 +62,10 @@ pub struct DashboardThread {
     /// Its last message is older than the waiting window. On a thread that is
     /// waiting, only because the user said it needs a reply.
     pub quiet: bool,
+    /// Its last message only closes the conversation — a thank-you, an okay
+    /// (`crate::closing`). A reading from the words, and the screen words it
+    /// as one. On a thread that is waiting, only because the user said so.
+    pub closes: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,6 +181,7 @@ fn thread(db: &Db, row: AwaitingReply) -> Result<DashboardThread, DbError> {
         automated: row.automated,
         mark: row.mark,
         quiet: row.quiet,
+        closes: row.closes,
     })
 }
 

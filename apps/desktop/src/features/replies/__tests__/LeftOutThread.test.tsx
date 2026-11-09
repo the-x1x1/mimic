@@ -106,3 +106,44 @@ describe("what was left out is listed by why", () => {
     expect(screen.queryByText(/most recent of 1\./)).toBeNull();
   });
 });
+
+describe("a thread where they only said thanks", () => {
+  beforeEach(() => {
+    native.markThread.mockReset();
+    native.markThread.mockResolvedValue(true);
+  });
+
+  it("says so as a reading of the words, and puts it back by saying it needs a reply", async () => {
+    renderIt(left({ lastMessage: "Thanks so much!", quiet: false, closes: true }));
+    expect(
+      screen.getByText(
+        "They only said thanks, or okay, so I've taken it that nothing more is needed.",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /it needs a reply/i }));
+    await waitFor(() => expect(native.markThread).toHaveBeenCalledWith("c1", "m1", "needs_reply"));
+  });
+
+  it("is listed after what looks automated and before what has gone quiet", () => {
+    const data = {
+      leftOutThreads: [
+        left({ conversationId: "q", lastMessageId: "q1" }),
+        left({ conversationId: "t", lastMessageId: "t1", quiet: false, closes: true }),
+        left({ conversationId: "n", lastMessageId: "n1", automated: "newsletter", quiet: false }),
+      ],
+      waitingWithinDays: 30,
+      leftOut: { notNeeded: 0, automated: 1, quiet: 1, closed: 1 },
+    } as unknown as Dashboard;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <LeftOutList data={data} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+      "This one looks automated to me",
+      "They only said thanks, or okay",
+      "Its last message is more than 30 days old",
+    ]);
+  });
+});

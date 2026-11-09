@@ -249,6 +249,7 @@ export const Standing = z.enum([
   "answered",
   "waiting",
   "automated",
+  "closed",
   "quiet",
   "not_needed",
   "undecided",
@@ -291,6 +292,8 @@ export function describeStanding(c: PersonConversation, withinDays: number | nul
         : "On your list: waiting on you.";
     case "automated":
       return "Not on your list: its last message looks automated.";
+    case "closed":
+      return "Not on your list: they only said thanks, or okay.";
     case "quiet":
       return `Not on your list: the message it waits on is ${olderThan(withinDays)}.`;
     case "not_needed":
@@ -306,7 +309,10 @@ export function describeStanding(c: PersonConversation, withinDays: number | nul
  */
 export function canPutOnList(c: PersonConversation): boolean {
   return (
-    (c.standing === "automated" || c.standing === "quiet" || c.standing === "not_needed") &&
+    (c.standing === "automated" ||
+      c.standing === "closed" ||
+      c.standing === "quiet" ||
+      c.standing === "not_needed") &&
     c.decidingMessageId !== null
   );
 }
@@ -348,6 +354,12 @@ export const DashboardThread = z.object({
    * On a thread that is waiting, only because the user said it needs a reply.
    */
   quiet: z.boolean(),
+  /**
+   * Its last message only closes the conversation: a thank-you, an okay
+   * (0.10.0-alpha.106). A reading from the words. On a thread that is waiting,
+   * only because the user said it needs a reply. Absent from an older reply.
+   */
+  closes: z.boolean().optional(),
 });
 export type DashboardThread = z.infer<typeof DashboardThread>;
 
@@ -363,7 +375,13 @@ export const Dashboard = z.object({
    * estimates. One that looks automated is counted there even if it is also
    * old.
    */
-  leftOut: z.object({ automated: z.number(), notNeeded: z.number(), quiet: z.number() }),
+  leftOut: z.object({
+    automated: z.number(),
+    notNeeded: z.number(),
+    quiet: z.number(),
+    /** Only said thanks, or okay (0.10.0-alpha.106). Absent from an older reply. */
+    closed: z.number().optional(),
+  }),
   /** Those threads, only when they were asked for. */
   leftOutThreads: z.array(DashboardThread),
   /** Whether they were asked for: empty and not asked for are different answers. */
@@ -444,7 +462,7 @@ export function describeAutomated(reason: string | null): string | null {
 
 /** Every unanswered thread that is not on the waiting list, for whatever reason. */
 export function leftOutTotal(d: Dashboard): number {
-  return d.leftOut.automated + d.leftOut.notNeeded + d.leftOut.quiet;
+  return d.leftOut.automated + d.leftOut.notNeeded + d.leftOut.quiet + (d.leftOut.closed ?? 0);
 }
 
 /**
@@ -464,6 +482,13 @@ export function describeQuiet(days: number | null): string {
   return `Its last message is ${olderThan(days)}, so I've taken it that nobody is still waiting on a reply.`;
 }
 
+/**
+ * Why a thread whose last message only closes the conversation was left out,
+ * for the thread itself. A reading of the words, worded as one.
+ */
+export const CLOSED_WHY =
+  "They only said thanks, or okay, so I've taken it that nothing more is needed.";
+
 /** "a, b and c", "a and b", or "a". */
 function listOf(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
@@ -477,7 +502,8 @@ function listOf(parts: string[]): string {
  */
 export function describeLeftOut(d: Dashboard): string | null {
   const { automated, notNeeded, quiet } = d.leftOut;
-  if (automated === 0 && notNeeded === 0 && quiet === 0) return null;
+  const closed = d.leftOut.closed ?? 0;
+  if (automated === 0 && notNeeded === 0 && quiet === 0 && closed === 0) return null;
   const parts: string[] = [];
   if (automated === 1) parts.push("one thread that looks automated");
   if (automated > 1) {
@@ -485,6 +511,8 @@ export function describeLeftOut(d: Dashboard): string | null {
       `${automated.toLocaleString()} threads that look automated (newsletters, notifications and the like)`,
     );
   }
+  if (closed === 1) parts.push("one where they only said thanks, or okay");
+  if (closed > 1) parts.push(`${closed.toLocaleString()} where they only said thanks, or okay`);
   const age = olderThan(d.waitingWithinDays);
   if (quiet === 1) parts.push(`one thread whose last message is ${age}`);
   if (quiet > 1) parts.push(`${quiet.toLocaleString()} threads whose last message is ${age}`);

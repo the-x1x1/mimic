@@ -461,7 +461,7 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     let marked = mimic_core::dashboard::dashboard(&db, 25, true, true).unwrap();
     assert_eq!(marked.awaiting.len(), waiting - 1);
     assert_eq!(marked.awaiting_total, waiting as i64 - 1);
-    assert_eq!(marked.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 1, quiet: 0 });
+    assert_eq!(marked.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 1, quiet: 0, closed: 0 });
     let taken = marked.left_out_threads.iter().find(|t| t.conversation_id == off).unwrap();
     assert_eq!(taken.mark, Some(mimic_core::db::ThreadMark::NoReplyNeeded));
     assert!(taken.draft.is_some(), "no draft was resolved by it");
@@ -534,7 +534,7 @@ fn the_dashboard_shows_what_is_waiting_and_what_was_prepared_for_it() {
     assert_eq!(quiet.awaiting.len(), 1);
     assert_eq!(quiet.awaiting[0].conversation_id, kept.conversation_id);
     assert!(quiet.awaiting[0].quiet, "kept by the user's word, and still said to be old");
-    assert_eq!(quiet.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 0, quiet: 1 });
+    assert_eq!(quiet.left_out, mimic_core::db::LeftOut { automated: 1, not_needed: 0, quiet: 1, closed: 0 });
     let lease_row = quiet.left_out_threads.iter().find(|t| t.conversation_id == lease).unwrap();
     assert!(lease_row.quiet && lease_row.automated.is_none() && lease_row.mark.is_none());
     assert_eq!(lease_row.participant.as_ref().unwrap().display_name, "Carol");

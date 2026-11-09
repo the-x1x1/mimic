@@ -329,6 +329,23 @@ fn configure(conn: &Connection) -> rusqlite::Result<()> {
          PRAGMA foreign_keys = ON;
          PRAGMA busy_timeout = 5000;
          PRAGMA temp_store = MEMORY;",
+    )?;
+    register_functions(conn)
+}
+
+/// Readings the queries make in SQL with Rust's own code, so a reading is
+/// made the same way wherever it is asked for, and of mail read before it
+/// existed too: `mimic_closes(body)` is `crate::closing::closes`.
+pub(crate) fn register_functions(conn: &Connection) -> rusqlite::Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    conn.create_scalar_function(
+        "mimic_closes",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let body: Option<String> = ctx.get(0)?;
+            Ok(body.is_some_and(|b| crate::closing::closes(&b)))
+        },
     )
 }
 

@@ -20,6 +20,7 @@
 
 pub mod assist;
 pub mod autoreply;
+pub mod closing;
 pub mod dashboard;
 pub mod db;
 pub mod diagnostics;
