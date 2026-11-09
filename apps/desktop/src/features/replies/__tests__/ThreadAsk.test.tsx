@@ -54,7 +54,7 @@ describe("asking for a reply in a few words", () => {
     native.generateDraft.mockReturnValue(new Promise(() => {}));
   });
 
-  it("puts the words and Write it on one line, and Enter writes it", async () => {
+  it("puts the words and Write it on one line, and submitting the form writes it once", async () => {
     renderIt(thread());
     const form = screen.getByRole("form", { name: "Write a reply to Dad" });
     const box = within(form).getByRole("textbox", { name: "Roughly what you want to say to Dad" });

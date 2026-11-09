@@ -193,6 +193,13 @@
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
 }
+.ui-metric__value--words {
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.3;
+  padding-top: 6px;
+}
 .ui-metric__hint {
   font-size: var(--text-body-sm);
   color: var(--text-secondary);

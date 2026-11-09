@@ -1141,11 +1141,6 @@ select option {
   background: var(--surface-2);
   font-size: var(--text-body-sm);
 }
-.jobtray--idle {
-  color: var(--text-muted);
-  border-style: dashed;
-  background: transparent;
-}
 .jobtray__head {
   display: flex;
   justify-content: space-between;

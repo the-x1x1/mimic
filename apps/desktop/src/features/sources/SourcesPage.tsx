@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Button, InlineError } from "@mimic/ui";
 import {
   CHANNEL_LABELS,
@@ -189,7 +189,16 @@ function SourceRow({ source: s, onTelegram }: { source: Source; onTelegram: () =
   const startImport = useStartImport();
   const remove = useDeleteSource();
   const [confirming, setConfirming] = useState(false);
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const keepButton = useRef<HTMLButtonElement>(null);
   const live = LIVE.has(s.connector);
+  // Asking takes focus to the safe answer; keeping it gives focus back to Remove.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (confirming) keepButton.current?.focus();
+    else if (asked.current) removeButton.current?.focus();
+    asked.current = confirming;
+  }, [confirming]);
   const confirmId = `remove-${s.id}`;
   const messages =
     s.messageCount === 1 ? "1 message" : `${s.messageCount.toLocaleString()} messages`;
@@ -212,8 +221,10 @@ function SourceRow({ source: s, onTelegram }: { source: Source; onTelegram: () =
           <Button
             size="sm"
             variant="ghost"
+            ref={removeButton}
             aria-expanded={confirming}
             aria-controls={confirming ? confirmId : undefined}
+            disabled={confirming}
             onClick={() => setConfirming(true)}
           >
             Remove
@@ -239,9 +250,13 @@ function SourceRow({ source: s, onTelegram }: { source: Source; onTelegram: () =
           role="group"
           aria-label={`Remove ${s.name}`}
         >
+          {/* What delete_source_and_contents and delete_source do: the
+              messages, anyone known only from them, the record of what was
+              sent through it, the sign-in; how you write is measured again. */}
           <p>
-            Remove {s.name}? The {messages} I read from it go too, with what I worked out from them
-            {live ? ", and I forget how to sign in to it" : ""}. This can&rsquo;t be undone.
+            Remove {s.name}? The {messages} I read from it go too, and so does anyone I know only
+            from it{live ? ", the record of replies sent through it, and how I sign in to it" : ""}.
+            How you write is worked out again without them. This can&rsquo;t be undone.
             {live ? null : " The file itself isn’t touched, so you can import it again."}
           </p>
           {remove.isError ? <InlineError>{(remove.error as Error).message}</InlineError> : null}
@@ -254,7 +269,7 @@ function SourceRow({ source: s, onTelegram }: { source: Source; onTelegram: () =
             >
               Remove it
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+            <Button ref={keepButton} size="sm" variant="ghost" onClick={() => setConfirming(false)}>
               Keep it
             </Button>
           </div>

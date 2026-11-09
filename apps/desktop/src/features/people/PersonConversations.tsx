@@ -29,8 +29,8 @@ function isGone(e: unknown): boolean {
  * Every conversation someone is in, not only the one waiting on the home
  * screen: most recently active first, each with where it stands by the same
  * reading the home screen makes, and each readable in full. One left off the
- * list — it looks automated, it has gone quiet, or the user said it needs no
- * reply — can be put back on it from here, which is how a reply gets drafted
+ * list — it looks automated, they only said thanks, it has gone quiet, or the
+ * user said it needs no reply — can be put back on it from here, which is how a reply gets drafted
  * for it. **Find something said in them** opens Find on just these
  * conversations (0.10.0-alpha.102).
  */

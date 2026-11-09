@@ -519,6 +519,20 @@ export function Thread({
               ? `I don't know yet how you write to ${who.split(" ")[0]}, so tell me roughly what to say and I'll put it in your words.`
               : "Tell me roughly what to say, or leave it empty and I'll answer what they asked."}
           </p>
+          {situations.data ? (
+            <label className="thread__kind">
+              <span className="muted small">What kind of reply</span>
+              <select value={situationId} onChange={(e) => setSituationId(e.target.value)}>
+                <option value="">Work it out from what I wrote</option>
+                {situations.data.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                    {s.measurable ? "" : " (I haven't seen enough of these yet)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {/* The note and the button on one line, and Enter writes it: the
               commonest reply is a few words and a keypress. */}
           <div className="thread__ask">
@@ -534,20 +548,6 @@ export function Thread({
               {generate.isPending ? "Writing…" : "Write it"}
             </Button>
           </div>
-          {situations.data ? (
-            <label className="thread__kind">
-              <span className="muted small">What kind of reply</span>
-              <select value={situationId} onChange={(e) => setSituationId(e.target.value)}>
-                <option value="">Work it out from what I wrote</option>
-                {situations.data.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                    {s.measurable ? "" : " (I haven't seen enough of these yet)"}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
         </form>
       )}
       {generate.isError ? <InlineError>{(generate.error as Error).message}</InlineError> : null}

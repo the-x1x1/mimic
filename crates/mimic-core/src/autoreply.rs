@@ -13,7 +13,8 @@
 //!   only the people they listed (`Who::Listed`).
 //! * **Only what is waiting, exactly as the home screen reads it**: the
 //!   thread's deciding message is the one the draft answers, it doesn't look
-//!   automated, it hasn't gone quiet, nobody said it needs no reply, and the
+//!   automated, it doesn't only say thanks, it hasn't gone quiet, nobody said
+//!   it needs no reply, and the
 //!   user hasn't answered or written since. Only a first draft prepared in
 //!   advance — not one the user asked for, not one with other ways beside
 //!   it — and only while it is undecided.
@@ -353,13 +354,13 @@ impl Run {
 }
 
 /// `(conversation, message)` for every thread waiting on that message now,
-/// leaving out what the user kept on the list against the headers or the
-/// waiting window: those are theirs to answer.
+/// leaving out what the user kept on the list against the headers, the words
+/// (only a thank-you) or the waiting window: those are theirs to answer.
 fn waiting_now(db: &Db) -> Result<HashSet<(String, String)>, DbError> {
     Ok(db
         .threads_awaiting_reply(SCAN)?
         .into_iter()
-        .filter(|t| t.automated.is_none() && !t.quiet)
+        .filter(|t| t.automated.is_none() && !t.quiet && !t.closes)
         .map(|t| (t.conversation.id, t.last_message_id))
         .collect())
 }

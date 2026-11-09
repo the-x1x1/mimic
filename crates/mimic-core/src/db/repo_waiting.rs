@@ -195,12 +195,27 @@ enum Scope {
 }
 
 fn unanswered_cte_in(scope: Scope) -> String {
+    // Only closing when everything they sent since the user last wrote only
+    // closes: "can you check slide 4?" and then "thanks!" is a question. Not
+    // read at all for a thread that looks automated, which is left out for
+    // that first. Materialized, so the reading is made once per thread
+    // however many times a query below names it.
+    let other_automated = automated_of("o");
     format!(
         "{deciding},
-         unanswered AS (
+         unanswered AS MATERIALIZED (
            SELECT d.conversation_id, d.message_id, d.automated, tm.mark AS mark,
                   COALESCE(julianday(dm.sent_at) < julianday(:cutoff), 0) AS quiet,
-                  mimic_closes(dm.body) AS closes
+                  CASE WHEN d.automated IS NULL AND mimic_closes(dm.body) AND NOT EXISTS (
+                         SELECT 1 FROM messages o
+                         WHERE o.conversation_id = d.conversation_id AND o.direction = 'other'
+                           AND o.id <> dm.id
+                           AND o.sequence_index > COALESCE((
+                                 SELECT MAX(s.sequence_index) FROM messages s
+                                 WHERE s.conversation_id = d.conversation_id AND s.direction = 'self'), -1)
+                           AND {other_automated} IS NULL
+                           AND NOT mimic_closes(o.body))
+                       THEN 1 ELSE 0 END AS closes
            FROM deciding d
            JOIN messages dm ON dm.id = d.message_id
            LEFT JOIN thread_marks tm
@@ -732,6 +747,33 @@ mod tests {
         assert_eq!(waiting.len(), 2);
         assert!(waiting.iter().any(|t| t.conversation.id == theo && t.closes));
         assert_eq!(w.db.count_left_out().unwrap(), LeftOut { automated: 0, not_needed: 0, quiet: 0, closed: 1 });
+    }
+
+    #[test]
+    fn a_question_and_then_a_thank_you_is_still_a_question() {
+        let w = world();
+        // In a chat: the ask, then "thx" as a message of its own.
+        w.thread(
+            "ada",
+            &[("self", "here's the deck", None), ("other", "can you check slide 4", None), ("other", "thx!", None)],
+        );
+        // In a group: one asks, another thanks.
+        w.thread(
+            "team",
+            &[("self", "deck attached", None), ("other", "Send the numbers too", None), ("other", "Thanks!", None)],
+        );
+        // Only thanks since the user last wrote: closing, however many.
+        w.thread(
+            "grace",
+            &[
+                ("other", "can you send the deck", None),
+                ("self", "here it is", None),
+                ("other", "Thanks!", None),
+                ("other", "👍", None),
+            ],
+        );
+        assert_eq!(w.waiting().len(), 2);
+        assert_eq!(w.db.count_left_out().unwrap().closed, 1);
     }
 
     #[test]

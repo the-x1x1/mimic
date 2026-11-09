@@ -2,6 +2,22 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.108] — 2026-11-08
+
+Tightened after a review of alpha.104–107.
+
+### Fixed
+
+- **A question followed by a thank-you is still a question.** alpha.106 read only the last thing someone sent, so "can you check slide 4" and then "thx!" was left out as a thank-you. Now everything they sent since you last wrote has to be only thanks.
+- **A message with certain letters could stop the home screen loading.** Some letters change length when lower-cased ("ẞ", the kelvin sign "K"); reading "ok ẞẞ" for a thank-you panicked, and the waiting list, its counts and drafting ahead all failed with it. The reading now works word by word and can't.
+- **Requests in capitals or Title Case aren't names.** "Thanks!" over "PLEASE CONFIRM", "Ok, Urgent", "Thanks. Thoughts" and "Hey call me asap / Thanks" were read as a thank-you with a name or a greeting round it; they stay on the list. A name only counts after a thank-you ("Thanks, Sam") or on its own line at the end.
+- **An ask after a dash, and pictographs that ask, aren't thank-yous.** "Thanks for this - send the final", "Invoice ❓", "Ok 🤔" and "ok 👍 📞" stay on the list; only a thumbs-up, a heart, a smile and the like close a conversation, and 🙏 only beside a thank-you.
+- **"Thanks in advance" isn't a thank-you**: it comes after an ask, often one in the subject I don't read for this.
+- **Replying by yourself never answers a thank-you you put back on the list.**
+- **Removing a source says everything that goes**: anyone you only know from it, and for a connected account the record of replies sent through it. Keep it gives focus back to Remove, and Remove can't be pressed again while it's asking.
+- In How you write, a figure that is words ("not measured yet") is set as words instead of wrapping over three lines at a number's size.
+- On a card I haven't written yet, What kind of reply comes before the box and Write it, so the keyboard reaches it before the button.
+
 ## [0.10.0-alpha.107] — 2026-11-08
 
 Setting up says where you are, and a draft says what it can't do once.

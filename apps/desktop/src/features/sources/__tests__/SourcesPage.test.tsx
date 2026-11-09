@@ -79,12 +79,17 @@ describe("Your mail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
     const ask = screen.getByRole("group", { name: "Remove riverastudio-sample.json" });
     expect(ask).toHaveTextContent("The 51 messages I read from it go too");
+    expect(ask).toHaveTextContent("anyone I know only from it");
+    // The safe answer has focus, and Remove can't be pressed again meanwhile.
+    expect(within(ask).getByRole("button", { name: "Keep it" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
     expect(ask).toHaveTextContent("can’t be undone");
     expect(ask).toHaveTextContent("The file itself isn’t touched");
     expect(native.deleteSource).not.toHaveBeenCalled();
 
     fireEvent.click(within(ask).getByRole("button", { name: "Keep it" }));
     expect(screen.queryByRole("group", { name: /^Remove / })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toHaveFocus();
     expect(native.deleteSource).not.toHaveBeenCalled();
   });
 
@@ -114,7 +119,7 @@ describe("Your mail", () => {
     expect(await screen.findByRole("button", { name: "Check now" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     const ask = screen.getByRole("group", { name: "Remove Riverastudio" });
-    expect(ask).toHaveTextContent("I forget how to sign in to it");
+    expect(ask).toHaveTextContent("the record of replies sent through it, and how I sign in to it");
     expect(ask).not.toHaveTextContent("The file itself");
   });
 
