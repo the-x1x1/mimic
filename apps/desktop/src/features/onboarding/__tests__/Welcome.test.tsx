@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingFlow } from "../OnboardingFlow";
@@ -65,5 +65,33 @@ describe("first-run welcome", () => {
     expect(await screen.findByText("Could not save setup")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Explore first" }));
     await waitFor(() => expect(native.completeOnboarding).toHaveBeenCalledTimes(2));
+  });
+
+  it("says which of the three steps this is, and Enter continues from the name", async () => {
+    native.setUserIdentity.mockResolvedValue({ id: "me", displayName: "Sam", identifiers: [] });
+    open();
+    // The welcome itself is not a step.
+    fireEvent.click(await screen.findByRole("button", { name: "Import my messages" }));
+    const steps = await screen.findByRole("list", { name: "Setting up" });
+    expect(
+      within(steps)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["1Who you are", "2Your messages", "3How you write"]);
+    expect(within(steps).getByText("Who you are").closest("li")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+
+    const name = await screen.findByLabelText("Your name");
+    fireEvent.change(name, { target: { value: "Sam" } });
+    fireEvent.submit(name.closest("form")!);
+    expect(await screen.findByText("Choose messages to learn from")).toBeInTheDocument();
+    const now = screen.getByRole("list", { name: "Setting up" });
+    expect(within(now).getByText("Your messages").closest("li")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(within(now).getByText("(done)", { exact: false })).toBeInTheDocument();
   });
 });

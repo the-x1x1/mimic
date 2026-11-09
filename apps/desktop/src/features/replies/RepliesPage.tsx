@@ -948,9 +948,12 @@ export function DraftReview({
         {draft.intent
           ? "Written from what you told me you wanted to say."
           : "You didn't tell me what you wanted to say, so this comes from their message and how you usually write — worth a read before you use it."}{" "}
+        {/* Why it can't be sent already ends by saying Use this copies it, so
+            it is said instead of that, not after it. */}
         {sendable
           ? "Send shows you who it goes to before it goes; “Use this” copies it for you to send yourself."
-          : `“Use this” copies it so you can paste it ${draft.channel === "email" ? "into your email" : "where you reply"}.${envelope.data?.whyNot ? ` ${envelope.data.whyNot}` : ""}`}
+          : (envelope.data?.whyNot ??
+            `“Use this” copies it so you can paste it ${draft.channel === "email" ? "into your email" : "where you reply"}.`)}
       </p>
     </div>
   );

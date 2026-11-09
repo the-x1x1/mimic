@@ -91,6 +91,7 @@ export function OnboardingFlow() {
         {error ? <InlineError>{error}</InlineError> : null}
         {onboarding.isError ? <InlineError>{onboarding.error.message}</InlineError> : null}
         {onboarding.isPending ? <p className="muted">Loading your setup…</p> : null}
+        {!welcome && onboarding.data ? <Steps step={step} /> : null}
         {welcome ? (
           <Card title="Start with what you already have">
             <p>
@@ -156,6 +157,49 @@ export function OnboardingFlow() {
   );
 }
 
+/** The three steps of setting up, as the first-run design has them. */
+const STEPS = [
+  { name: "Who you are", steps: ["identity"] },
+  { name: "Your messages", steps: ["source", "import"] },
+  { name: "How you write", steps: ["analyze"] },
+] as const;
+
+/**
+ * Where setting up has got to: three steps, the one under way marked, the ones
+ * before it done. Everything done when there is no step left.
+ */
+function Steps({ step }: { step: string | null }) {
+  const at =
+    step === null
+      ? STEPS.length
+      : STEPS.findIndex((s) => (s.steps as readonly string[]).includes(step));
+  return (
+    <ol className="steps" aria-label="Setting up">
+      {STEPS.map((s, i) => (
+        <li
+          key={s.name}
+          className={
+            i < at
+              ? "steps__step steps__step--done"
+              : i === at
+                ? "steps__step steps__step--now"
+                : "steps__step"
+          }
+          aria-current={i === at ? "step" : undefined}
+        >
+          <span className="steps__n" aria-hidden="true">
+            {i < at ? "✓" : i + 1}
+          </span>
+          <span className="steps__name">
+            {s.name}
+            {i < at ? <span className="visually-hidden"> (done)</span> : null}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /**
  * The way out, on every step that has one.
  *
@@ -175,14 +219,16 @@ function LeaveEarly({ state, onLeave }: { state: OnboardingState; onLeave: () =>
     );
   }
   return (
-    <p className="muted small">
+    <div className="leave-early">
       <Button variant="ghost" size="sm" onClick={onLeave}>
         Have a look around first
-      </Button>{" "}
-      There won&rsquo;t be anything in there yet &mdash; no replies, nobody I&rsquo;ve met, nothing
-      about how you write &mdash; but you can see where things are. Setup will be waiting under
-      Settings.
-    </p>
+      </Button>
+      <p className="muted small">
+        There won&rsquo;t be anything in there yet &mdash; no replies, nobody I&rsquo;ve met,
+        nothing about how you write &mdash; but you can see where things are. Setup will be waiting
+        under Settings.
+      </p>
+    </div>
   );
 }
 
@@ -218,18 +264,29 @@ function IdentityStep({ onContinue }: { onContinue: () => void }) {
         yours. You do not need to connect an account.
       </p>
       {!identity.data ? (
-        <>
+        // A form, so Enter continues from the name.
+        <form
+          className="stack gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim() && !setIdentity.isPending) {
+              setIdentity.mutate(name.trim(), { onSuccess: onContinue });
+            }
+          }}
+        >
           <Field label="Your name" htmlFor="ob-name">
             <input id="ob-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </Field>
-          <Button
-            variant="primary"
-            disabled={!name.trim() || setIdentity.isPending}
-            onClick={() => setIdentity.mutate(name.trim(), { onSuccess: onContinue })}
-          >
-            Continue
-          </Button>
-        </>
+          <div>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!name.trim() || setIdentity.isPending}
+            >
+              Continue
+            </Button>
+          </div>
+        </form>
       ) : (
         <>
           <p>Welcome, {identity.data.displayName}.</p>

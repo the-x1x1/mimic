@@ -2,6 +2,20 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.107] — 2026-11-08
+
+Setting up says where you are, and a draft says what it can't do once.
+
+### Changed
+
+- **Setting up shows its three steps** — who you are, your messages, how you write — with the one you're on marked and the ones behind you ticked, as the first-run design always had them.
+- **Enter continues from your name** in setup.
+- **"Have a look around first" sits on its own line** with what it means under it, instead of a button in the middle of a sentence.
+
+### Fixed
+
+- Under a draft that can't be sent from here, the line said "Use this copies it" twice; it says it once.
+
 ## [0.10.0-alpha.106] — 2026-11-08
 
 A thank-you isn't someone waiting on you.
