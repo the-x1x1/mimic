@@ -105,3 +105,16 @@ describe("nothing in the drawer or a dialog scrolls sideways", () => {
     expect(declarations(".table td")).toMatch(/overflow-wrap:\s*break-word/);
   });
 });
+
+describe("setting up's steps sit in a row", () => {
+  it("lays the three steps out side by side, under a name no other rule uses", () => {
+    // In alpha.107 they were ".steps", and an older ".steps" rule set them in
+    // a column.
+    const steps = declarations(".setup-steps");
+    expect(steps).toMatch(/display:\s*flex/);
+    expect(steps).not.toMatch(/flex-direction:\s*column/);
+    for (const [, selectors] of css.matchAll(/([^{}]+)\{[^{}]*\}/g)) {
+      expect((selectors ?? "").split(",").map((s) => s.trim())).not.toContain(".steps");
+    }
+  });
+});

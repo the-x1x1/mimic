@@ -174,23 +174,23 @@ function Steps({ step }: { step: string | null }) {
       ? STEPS.length
       : STEPS.findIndex((s) => (s.steps as readonly string[]).includes(step));
   return (
-    <ol className="steps" aria-label="Setting up">
+    <ol className="setup-steps" aria-label="Setting up">
       {STEPS.map((s, i) => (
         <li
           key={s.name}
           className={
             i < at
-              ? "steps__step steps__step--done"
+              ? "setup-steps__step setup-steps__step--done"
               : i === at
-                ? "steps__step steps__step--now"
-                : "steps__step"
+                ? "setup-steps__step setup-steps__step--now"
+                : "setup-steps__step"
           }
           aria-current={i === at ? "step" : undefined}
         >
-          <span className="steps__n" aria-hidden="true">
+          <span className="setup-steps__n" aria-hidden="true">
             {i < at ? "✓" : i + 1}
           </span>
-          <span className="steps__name">
+          <span className="setup-steps__name">
             {s.name}
             {i < at ? <span className="visually-hidden"> (done)</span> : null}
           </span>

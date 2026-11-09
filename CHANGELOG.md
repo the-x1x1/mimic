@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.113] — 2026-11-08
+
+Seen in a running build: setting up's three steps stood in a column.
+
+### Fixed
+
+- **Setting up's steps sit side by side**, as drawn. alpha.107 named them with a class an older, unused rule also named, and that rule stacked them.
+
 ## [0.10.0-alpha.112] — 2026-11-08
 
 Settings and the README say what counts as waiting now.
