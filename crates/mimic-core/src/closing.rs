@@ -20,9 +20,12 @@
 //! nothing is ever cut out of the text by a length measured on a lower-cased
 //! copy: lower-casing can change how many bytes a letter takes (alpha.106
 //! panicked on "ok ẞẞ", and the panic failed every query that read it).
-//! A name is only a name where names go — after a thank-you ("Thanks, Sam"),
-//! or on a line of its own at the end — and never in capitals, never a word
-//! that asks ("Confirm", "Urgent"). Only a few pictographs close anything
+//! A name is only a name when it is one of the names the caller passes — the
+//! sender's and the user's own — and only where names go: after a thank-you
+//! ("Thanks, Sam"), after a greeting, or on a line of its own at the end.
+//! alpha.108 guessed names from capital letters, and a phone that capitalises
+//! every line made "Thanks!" over "Resend Invoice" a thank-you to someone
+//! called Resend Invoice. Only a few pictographs close anything
 //! (a thumbs-up, a heart, a smile); a few more go with a thank-you but say
 //! nothing alone (🙏, a laugh); any other — ❓, 🤔, 📞 — is not a thank-you.
 //! And whether a thread is only closing is decided over everything they sent
@@ -96,6 +99,25 @@ const ACKS: &[&str] = &[
     "any time",
     "received",
     "done",
+];
+
+/// The closing phrases that thank, and so may say what for.
+const THANKS: &[&str] = &[
+    "thank you so much",
+    "thank you very much",
+    "thanks so much",
+    "thanks very much",
+    "thanks a lot",
+    "thanks a ton",
+    "thanks a million",
+    "many thanks",
+    "thank you",
+    "thank u",
+    "thankyou",
+    "thanks",
+    "thx",
+    "tysm",
+    "ty",
 ];
 
 /// What may follow a closing phrase in the same fragment. Not "in advance":
@@ -175,6 +197,7 @@ const ASKING_ALWAYS: &[&str] = &[
     "asap",
     "urgent",
     "urgently",
+    "nothing",
 ];
 
 /// A word anywhere in a fragment, or a line taken for a name, that makes it
@@ -280,6 +303,9 @@ const SIGN_OFFS: &[&str] = &[
     "yours",
 ];
 
+/// Every way of writing a question mark, the pictographs among them.
+const QUESTION_MARKS: [char; 10] = ['?', '？', '¿', '؟', '﹖', '❓', '❔', '⁉', '‽', '⸮'];
+
 /// Words a greeting line starts with.
 const GREETINGS: &[&str] = &["hi", "hey", "hello", "dear", "hiya", "morning", "good morning", "evening", "yo"];
 
@@ -294,12 +320,44 @@ const CLOSING_EMOJI: &[char] = &[
 /// as often as "thanks", and a laugh is not a thank-you.
 const NEUTRAL_EMOJI: &[char] = &['🙏', '😂', '🤣', '😅', '😆', '😉', '😎'];
 
-/// Whether `body` only closes the conversation. See the module comment.
+/// Whether `body` only closes the conversation, knowing no names.
 pub fn closes(body: &str) -> bool {
+    closes_with(body, "")
+}
+
+/// The names a message may use without asking anything: every word of
+/// `names` (the sender's display name and the user's, in SQL), lower-cased.
+struct Names(Vec<String>);
+
+impl Names {
+    fn of(names: &str) -> Self {
+        Names(
+            names
+                .split(|c: char| !c.is_alphabetic() && c != '\'' && c != '-')
+                .filter(|w| w.chars().count() > 1)
+                .map(str::to_lowercase)
+                .collect(),
+        )
+    }
+
+    /// One to three words, each one of these names: "Sam", "Maya Chen".
+    fn all(&self, words: &[(String, String)]) -> bool {
+        !words.is_empty() && words.len() <= 3 && words.iter().all(|(_, low)| self.0.contains(low))
+    }
+}
+
+/// Whether `body` only closes the conversation, where `names` are the names
+/// it may use (the sender's and the user's). See the module comment.
+pub fn closes_with(body: &str, names: &str) -> bool {
+    let names = Names::of(names);
     let Some(mut lines) = own_lines(body) else { return false };
+    // Asked before anything is set aside: "Thanks!" over "Friday?" asks.
+    if lines.iter().any(|l| l.contains(QUESTION_MARKS)) {
+        return false;
+    }
     // A greeting line ("Hi Sam,") says nothing either way, when it is only a
     // greeting and perhaps a name.
-    if lines.len() > 1 && is_greeting(&lines[0]) {
+    if lines.len() > 1 && is_greeting(&lines[0], &names) {
         lines.remove(0);
     }
     // Names and sign-offs at the end ("Best,", "Maya") say nothing either
@@ -307,7 +365,7 @@ pub fn closes(body: &str) -> bool {
     let mut popped = 0;
     while lines.len() > 1 && popped < 2 {
         let last = &lines[lines.len() - 1];
-        if is_name(&words_of(last)) || is_sign_off(last) {
+        if names.all(&words_of(last)) || is_sign_off(last, &names) {
             lines.pop();
             popped += 1;
         } else {
@@ -315,12 +373,12 @@ pub fn closes(body: &str) -> bool {
         }
     }
     let text = lines.join("\n");
-    if text.contains(['?', '？', '¿', '❓', '❔', '⁉', '‽']) || text.split_whitespace().count() > MOST_WORDS {
+    if text.split_whitespace().count() > MOST_WORDS {
         return false;
     }
     // Every part closes, and at least one is a thank-you rather than a name or
     // a neutral pictograph: "Maya" on its own is not one, nor is "🙏".
-    let read: Vec<Part> = fragments(&text).iter().map(|f| part(&f.text, f.after_comma)).collect();
+    let read: Vec<Part> = fragments(&text).iter().map(|f| part(&f.text, f.after_comma, &names)).collect();
     let mut closing = false;
     for (i, p) in read.iter().enumerate() {
         match p {
@@ -357,13 +415,28 @@ enum Part {
 fn own_lines(body: &str) -> Option<Vec<String>> {
     let mut out = Vec::new();
     let mut words = 0;
-    for raw in body.lines() {
+    let mut lines = body.lines();
+    while let Some(raw) = lines.next() {
         let line = raw.trim();
-        if line == "--" || line.starts_with("-----Original Message") {
+        if line.starts_with("-----Original Message") {
+            // Outlook's: what follows is the message answered, unquoted.
+            break;
+        }
+        if line == "--" {
+            // A signature. Nothing in it may ask: a chat message with a "--"
+            // line is not an email's signature.
+            if lines.clone().any(|l| l.contains(QUESTION_MARKS) || asks(&words_of(l), ASKING_ALWAYS)) {
+                return None;
+            }
             break;
         }
         let first = line.split_whitespace().next().unwrap_or_default();
         if first.eq_ignore_ascii_case("on") && line.ends_with("wrote:") {
+            // What follows is quoted; anything written under it, unquoted, is
+            // a reply written below the quote, which is not read here.
+            if lines.clone().any(|l| !l.trim().is_empty() && !l.trim_start().starts_with('>')) {
+                return None;
+            }
             break;
         }
         if line.starts_with('>') || line.is_empty() {
@@ -398,45 +471,28 @@ fn starts_with_phrase(words: &[(String, String)], phrase: &str) -> Option<usize>
     (words.len() >= p.len() && words.iter().zip(&p).all(|((_, low), w)| low == w)).then_some(p.len())
 }
 
-fn is_greeting(line: &str) -> bool {
-    if line.contains('?') {
-        return false;
-    }
+fn is_greeting(line: &str, names: &Names) -> bool {
     let words = words_of(line);
     for g in GREETINGS {
         if let Some(n) = starts_with_phrase(&words, g) {
             // Only a greeting, and at most a name after it: "Hi Sam," yes;
             // "Hey call me asap" no.
             let rest = &words[n..];
-            return rest.is_empty() || (rest.len() <= 2 && is_name(rest));
+            return rest.is_empty() || names.all(rest);
         }
     }
     false
 }
 
-/// One to three words, each capitalised and not all in capitals, none of them
-/// a closing phrase or a word that asks: a name, or initials. "Maya" and
-/// "Maya C." count; "PLEASE CONFIRM", "Asap" and "Thoughts" do not.
-fn is_name(words: &[(String, String)]) -> bool {
-    !words.is_empty()
-        && words.len() <= 3
-        && words.iter().all(|(bare, low)| {
-            let letters: Vec<char> = bare.chars().filter(|c| c.is_alphabetic()).collect();
-            let all_caps = letters.len() > 1 && letters.iter().all(|c| c.is_uppercase());
-            let mut chars = bare.chars();
-            chars.next().is_some_and(char::is_uppercase)
-                && chars.all(|c| c.is_alphabetic() || matches!(c, '\'' | '’' | '-' | '.'))
-                && !all_caps
-                && !ACKS.contains(&low.as_str())
-                && !ASKING.contains(&low.as_str())
-                && !GREETINGS.contains(&low.as_str())
-        })
+/// "Best," or "Kind regards, Maya": a sign-off, with at most a name after it.
+fn is_sign_off(line: &str, names: &Names) -> bool {
+    let words = words_of(line);
+    SIGN_OFFS.iter().any(|s| starts_with_phrase(&words, s).is_some_and(|n| n == words.len() || names.all(&words[n..])))
 }
 
-/// "Best," or "Kind regards, Maya": a sign-off, with at most a name after it.
-fn is_sign_off(line: &str) -> bool {
-    let words = words_of(line);
-    SIGN_OFFS.iter().any(|s| starts_with_phrase(&words, s).is_some_and(|n| n == words.len() || is_name(&words[n..])))
+/// Whether any of `words` is one of `list`.
+fn asks(words: &[(String, String)], list: &[&str]) -> bool {
+    words.iter().any(|(_, low)| list.contains(&low.as_str()))
 }
 
 /// A part of a message, and whether a comma came before it.
@@ -497,7 +553,7 @@ fn is_joiner(c: char) -> bool {
     matches!(c as u32, 0xFE0E | 0xFE0F | 0x200D | 0x1F3FB..=0x1F3FF | 0x20E3)
 }
 
-fn part(fragment: &str, after_comma: bool) -> Part {
+fn part(fragment: &str, after_comma: bool, names: &Names) -> Part {
     let mut chars = fragment.chars();
     if let (Some(c), None) = (chars.next(), chars.next()) {
         if is_pictograph(c) {
@@ -515,7 +571,6 @@ fn part(fragment: &str, after_comma: bool) -> Part {
         // Only punctuation: nothing either way.
         return Part::Neutral;
     }
-    let asks = |w: &[(String, String)]| w.iter().any(|(_, low)| ASKING.contains(&low.as_str()));
     let lows: Vec<&str> = words.iter().map(|(_, l)| l.as_str()).collect();
     if PLEASANTRIES.contains(&lows.join(" ").as_str()) || is_wish(&lows) {
         return Part::Closing;
@@ -526,22 +581,32 @@ fn part(fragment: &str, after_comma: bool) -> Part {
         if let Some(n) = starts_with_phrase(&words, ack) {
             let rest = &words[n..];
             if rest.first().is_some_and(|(_, w)| w == "for") {
-                // "for the update", "for letting me know", "for everything": a
-                // few words of what the thanks is for, none of them asking.
-                if (2..=6).contains(&rest.len()) && !rest.iter().any(|(_, w)| ASKING_ALWAYS.contains(&w.as_str())) {
+                // "Thanks for the update", "thank you for letting me know": a
+                // few words of what the thanks is for, after a thank-you only.
+                // The word straight after "for", or after "for the", may be
+                // one that asks as a verb ("the update", "the call"); none
+                // after it may.
+                let what = &rest[1..];
+                let skip = if what.first().is_some_and(|(_, w)| matches!(w.as_str(), "the" | "your" | "this" | "that"))
+                {
+                    2
+                } else {
+                    1
+                };
+                if THANKS.contains(ack)
+                    && (2..=4).contains(&rest.len())
+                    && !asks(what, ASKING_ALWAYS)
+                    && !asks(&what[skip.min(what.len())..], ASKING)
+                {
                     return Part::Closing;
                 }
-            } else if !asks(rest) && rest_closes(rest) {
+            } else if !asks(rest, ASKING) && rest_closes(rest, names) {
                 return Part::Closing;
             }
         }
     }
-    // Before a name is considered, so that "Sorry" is never read as one.
-    if asks(&words) {
-        return Part::Other;
-    }
     // A name, only where a comma set it off from a thank-you before it.
-    if after_comma && is_name(&words) {
+    if after_comma && names.all(&words) {
         return Part::Name;
     }
     Part::Other
@@ -549,17 +614,17 @@ fn part(fragment: &str, after_comma: bool) -> Part {
 
 /// What follows a closing phrase: nothing, "so much", "for the update", or a
 /// name ("thanks Sam").
-fn rest_closes(rest: &[(String, String)]) -> bool {
+fn rest_closes(rest: &[(String, String)], names: &Names) -> bool {
     if rest.is_empty() {
         return true;
     }
     for a in AFTER_ACK {
         if let Some(n) = starts_with_phrase(rest, a) {
-            return rest_closes(&rest[n..]);
+            return rest_closes(&rest[n..], names);
         }
     }
-    // "Thanks Sam", "thank you Dr Patel": a name after it, written as one.
-    is_name(rest)
+    // "Thanks Sam": one of the names after it.
+    names.all(rest)
 }
 
 fn is_wish(words: &[&str]) -> bool {
@@ -574,7 +639,10 @@ fn is_wish(words: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::closes;
+    /// The sender's name and the user's, as the query passes them.
+    fn closes(body: &str) -> bool {
+        super::closes_with(body, "Maya Chen Sam Rivera Jonah Okafor Priya Nair")
+    }
 
     #[test]
     fn a_thank_you_and_an_okay_close_a_conversation() {
@@ -670,7 +738,7 @@ mod tests {
 
     #[test]
     fn a_thank_you_for_something_long_is_not_only_a_thank_you() {
-        assert!(closes("Thanks for sending the revised numbers"));
+        assert!(closes("Thanks for sending the numbers"));
         assert!(!closes("Thanks for sending the revised numbers to the whole board yesterday"));
     }
 
@@ -748,5 +816,78 @@ mod tests {
         let long = "word ".repeat(10_000);
         assert!(!closes(&format!("Thanks!\n{long}")));
         assert!(!closes(&"Thanks!\n".repeat(100)));
+    }
+
+    #[test]
+    fn a_question_mark_on_a_last_line_is_still_a_question() {
+        for body in [
+            "Thanks!\nFriday?",
+            "Thanks\nSam?",
+            "Got it\nSame Link?",
+            "ok\nZoom?",
+            "Thanks!\nMonday？",
+            "Thanks؟",
+            "thanks﹖",
+        ] {
+            assert!(!closes(body), "{body:?} should not close");
+        }
+    }
+
+    #[test]
+    fn only_the_names_given_are_names() {
+        for body in [
+            "Thanks!\nResend Invoice",
+            "Thanks\nResend",
+            "Thanks, Zoom Link",
+            "Great, Share Deck",
+            "Thanks Book Room",
+            "Thanks Forward Deck",
+            "Ok Ship It",
+            "Cool, Discuss Monday",
+            "k\nDeadline Friday",
+            "Thanks, Schedule Meeting",
+            "thx, Eta",
+            "ok, Status",
+            "Thanks!\nRsvp",
+            "Thanks!\nBest,\nResend Deck",
+            "Dear Resend\nThanks",
+        ] {
+            assert!(!closes(body), "{body:?} should not close");
+        }
+        // The same names, given, are names.
+        assert!(closes("Thanks, Maya"));
+        assert!(closes("Hi Sam,\nThanks!\nMaya Chen"));
+        // And knowing no names, no word is one.
+        assert!(!super::closes("Thanks, Maya"));
+        assert!(super::closes("Thanks!"));
+    }
+
+    #[test]
+    fn a_thank_you_for_something_is_only_that() {
+        for body in [
+            "thanks for the draft send the final",
+            "thanks for that call me later",
+            "thanks for this review it tonight",
+            "Thanks for the update tell me more",
+            "thanks for the deck sign and return",
+            "thanks for the invoice pay by friday",
+            "ok for me to call you",
+            "Thanks for nothing",
+        ] {
+            assert!(!closes(body), "{body:?} should not close");
+        }
+        for body in
+            ["Thanks for the update", "thank you for the call", "Thanks for your help!", "thanks for letting me know"]
+        {
+            assert!(closes(body), "{body:?} should close");
+        }
+    }
+
+    #[test]
+    fn what_is_written_under_a_quote_or_a_dashed_line_is_read() {
+        assert!(!closes("Thanks!\nOn Monday Sam wrote:\nalso send the deck"));
+        assert!(!closes("ok\n--\nalso can you resend the deck"));
+        assert!(closes("Thanks!\nOn Monday Sam wrote:\n> here's the deck"));
+        assert!(closes("Thanks!\n--\nMaya Chen\nNorthwind"));
     }
 }

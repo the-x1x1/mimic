@@ -201,20 +201,33 @@ fn unanswered_cte_in(scope: Scope) -> String {
     // that first. Materialized, so the reading is made once per thread
     // however many times a query below names it.
     let other_automated = automated_of("o");
+    let self_automated = automated_of("s");
+    // The names a thank-you may use: the sender's and the user's.
+    let names = |m: &str| {
+        format!(
+            "COALESCE((SELECT p.display_name FROM participants p WHERE p.id = {m}.participant_id), '') || ' ' ||
+             COALESCE((SELECT ui.display_name FROM user_identity ui LIMIT 1), '')"
+        )
+    };
+    let (deciding_names, other_names) = (names("dm"), names("o"));
     format!(
         "{deciding},
          unanswered AS MATERIALIZED (
            SELECT d.conversation_id, d.message_id, d.automated, tm.mark AS mark,
                   COALESCE(julianday(dm.sent_at) < julianday(:cutoff), 0) AS quiet,
-                  CASE WHEN d.automated IS NULL AND mimic_closes(dm.body) AND NOT EXISTS (
+                  CASE WHEN d.automated IS NULL AND mimic_closes(dm.body, {deciding_names}) AND NOT EXISTS (
                          SELECT 1 FROM messages o
                          WHERE o.conversation_id = d.conversation_id AND o.direction = 'other'
                            AND o.id <> dm.id
-                           AND o.sequence_index > COALESCE((
-                                 SELECT MAX(s.sequence_index) FROM messages s
-                                 WHERE s.conversation_id = d.conversation_id AND s.direction = 'self'), -1)
                            AND {other_automated} IS NULL
-                           AND NOT mimic_closes(o.body))
+                           -- After every message the user wrote themselves: a
+                           -- vacation responder's reply is not the user writing.
+                           AND NOT EXISTS (
+                                 SELECT 1 FROM messages s
+                                 WHERE s.conversation_id = d.conversation_id AND s.direction = 'self'
+                                   AND {self_automated} IS NULL
+                                   AND (s.sequence_index, s.id) > (o.sequence_index, o.id))
+                           AND NOT mimic_closes(o.body, {other_names}))
                        THEN 1 ELSE 0 END AS closes
            FROM deciding d
            JOIN messages dm ON dm.id = d.message_id
@@ -772,7 +785,39 @@ mod tests {
                 ("other", "👍", None),
             ],
         );
-        assert_eq!(w.waiting().len(), 2);
+        let mut waiting = w.waiting();
+        waiting.sort();
+        assert_eq!(waiting, ["Thanks!", "thx!"], "ada's and the team's, each still a question");
+        let left = w.db.threads_left_out(10).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].conversation.subject.as_deref(), Some("grace"));
+        assert!(left[0].closes);
+    }
+
+    #[test]
+    fn the_users_own_automatic_reply_is_not_the_user_writing() {
+        let w = world();
+        // Ada asks, the user's vacation responder answers, Ada thanks it.
+        w.thread(
+            "ada",
+            &[
+                ("other", "can you check slide 4", None),
+                ("self", "I'm away until Monday", Some("auto_reply")),
+                ("other", "thx", None),
+            ],
+        );
+        assert_eq!(w.waiting(), ["thx"]);
+        assert_eq!(w.db.count_left_out().unwrap().closed, 0);
+    }
+
+    #[test]
+    fn a_name_is_a_name_only_when_it_is_the_senders_or_the_users() {
+        let w = world();
+        w.db.set_user_identity("Sam Rivera").unwrap();
+        // The sender here is called "ada" (the world's key).
+        w.thread("ada", &[("self", "deck attached", None), ("other", "Thanks, Sam", None)]);
+        w.thread("grace", &[("self", "deck attached", None), ("other", "Thanks!\nResend Invoice", None)]);
+        assert_eq!(w.waiting(), ["Thanks!\nResend Invoice"]);
         assert_eq!(w.db.count_left_out().unwrap().closed, 1);
     }
 

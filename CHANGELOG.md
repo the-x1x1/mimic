@@ -2,6 +2,18 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.109] — 2026-11-08
+
+Tightened again after a re-review of alpha.108: a thank-you is read more carefully still.
+
+### Fixed
+
+- **Only real names count as names.** I used to take any word with a capital letter for a name, so "Thanks!" over "Resend Invoice", or "Great, Share Deck", read as a thank-you to someone. Now the only names a thank-you can carry are the sender's and yours.
+- **A question mark anywhere is a question**, even on a last line I'd otherwise have taken for a name ("Thanks!" over "Friday?"), and in Arabic and small forms.
+- **"Thanks for …" is a thank-you only when it's a few words of what for** — "thanks for the update" is; "thanks for the draft send the final" isn't.
+- **Your own vacation responder doesn't count as you writing.** A question, then your out-of-office, then their "thx" stays on your list.
+- **What's written under a quote or a dashed line is read**: a reply typed below "On Monday Sam wrote:" or under "--" in a chat isn't passed over.
+
 ## [0.10.0-alpha.108] — 2026-11-08
 
 Tightened after a review of alpha.104–107.
