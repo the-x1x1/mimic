@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.111] — 2026-11-08
+
+Seen in a running build: "Thanks for the notes!" stayed on the list.
+
+### Changed
+
+- **More of the things people say thanks for count**: the notes, the deck, the doc, the slides, the file, the summary, the recap, the details, a photo, a video, an article. "Thanks for the notes!" after you sent notes is a thank-you.
+
 ## [0.10.0-alpha.110] — 2026-11-08
 
 A third read of the thank-you reading, and what it found.
