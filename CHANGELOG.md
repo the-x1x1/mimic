@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.115] — 2026-11-10
+
+Seen in a running build: turn a reply down and the card said none had been written.
+
+### Fixed
+
+- **After "Not this one", the card says so.** It read "I haven't written this one yet — I don't know yet how you write to Dad", a second after showing what it had written. It now says "Not that one, then" and asks what to say instead, and the keyboard is already in the box to say it. After "Use this" it says the reply is yours to send, and offers another.
+- **"Change it" starts typing at the end of the reply**, not in front of its first word.
+
 ## [0.10.0-alpha.114] — 2026-11-10
 
 A newsletter in a file isn't someone waiting on you.

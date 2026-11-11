@@ -421,6 +421,15 @@ export function Thread({
   const [doneWith, setDoneWith] = useState<string | null>(null);
   const candidate = written ?? thread.draft;
   const draft = candidate && candidate.id !== doneWith ? candidate : null;
+  // What became of the draft that was here, so the form under it doesn't say
+  // nothing was ever written.
+  const [after, setAfter] = useState<"used" | "dropped" | null>(null);
+  const intentRef = useRef<HTMLInputElement>(null);
+  // The button that was pressed went with the draft; without this the
+  // keyboard is left on nothing.
+  useEffect(() => {
+    if (after === "dropped") intentRef.current?.focus();
+  }, [after]);
   const [intent, setIntent] = useState("");
   // Empty means "work it out from my note", which is the default: most people
   // will never touch this, and the note is read the same way either way.
@@ -499,9 +508,10 @@ export function Thread({
           key={draft.id}
           draft={draft}
           alternatives={thread.draft?.id === draft.id ? thread.alternatives : []}
-          onDone={() => {
+          onDone={(how) => {
             setDoneWith(draft.id);
             setWritten(null);
+            setAfter(how);
           }}
         />
       ) : (
@@ -513,11 +523,21 @@ export function Thread({
             if (!generate.isPending) void writeDraft();
           }}
         >
-          <div className="letter-label">I haven&rsquo;t written this one yet</div>
+          <div className="letter-label">
+            {after === "dropped"
+              ? "Not that one, then"
+              : after === "used"
+                ? "That one\u2019s yours to send"
+                : "I haven\u2019t written this one yet"}
+          </div>
           <p className="muted small">
-            {thread.participant && !thread.hasRelationshipProfile
-              ? `I don't know yet how you write to ${who.split(" ")[0]}, so tell me roughly what to say and I'll put it in your words.`
-              : "Tell me roughly what to say, or leave it empty and I'll answer what they asked."}
+            {after === "dropped"
+              ? "Tell me roughly what to say instead, or leave it empty and I\u2019ll try again."
+              : after === "used"
+                ? "If it wasn\u2019t right after all, tell me roughly what to say and I\u2019ll write another."
+                : thread.participant && !thread.hasRelationshipProfile
+                  ? `I don't know yet how you write to ${who.split(" ")[0]}, so tell me roughly what to say and I'll put it in your words.`
+                  : "Tell me roughly what to say, or leave it empty and I'll answer what they asked."}
           </p>
           {situations.data ? (
             <label className="thread__kind">
@@ -538,6 +558,7 @@ export function Thread({
           <div className="thread__ask">
             <input
               type="text"
+              ref={intentRef}
               className="thread__intent"
               aria-label={`Roughly what you want to say to ${who}`}
               placeholder="yes, happy to, same as last year"
@@ -737,7 +758,8 @@ export function DraftReview({
   draft: Draft;
   /** Other ways of saying it already on offer beside it, oldest first. */
   alternatives?: Draft[];
-  onDone: () => void;
+  /** Called when the draft is finished with, saying whether it was taken. */
+  onDone: (how: "used" | "dropped") => void;
 }) {
   const resolve = useResolveDraft();
   const another = useWriteAnother();
@@ -791,7 +813,7 @@ export function DraftReview({
       edited && adjustmentOf(d) === null ? "Copied. I noticed what you changed." : "Copied.",
       "Paste it into your email and send it from there.",
     );
-    onDone();
+    onDone("used");
   }
 
   async function drop(d: Draft) {
@@ -799,7 +821,7 @@ export function DraftReview({
     setSaid("");
     await resolve.mutateAsync({ draftId: d.id, outcome: "discarded", finalText: null });
     if (d.id === draft.id) {
-      onDone();
+      onDone("dropped");
       return;
     }
     const at = others.findIndex((o) => o.id === d.id);
@@ -842,7 +864,7 @@ export function DraftReview({
           onUse={(text) => quietly(use(draft, text))}
           onDrop={others.length > 0 ? undefined : () => quietly(drop(draft))}
           envelope={sendable}
-          onSent={onDone}
+          onSent={() => onDone("used")}
         />
         {others.map((d) => (
           <DraftWay
@@ -854,7 +876,7 @@ export function DraftReview({
             onUse={(text) => quietly(use(d, text))}
             onDrop={() => quietly(drop(d))}
             envelope={sendable}
-            onSent={onDone}
+            onSent={() => onDone("used")}
           />
         ))}
       </div>
@@ -1013,6 +1035,11 @@ function DraftWay({
             value={text}
             onChange={(e) => setText(e.target.value)}
             autoFocus
+            // Start where typing carries on, not in front of the first word.
+            onFocus={(e) => {
+              const end = e.currentTarget.value.length;
+              e.currentTarget.setSelectionRange(end, end);
+            }}
           />
         </>
       ) : (

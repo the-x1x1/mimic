@@ -1,11 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DashboardThread } from "@mimic/contracts";
+import type { DashboardThread, Draft } from "@mimic/contracts";
 import { Thread } from "../RepliesPage";
 
 // The real hooks run; only the native calls are replaced.
-const native = vi.hoisted(() => ({ generateDraft: vi.fn(), situations: vi.fn() }));
+const native = vi.hoisted(() => ({
+  generateDraft: vi.fn(),
+  situations: vi.fn(),
+  resolveDraft: vi.fn(),
+}));
 vi.mock("@/lib/ipc", () => ({ ipc: native }));
 
 const thread = (over: Partial<DashboardThread> = {}): DashboardThread => ({
@@ -91,5 +95,75 @@ describe("asking for a reply in a few words", () => {
         "Tell me roughly what to say, or leave it empty and I'll answer what they asked.",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+const prepared: Draft = {
+  id: "d1",
+  participantId: "p1",
+  conversationId: "c1",
+  channel: "sms",
+  situationId: null,
+  incomingMessage: "did you see the game last night",
+  intent: null,
+  generatedText: "yes caught the second half crazy ending",
+  finalText: null,
+  provider: "local",
+  model: "llama3.1:8b",
+  context: {},
+  promptHash: "abc",
+  evidence: {},
+  createdAt: "2026-11-08T02:00:00Z",
+  resolvedAt: null,
+  outcome: null,
+  incomingMessageId: "m5",
+  alternativeTo: null,
+};
+
+describe("what the card says once its draft is gone", () => {
+  beforeEach(() => {
+    for (const f of Object.values(native)) f.mockReset();
+    native.situations.mockResolvedValue([]);
+    native.resolveDraft.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it("says a draft was turned down, not that none was written, and takes the keyboard", async () => {
+    renderIt(thread({ draft: prepared }));
+    fireEvent.click(screen.getByRole("button", { name: "Not this one" }));
+    const form = await screen.findByRole("form", { name: "Write a reply to Dad" });
+    expect(within(form).getByText("Not that one, then")).toBeInTheDocument();
+    expect(within(form).getByText(/what to say instead/)).toBeInTheDocument();
+    expect(within(form).queryByText(/haven\u2019t written this one yet/)).toBeNull();
+    expect(within(form).queryByText(/don't know yet how you write/)).toBeNull();
+    expect(
+      within(form).getByRole("textbox", { name: "Roughly what you want to say to Dad" }),
+    ).toHaveFocus();
+  });
+
+  it("says a taken draft is theirs to send, and leaves the keyboard alone", async () => {
+    renderIt(thread({ draft: prepared }));
+    fireEvent.click(screen.getByRole("button", { name: "Use this" }));
+    const form = await screen.findByRole("form", { name: "Write a reply to Dad" });
+    expect(within(form).getByText("That one\u2019s yours to send")).toBeInTheDocument();
+    expect(
+      within(form).getByRole("textbox", { name: "Roughly what you want to say to Dad" }),
+    ).not.toHaveFocus();
+  });
+
+  it("still says nothing was written when nothing was", () => {
+    renderIt(thread());
+    expect(screen.getByText("I haven\u2019t written this one yet")).toBeInTheDocument();
+  });
+
+  it("opens the editor with the caret after the last word", () => {
+    renderIt(thread({ draft: prepared }));
+    fireEvent.click(screen.getByRole("button", { name: "Change it" }));
+    const box = screen.getByDisplayValue(prepared.generatedText) as HTMLTextAreaElement;
+    fireEvent.focus(box);
+    expect(box.selectionStart).toBe(prepared.generatedText.length);
   });
 });
