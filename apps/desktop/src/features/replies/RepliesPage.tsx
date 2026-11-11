@@ -445,6 +445,9 @@ export function Thread({
   // Empty means "work it out from my note", which is the default: most people
   // will never touch this, and the note is read the same way either way.
   const [situationId, setSituationId] = useState("");
+  // So the chooser stays out of the way until it's asked for: nine cards each
+  // opening on a menu nobody needs made the list twice as long.
+  const [choosingKind, setChoosingKind] = useState(false);
   const situations = useSituations();
   const who = thread.participant?.displayName ?? "Someone I couldn't put a name to";
   const address = thread.participant?.identifiers?.[0]?.value ?? null;
@@ -566,10 +569,14 @@ export function Thread({
                   ? `I don't know yet how you write to ${who.split(" ")[0]}, so tell me roughly what to say and I'll put it in your words.`
                   : "Tell me roughly what to say, or leave it empty and I'll answer what they asked."}
           </p>
-          {situations.data ? (
+          {situations.data && choosingKind ? (
             <label className="thread__kind">
               <span className="muted small">What kind of reply</span>
-              <select value={situationId} onChange={(e) => setSituationId(e.target.value)}>
+              <select
+                value={situationId}
+                onChange={(e) => setSituationId(e.target.value)}
+                autoFocus
+              >
                 <option value="">Work it out from what I wrote</option>
                 {situations.data.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -596,6 +603,18 @@ export function Thread({
               {generate.isPending ? "Writing…" : "Write it"}
             </Button>
           </div>
+          {situations.data && situations.data.length > 0 && !choosingKind ? (
+            <div className="thread__aside">
+              <button
+                type="button"
+                className="linkish"
+                aria-label={`Say what kind of reply this is: ${who}`}
+                onClick={() => setChoosingKind(true)}
+              >
+                Say what kind of reply this is
+              </button>
+            </div>
+          ) : null}
         </form>
       )}
       {generate.isError ? <InlineError>{(generate.error as Error).message}</InlineError> : null}

@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.122] — 2026-11-10
+
+Seen in a running build: nine people waiting, and nine identical menus down the page.
+
+### Changed
+
+- **A card asks for what you want to say, and nothing else.** The "What kind of reply" menu, which works itself out from your note unless you say otherwise, is behind "Say what kind of reply this is" under the box. Each card is two lines shorter.
+
 ## [0.10.0-alpha.121] — 2026-11-10
 
 Seen in a running build: two cards from Theo, one under the other, looked like one card twice.

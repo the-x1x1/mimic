@@ -187,3 +187,37 @@ describe("two cards from one person", () => {
     expect(screen.queryByText(/Email · 5 messages/)).toBeNull();
   });
 });
+
+describe("what kind of reply", () => {
+  beforeEach(() => {
+    for (const f of Object.values(native)) f.mockReset();
+    native.generateDraft.mockReturnValue(new Promise(() => {}));
+    native.situations.mockResolvedValue([
+      { id: "decline", label: "Saying no", measurable: true },
+      { id: "thanks", label: "Thanking someone", measurable: false },
+    ]);
+  });
+
+  it("is chosen only when asked for, and what is chosen goes with the note", async () => {
+    renderIt(thread());
+    const ask = await screen.findByRole("button", {
+      name: "Say what kind of reply this is: Dad",
+    });
+    expect(screen.queryByRole("combobox")).toBeNull();
+    fireEvent.click(ask);
+    const kinds = screen.getByRole("combobox", { name: "What kind of reply" });
+    expect(kinds).toHaveFocus();
+    expect(screen.queryByRole("button", { name: /Say what kind of reply/ })).toBeNull();
+    fireEvent.change(kinds, { target: { value: "decline" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Write a reply to Dad" }));
+    await waitFor(() => expect(native.generateDraft).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(native.generateDraft.mock.calls[0])).toContain("decline");
+  });
+
+  it("isn't offered when there are no kinds to choose from", async () => {
+    native.situations.mockResolvedValue([]);
+    renderIt(thread());
+    await waitFor(() => expect(native.situations).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /Say what kind of reply/ })).toBeNull();
+  });
+});
