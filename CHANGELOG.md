@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.116] — 2026-11-10
+
+Seen in a running build: every conversation with Dad was headed "No subject".
+
+### Fixed
+
+- **Texts and chats with someone are named by what they are and when** — "Text messages, 2 d ago" — in People → Conversations. Only mail has subjects, so only mail is ever said to have none.
+
 ## [0.10.0-alpha.115] — 2026-11-10
 
 Seen in a running build: turn a reply down and the card said none had been written.

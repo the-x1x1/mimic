@@ -6,6 +6,7 @@ import type {
   PersonConversation,
   PersonConversations as Page,
 } from "@mimic/contracts";
+import { formatRelative } from "@/lib/format";
 import { useFindWith } from "@/state/find";
 import { CONVERSATION_GONE, PersonConversations } from "../PersonConversations";
 
@@ -162,5 +163,25 @@ describe("every conversation with someone, not only what is waiting", () => {
     expect(window.location.hash).toBe("#/find");
     useFindWith.getState().ask(null);
     window.location.hash = "";
+  });
+
+  it("names texts by what they are and when, and only mail as having no subject", async () => {
+    const when = formatRelative("2026-09-02T10:00:00Z");
+    native.personConversations.mockResolvedValue(
+      page([
+        convo("texts", { subject: null, channel: "sms", messageCount: 2 }),
+        convo("mail", { subject: "  ", channel: "email" }),
+      ]),
+    );
+    renderIt();
+    const texts = await screen.findByText(`Text messages, ${when}`);
+    expect(texts.tagName).toBe("STRONG");
+    // Said once: not again beside the heading.
+    expect(texts.nextElementSibling).toHaveTextContent(/^2 messages$/);
+    expect(
+      screen.getByRole("button", { name: `Read it: Text messages, ${when}` }),
+    ).toBeInTheDocument();
+    const mail = screen.getByText("No subject");
+    expect(mail.nextElementSibling).toHaveTextContent(`Email · 3 messages · ${when}`);
   });
 });

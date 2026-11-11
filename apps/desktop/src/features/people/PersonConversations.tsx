@@ -120,14 +120,19 @@ export function PersonConversations({
 function ConversationItem({ c, withinDays }: { c: PersonConversation; withinDays: number | null }) {
   const [open, setOpen] = useState(false);
   const mark = useMarkThread();
-  const subject = c.subject?.trim() || "No subject";
+  const channel = CHANNEL_LABELS[c.channel as Channel] ?? c.channel;
+  const when = c.lastMessageAt ? formatRelative(c.lastMessageAt) : null;
+  // Only mail has subjects. A run of texts each headed "No subject" says
+  // nothing three times, so those are named by what they are and when.
+  const named = c.subject?.trim() || (c.channel === "email" ? "No subject" : null);
+  const subject = named ?? [channel, when].filter((x) => x !== null).join(", ");
   const deciding = c.decidingMessageId;
   const region = `conversation-${c.conversationId}`;
   const facts = [
-    CHANNEL_LABELS[c.channel as Channel] ?? c.channel,
+    named ? channel : null,
     c.messageCount === 1 ? "1 message" : `${c.messageCount.toLocaleString()} messages`,
     c.isGroup ? "with others too" : null,
-    c.lastMessageAt ? formatRelative(c.lastMessageAt) : null,
+    named ? when : null,
   ].filter((f): f is string => f !== null);
   return (
     <li className="stack gap-1">
