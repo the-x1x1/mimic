@@ -2,6 +2,12 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.118] — 2026-11-10
+
+### Fixed
+
+- **Find no longer says a text was "in No subject".** What it found is named by its conversation only when the conversation has a name.
+
 ## [0.10.0-alpha.117] — 2026-11-10
 
 Seen in a running build: "legend 👍" was someone waiting on you.

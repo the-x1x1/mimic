@@ -103,7 +103,8 @@ describe("finding what was said", () => {
     expect(within(items[0]!).getByText("Friday").tagName).toBe("MARK");
     expect(items[0]).toHaveTextContent("Ada wrote");
     expect(items[0]).toHaveTextContent("in Lunch");
-    expect(items[1]).toHaveTextContent("in No subject");
+    // A conversation with no subject isn't named as having none.
+    expect(items[1]).not.toHaveTextContent("No subject");
 
     fireEvent.click(screen.getByRole("button", { name: "Show older ones" }));
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));

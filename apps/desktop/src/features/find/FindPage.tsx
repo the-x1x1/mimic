@@ -240,12 +240,14 @@ export function FindPage() {
  */
 function FoundItem({ f }: { f: FoundMessage }) {
   const [open, setOpen] = useState(false);
-  const subject = f.subject?.trim() || "No subject";
+  // Texts and chats have no subject, and "in No subject" under each of them
+  // says nothing, so a conversation is named only when it has a name.
+  const subject = f.subject?.trim() || null;
   const region = `found-${f.message.id}`;
   const about = `${region}-about`;
   const facts = [
     f.message.sentAt ? formatRelative(f.message.sentAt) : null,
-    `in ${subject}`,
+    subject ? `in ${subject}` : null,
   ].filter((x): x is string => x !== null);
   return (
     <li className="stack gap-1" tabIndex={-1}>
@@ -256,7 +258,7 @@ function FoundItem({ f }: { f: FoundMessage }) {
         }
       >
         {writerOf(f.message)}
-        <span className="muted"> · {facts.join(" · ")}</span>
+        {facts.length > 0 ? <span className="muted"> · {facts.join(" · ")}</span> : null}
       </div>
       <p className="found__snippet">
         {f.snippet.map((p, i) =>
