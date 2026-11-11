@@ -677,6 +677,19 @@ fieldset.message-filing {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-2);
 }
+/* One line of where replying for you stands. The mark sits on the first line
+   of what it marks, and every mark is as wide as the others, so a line that
+   wraps doesn't leave its tick halfway down or its words a pixel off. */
+.standing-step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.standing-step__mark {
+  flex: none;
+  width: 1em;
+  text-align: center;
+}
 .status-list,
 .plain-list {
   list-style: none;

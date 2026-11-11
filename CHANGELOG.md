@@ -2,6 +2,12 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.120] — 2026-11-10
+
+### Fixed
+
+- **In Settings, each tick under "Replying for you" sits on the first line of what it ticks.** A line that wrapped had its tick halfway down, and its words a pixel left of the lines around it.
+
 ## [0.10.0-alpha.119] — 2026-11-10
 
 Seen in a running build: How you write opened on four cramped columns.

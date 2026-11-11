@@ -25,8 +25,10 @@ function Step({
   action?: ReactNode;
 }) {
   return (
-    <li className="row gap-2">
-      <span aria-hidden="true">{done === null ? "·" : done ? "✓" : "○"}</span>
+    <li className="standing-step">
+      <span className="standing-step__mark" aria-hidden="true">
+        {done === null ? "·" : done ? "✓" : "○"}
+      </span>
       <span>
         {children} {action}
       </span>
