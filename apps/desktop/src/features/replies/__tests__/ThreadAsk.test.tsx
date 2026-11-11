@@ -42,11 +42,11 @@ const thread = (over: Partial<DashboardThread> = {}): DashboardThread => ({
   ...over,
 });
 
-function renderIt(t: DashboardThread) {
+function renderIt(t: DashboardThread, oneOfSeveral = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <Thread thread={t} />
+      <Thread thread={t} oneOfSeveral={oneOfSeveral} />
     </QueryClientProvider>,
   );
 }
@@ -165,5 +165,25 @@ describe("what the card says once its draft is gone", () => {
     const box = screen.getByDisplayValue(prepared.generatedText) as HTMLTextAreaElement;
     fireEvent.focus(box);
     expect(box.selectionStart).toBe(prepared.generatedText.length);
+  });
+});
+
+describe("two cards from one person", () => {
+  beforeEach(() => {
+    for (const f of Object.values(native)) f.mockReset();
+    native.situations.mockResolvedValue([]);
+  });
+
+  it("says which conversation a card with no subject is", () => {
+    renderIt(thread(), true);
+    expect(screen.getByText("Text messages · 5 messages")).toBeInTheDocument();
+  });
+
+  it("says nothing more for the only card from someone, or one with a subject", () => {
+    renderIt(thread());
+    expect(screen.queryByText(/5 messages/)).toBeNull();
+    renderIt(thread({ subject: "Saturday", channel: "email" }), true);
+    expect(screen.getByText("Saturday")).toBeInTheDocument();
+    expect(screen.queryByText(/Email · 5 messages/)).toBeNull();
   });
 });

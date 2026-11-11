@@ -4,7 +4,9 @@ import { Link } from "react-router-dom";
 import { Button, InlineError } from "@mimic/ui";
 import {
   ADJUSTMENT_LABELS,
+  CHANNEL_LABELS,
   CLOSED_WHY,
+  type Channel,
   Adjustment,
   adjustmentOf,
   type Dashboard,
@@ -94,6 +96,12 @@ export function RepliesPage() {
             key={`${t.conversationId}:${t.lastMessageId}`}
             thread={t}
             withinDays={data.waitingWithinDays}
+            oneOfSeveral={data.awaiting.some(
+              (o) =>
+                o.conversationId !== t.conversationId &&
+                o.participant !== null &&
+                o.participant.id === t.participant?.id,
+            )}
           />
         ))}
       </div>
@@ -408,10 +416,13 @@ function Footer({ data }: { data: Dashboard }) {
 export function Thread({
   thread,
   withinDays = null,
+  oneOfSeveral = false,
 }: {
   thread: DashboardThread;
   /** The waiting window, to name when the user kept an old thread on the list. */
   withinDays?: number | null;
+  /** Another card on the list is from the same person. */
+  oneOfSeveral?: boolean;
 }) {
   const generate = useGenerateDraft();
   // A draft written here shows at once; one prepared in the background shows
@@ -465,7 +476,23 @@ export function Thread({
         <span className="thread__when">{formatRelative(thread.lastMessageAt)}</span>
       </header>
 
-      {thread.subject ? <p className="thread__subject">{thread.subject}</p> : null}
+      {thread.subject ? (
+        <p className="thread__subject">{thread.subject}</p>
+      ) : oneOfSeveral ? (
+        // Two cards from one person with no subject between them look like
+        // the same card twice; say which conversation each is.
+        <p className="thread__subject">
+          {[
+            CHANNEL_LABELS[thread.channel as Channel] ?? thread.channel,
+            thread.isGroup ? "with others too" : null,
+            thread.messageCount === 1
+              ? "1 message"
+              : `${thread.messageCount.toLocaleString()} messages`,
+          ]
+            .filter((x) => x !== null)
+            .join(" · ")}
+        </p>
+      ) : null}
 
       {thread.mark === "needs_reply" &&
       (thread.automated !== null || thread.closes || thread.quiet) ? (

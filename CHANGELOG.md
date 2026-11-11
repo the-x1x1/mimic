@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.121] — 2026-11-10
+
+Seen in a running build: two cards from Theo, one under the other, looked like one card twice.
+
+### Fixed
+
+- **When someone is waiting in more than one conversation, a card with no subject says which it is** — "Chat · 10 messages" — under their name. A card that is the only one from someone is unchanged.
+
 ## [0.10.0-alpha.120] — 2026-11-10
 
 ### Fixed
