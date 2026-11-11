@@ -2,6 +2,15 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.119] — 2026-11-10
+
+Seen in a running build: How you write opened on four cramped columns.
+
+### Changed
+
+- **How you write's four numbers sit two across**, so each label fits on a line and its note reads as a sentence, not a column five lines deep.
+- Its first line says it counted "messages you wrote", not "mail you sent": texts and chats are counted too.
+
 ## [0.10.0-alpha.118] — 2026-11-10
 
 ### Fixed

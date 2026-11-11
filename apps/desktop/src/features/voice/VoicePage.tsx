@@ -59,7 +59,7 @@ export function VoicePage() {
     <div className="stack gap-3">
       <PageHeader
         title="How you write"
-        subtitle="Everything here I counted in mail you sent. Nothing here is a guess."
+        subtitle="Everything here I counted in messages you wrote. Nothing here is a guess."
         actions={
           <Button variant="primary" onClick={() => analyze.mutate()} disabled={analyze.isPending}>
             {o?.stale ? "Re-analyze" : "Analyze again"}
