@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.114] — 2026-11-10
+
+A newsletter in a file isn't someone waiting on you.
+
+### Fixed
+
+- **Mail from a no-reply address in a Mimic export file is read as automated**, the same way it is in a mailbox or an .mbox file: by the sender's own address (`no-reply@…`, `noreply@…`, `donotreply@…`). Before, a newsletter brought in from a file sat on the home screen as a person waiting on a reply. A file still can't _say_ a message was automated — only the address is read. Import the file again to have it applied to what's already in.
+
 ## [0.10.0-alpha.113] — 2026-11-08
 
 Seen in a running build: setting up's three steps stood in a column.

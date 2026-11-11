@@ -174,20 +174,34 @@ impl CommunicationSource for MimicJsonSource {
                     author: m.from.to_ref(),
                     sent_at: m.sent_at.clone().filter(|s| !s.trim().is_empty()),
                     body,
-                    metadata: match &m.metadata {
-                        Value::Object(map) => {
-                            let mut map = map.clone();
-                            // `automated` and `sentFolder` are Mimic's readings
-                            // of email headers and mail folders, and a file in
-                            // this format has neither. Left in, they would let
-                            // a file claim a person was a machine, or that
-                            // someone was in the user's Sent folder, in words
-                            // that say the headers or the folder did.
-                            map.remove("automated");
-                            map.remove("sentFolder");
+                    metadata: {
+                        let mut map = match &m.metadata {
+                            Value::Object(map) => map.clone(),
+                            _ => serde_json::Map::new(),
+                        };
+                        // `automated` and `sentFolder` are Mimic's readings
+                        // of email headers and mail folders, and a file in
+                        // this format has neither. Left in, they would let
+                        // a file claim a person was a machine, or that
+                        // someone was in the user's Sent folder, in words
+                        // that say the headers or the folder did.
+                        map.remove("automated");
+                        map.remove("sentFolder");
+                        // One reading needs no headers: the sender's own
+                        // address saying not to reply (`no-reply@…`). It is
+                        // made here exactly as it is for mail, so a
+                        // newsletter in a file is not someone waiting.
+                        let no_reply = m.from.email.as_deref().and_then(|address| {
+                            super::automated::detect(&super::mime::Headers::new(), Some(address.trim()))
+                        });
+                        if let Some(reason) = no_reply {
+                            map.insert("automated".into(), Value::String(reason.as_str().into()));
+                        }
+                        if map.is_empty() && !m.metadata.is_object() {
+                            Value::Null
+                        } else {
                             Value::Object(map)
                         }
-                        _ => Value::Null,
                     },
                 });
             }
@@ -335,5 +349,30 @@ mod tests {
     fn discover_reports_nothing_for_a_directory() {
         let dir = tempfile::tempdir().unwrap();
         assert!(MimicJsonSource.discover(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_senders_no_reply_address_is_read_and_a_files_own_claim_is_not() {
+        let (_dir, path) = write(
+            r#"{"channel": "email", "conversations": [{"id": "c", "messages": [
+                {"id": "n", "from": {"name": "Northwind Weekly", "email": " No-Reply@news.northwind.example "},
+                 "body": "This week at Northwind"},
+                {"id": "p", "from": {"name": "Maya", "email": "maya@northwind.example"},
+                 "body": "hello", "metadata": {"automated": "newsletter"}},
+                {"id": "t", "from": {"name": "Dad", "phone": "+1 808 555 0142"}, "body": "you coming sunday"}
+            ]}]}"#,
+        );
+        let mut seen = Vec::new();
+        MimicJsonSource
+            .import(&path, &mut |c| {
+                seen.push(c);
+                Ok(())
+            })
+            .unwrap();
+        let by_id = |id: &str| seen[0].messages.iter().find(|m| m.external_id == id).unwrap().metadata.clone();
+        assert_eq!(by_id("n")["automated"], serde_json::json!("no_reply_address"));
+        // A person, whatever the file says of them; and no address, no reading.
+        assert!(by_id("p").get("automated").is_none());
+        assert!(by_id("t").is_null());
     }
 }
