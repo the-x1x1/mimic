@@ -16,7 +16,7 @@
     {
       "habit": "greeting",
       "direction": "less",
-      "participantId": "39b797bb-a5d8-407c-a825-b126e871b8de",
+      "participantId": "0c6ff075-8707-4082-9252-9a6a6f1f0bcd",
       "participantName": "Ada Lovelace",
       "agreeing": 3,
       "observations": 3,
@@ -41,7 +41,7 @@
     },
     {
       "adjustment": "moreCasual",
-      "participantId": "39b797bb-a5d8-407c-a825-b126e871b8de",
+      "participantId": "0c6ff075-8707-4082-9252-9a6a6f1f0bcd",
       "participantName": "Ada Lovelace",
       "chosen": 3,
       "against": 0,
@@ -54,11 +54,11 @@
   "minAgreeing": 3,
   "notes": [
     {
-      "id": "973b6e08-94c4-4742-a51b-cfaa07f20f46",
+      "id": "6e518621-1eb6-4dae-b373-6c9be91a4409",
       "text": "keep it to one line",
-      "participantId": "39b797bb-a5d8-407c-a825-b126e871b8de",
+      "participantId": "0c6ff075-8707-4082-9252-9a6a6f1f0bcd",
       "participantName": "Ada Lovelace",
-      "updatedAt": "2026-11-11T01:06:25.827Z"
+      "updatedAt": "2026-11-11T01:10:14.199Z"
     }
   ]
 }

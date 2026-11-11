@@ -143,6 +143,25 @@ const PLEASANTRIES: &[&str] = &[
     "no rush",
     "have fun",
     "good luck",
+    // Praise for something done, which asks nothing back either. Whole
+    // fragments only: "legend" closes, "legend for the chart" does not.
+    "legend",
+    "absolute legend",
+    "you legend",
+    "you're a legend",
+    "youre a legend",
+    "lifesaver",
+    "life saver",
+    "you're a lifesaver",
+    "youre a lifesaver",
+    "you're a star",
+    "youre a star",
+    "you're the best",
+    "youre the best",
+    "you rock",
+    "nice one",
+    "good stuff",
+    "love it",
 ];
 
 /// Words for a stretch of time a pleasantry can wish someone well for.
@@ -750,6 +769,33 @@ mod tests {
             "thx",
         ] {
             assert!(closes(body), "{body:?} should close");
+        }
+    }
+
+    #[test]
+    fn praise_for_something_done_closes_and_praise_with_more_does_not() {
+        for body in [
+            "legend 👍",
+            "Legend!",
+            "You're a legend, thanks",
+            "You\u{2019}re a lifesaver!",
+            "you rock",
+            "Nice one, cheers",
+            "Love it. Thanks Sam!",
+            "you're the best 🙌",
+        ] {
+            assert!(closes(body), "{body:?} should close");
+        }
+        for body in [
+            "Legend?",
+            "legend for the chart",
+            "You're a legend, can you do Friday too",
+            "love it but the logo is off",
+            "nice one, when's the next",
+            "The legend is missing from page 2",
+            "you rock the boat every time",
+        ] {
+            assert!(!closes(body), "{body:?} should not close");
         }
     }
 

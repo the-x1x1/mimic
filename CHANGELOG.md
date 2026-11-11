@@ -2,6 +2,14 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.117] — 2026-11-10
+
+Seen in a running build: "legend 👍" was someone waiting on you.
+
+### Fixed
+
+- **Praise for something you did isn't someone waiting.** "Legend!", "you're a lifesaver", "you rock", "nice one", "love it", "you're the best" are read as closing a conversation, like a thank-you — when that's all the message says. "Love it but the logo is off" still waits. They're under "Show them" on the home screen like any other.
+
 ## [0.10.0-alpha.116] — 2026-11-10
 
 Seen in a running build: every conversation with Dad was headed "No subject".
