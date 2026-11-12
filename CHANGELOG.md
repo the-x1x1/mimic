@@ -2,6 +2,12 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.123] — 2026-11-11
+
+### Changed
+
+- Find and the empty home screen say "what I've read" rather than "the mail I've read": texts and chats are searched and counted too.
+
 ## [0.10.0-alpha.122] — 2026-11-10
 
 Seen in a running build: nine people waiting, and nine identical menus down the page.

@@ -137,7 +137,7 @@ export function FindPage() {
     <div className="stack gap-3">
       <PageHeader
         title="Find"
-        subtitle="Anything said in the mail I've read — by you or to you. Looking happens on this computer."
+        subtitle="Anything said in what I've read — mail, texts or chats, by you or to you. Looking happens on this computer."
       />
       <form className="stack gap-2" role="search" aria-label="Find what was said" onSubmit={submit}>
         <div className="row gap-2 wrap">

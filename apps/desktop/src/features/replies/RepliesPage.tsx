@@ -362,7 +362,7 @@ function CaughtUp({ data }: { data: Dashboard }) {
       <p className="note__body">
         {leftOutTotal(data) > 0
           ? "Everything I've read either ends with you, or is one of the threads I left out."
-          : "Nothing in the mail I've read ends with someone else waiting on you."}{" "}
+          : "Nothing I've read ends with someone else waiting on you."}{" "}
         {checking && data.mailChecking?.failing
           ? checking
           : checking && data.mailChecking?.everyMinutes
