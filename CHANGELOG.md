@@ -2,6 +2,12 @@
 
 All notable changes to Mimic are documented here. The format follows Keep a Changelog; versions follow SemVer with pre-release tags for alpha/beta builds.
 
+## [0.10.0-alpha.124] — 2026-11-12
+
+### Changed
+
+- **The roadmap says what ends alpha.** A real updater key, the Microsoft and Google sign-in values set for released builds, one real first run with a real reply sent, and a short stretch of fixes from it. Until then the work is fixes, not new features. The first beta is `0.10.0-beta.1`.
+
 ## [0.10.0-alpha.123] — 2026-11-11
 
 ### Changed

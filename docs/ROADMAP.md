@@ -96,6 +96,17 @@ Next: other places messages arrive, where a service lets a person's own app read
 - Multiple personas for one person, where the channel and relationship layers are not enough.
 - Group-conversation dynamics.
 
+## Leaving alpha: the beta checklist
+
+Agreed 12 Nov 2026: alpha is done once these hold. From now on the work is fixes, not new features, until they do.
+
+- [ ] A real updater signing key in place of the development key (and `verify-release.ps1` refusing the development key for a beta).
+- [ ] `MIMIC_MICROSOFT_CLIENT_ID`, `MIMIC_GOOGLE_CLIENT_ID` and `MIMIC_GOOGLE_CLIENT_SECRET` set on the repository, so a released build offers Microsoft and Google sign-in.
+- [ ] One real first run of a released build: a real mailbox read, replies drafted, one real reply sent; then one chat service actually used.
+- [ ] A short stretch of fixes from that run, with no new features.
+
+The first beta is `0.10.0-beta.1`, cut when every box is ticked.
+
 ## Carried over from Phase 0
 
 Small things the migration left behind, listed so they are not lost:
